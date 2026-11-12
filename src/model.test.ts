@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import * as Y from 'yjs'
 import { FakeHub } from './sync'
 import { sha256Hex } from './blobStore'
-import { moveColumn, moveTable, deleteColumn, deleteTable, renameColumn, renameTable, addOption, deleteOption, updateOption, moveFile, moveLink, addFile, buildFileIndex, removeFile, addLink, addColumn, addRow, buildLinkIndex, removeLink, summarize, addTable, deleteRow, getCell, readTables, setCell, setColumnWidth } from './model'
+import { moveColumn, moveTable, deleteColumn, deleteTable, renameColumn, renameTable, addOption, deleteOption, updateOption, moveFile, moveLink, addFile, buildFileIndex, removeFile, addLink, addColumn, addRow, buildLinkIndex, removeLink, summarize, addTable, deleteRow, getCell, readTables, setCell, setColumnWidth, setColumnConfig } from './model'
 
 function setup() {
   const a = new Y.Doc(), b = new Y.Doc()
@@ -342,5 +342,21 @@ describe('Spaltenbreite', () => {
     expect(readTables(b)[0].columns[0].width).toBe(301)
     setColumnWidth(a, t, col, undefined)
     expect(readTables(a)[0].columns[0].width).toBeUndefined()
+  })
+})
+
+describe('Spaltenkonfiguration', () => {
+  it('gleichzeitige Änderungen verschiedener Einstellungen gehen nicht verloren', () => {
+    const a = new Y.Doc(), b = new Y.Doc()
+    const t = addTable(a, 'T', { firstRow: false })
+    const col = readTables(a)[0].columns[0].id
+    Y.applyUpdate(b, Y.encodeStateAsUpdate(a))
+    setColumnConfig(a, t, col, 'mode', 'multi')
+    setColumnConfig(b, t, col, 'bold', true)
+    Y.applyUpdate(a, Y.encodeStateAsUpdate(b)); Y.applyUpdate(b, Y.encodeStateAsUpdate(a))
+    expect(readTables(a)[0].columns[0].config).toEqual({ mode: 'multi', bold: true })
+    expect(readTables(b)[0].columns[0].config).toEqual({ mode: 'multi', bold: true })
+    setColumnConfig(a, t, col, 'mode', undefined)
+    expect(readTables(a)[0].columns[0].config).toEqual({ bold: true })
   })
 })

@@ -1,6 +1,6 @@
 mod grid_file;
 
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::Mutex};
 use tauri::{
   ipc::{InvokeBody, Request, Response},
   menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder},
@@ -41,11 +41,22 @@ async fn grid_open(request: Request<'_>) -> Result<Response, String> {
   grid_file::open_grid(&path).map(Response::new)
 }
 
+/// Per Finder (Doppelklick, „Öffnen mit“) angeforderte Datei, bis die Oberfläche sie abgeholt hat
+/// (beim Kaltstart kommt das Ereignis vor dem ersten Rendern).
+#[derive(Default)]
+struct PendingOpen(Mutex<Option<String>>);
+
+#[tauri::command]
+fn take_pending_open(state: tauri::State<'_, PendingOpen>) -> Option<String> {
+  state.0.lock().ok().and_then(|mut p| p.take())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
     .plugin(tauri_plugin_dialog::init())
-    .invoke_handler(tauri::generate_handler![grid_save, grid_open])
+    .manage(PendingOpen::default())
+    .invoke_handler(tauri::generate_handler![grid_save, grid_open, take_pending_open])
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(
@@ -79,6 +90,22 @@ pub fn run() {
     .on_menu_event(|app, event| {
       let _ = app.emit("menu", event.id().as_ref());
     })
-    .run(tauri::generate_context!())
-    .expect("error while building tauri application");
+    .build(tauri::generate_context!())
+    .expect("error while building tauri application")
+    .run(|app, event| {
+      // macOS: Doppelklick auf eine .grid-Datei im Finder.
+      #[cfg(any(target_os = "macos", target_os = "ios"))]
+      if let tauri::RunEvent::Opened { urls } = event {
+        use tauri::Manager;
+        if let Some(path) = urls.iter().filter_map(|u| u.to_file_path().ok()).next() {
+          let path = path.to_string_lossy().to_string();
+          if let Ok(mut p) = app.state::<PendingOpen>().0.lock() {
+            *p = Some(path.clone());
+          }
+          let _ = app.emit("open-file", path);
+        }
+      }
+      #[cfg(not(any(target_os = "macos", target_os = "ios")))]
+      let _ = (app, event);
+    });
 }

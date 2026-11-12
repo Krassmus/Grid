@@ -1,3 +1,4 @@
+import { FILE } from './columnTypes'
 import { useEffect, useRef, useState } from 'react'
 import * as Y from 'yjs'
 import { addFile, moveFile, removeFile, type CellSlot, type ColumnInfo, type FileRef } from './model'
@@ -117,9 +118,21 @@ export function FileCell(props: {
   const [preview, setPreview] = useState<FileRef | null>(null)
   const [removing, setRemoving] = useState<FileRef | null>(null)
 
+  const cfg = FILE.config(col)
+  const full = cfg.single && files.length >= 1
   const upload = async (list: FileList | File[]) => {
     setError(null)
-    await Promise.all(Array.from(list).map(async (f) => {
+    let picked = Array.from(list)
+    if (cfg.accept === 'images') {
+      const images = picked.filter((f) => f.type.startsWith('image/'))
+      if (images.length < picked.length) setError('In dieser Spalte sind nur Bilder erlaubt')
+      picked = images
+    }
+    if (cfg.single) {
+      if (files.length >= 1) { setError('In dieser Spalte ist nur eine Datei erlaubt'); return }
+      if (picked.length > 1) { setError('In dieser Spalte ist nur eine Datei erlaubt'); picked = picked.slice(0, 1) }
+    }
+    await Promise.all(picked.map(async (f) => {
       setBusy((n) => n + 1)
       try {
         const { ref, saved } = await storeFile(f)
@@ -161,12 +174,12 @@ export function FileCell(props: {
               onRemove={() => setRemoving(e.item)} />
           </AnimItem>
         ))}
-        <button type="button" className="add-tile" title="Datei hinzufügen (oder hierher ziehen)"
-          onClick={() => input.current?.click()}>+</button>
+        {!full && <button type="button" className="add-tile" title="Datei hinzufügen (oder hierher ziehen)"
+          onClick={() => input.current?.click()}>+</button>}
         {busy > 0 && <span className="hint">lädt …</span>}
         {error && <span className="hint err">{error}</span>}
       </div>
-      <input ref={input} type="file" multiple hidden
+      <input ref={input} type="file" multiple={!cfg.single} accept={cfg.accept === 'images' ? 'image/*' : undefined} hidden
         onChange={(e) => { if (e.target.files) upload(e.target.files); e.target.value = '' }} />
       {preview && <Preview file={preview} onClose={() => setPreview(null)} />}
       {removing && (

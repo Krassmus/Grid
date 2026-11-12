@@ -29,7 +29,7 @@ export type ColType = 'text' | 'number' | 'relation' | 'file' | 'select'
 export type CellValue = string | number | null
 
 export interface SelectOption { id: string; name: string; color: string }
-export interface ColumnInfo { id: string; name: string; type: ColType; target?: string; options?: SelectOption[]; width?: number }
+export interface ColumnInfo { id: string; name: string; type: ColType; target?: string; options?: SelectOption[]; width?: number; config?: Record<string, unknown> }
 
 /** Farb-IDs für Auswahloptionen; die konkreten Farben stehen in der UI (SelectCell.tsx). */
 export const OPTION_COLORS = ['sand', 'green', 'blue', 'rose', 'violet', 'gray'] as const
@@ -120,6 +120,9 @@ export function getCell(doc: Y.Doc, tableId: string, rowId: string, colId: strin
 }
 
 /** Snapshot für die UI. Doppelte Zeilen-IDs (durch Merge) werden entfernt, verwaiste ignoriert. */
+/** Typspezifische Spaltenkonfiguration: je Einstellung ein eigener Schlüssel `cfg.<name>` (parallele Änderungen verschiedener Einstellungen gehen nicht verloren). */
+const CFG = 'cfg.'
+
 export function readTables(doc: Y.Doc): TableInfo[] {
   const out: TableInfo[] = []
   tablesOf(doc).forEach((t, id) => {
@@ -136,7 +139,9 @@ export function readTables(doc: Y.Doc): TableInfo[] {
               .sort((x, y) => x.pos - y.pos || x.id.localeCompare(y.id))
               .map(({ pos: _pos, ...rest }) => rest)
           : undefined
-        return { id: cid, name: c.get('name'), type: c.get('type') as ColType, target: c.get('target') as string | undefined, options, width: c.get('width') as number | undefined }
+        const config: Record<string, unknown> = {}
+        c.forEach((v, k) => { if (k.startsWith(CFG)) config[k.slice(CFG.length)] = v })
+        return { id: cid, name: c.get('name'), config, type: c.get('type') as ColType, target: c.get('target') as string | undefined, options, width: c.get('width') as number | undefined }
       })
     const rowIds = [...new Set<string>(t.get('rowOrder').toArray())].filter((rid) => rows.has(rid))
     out.push({ id, name: t.get('name'), columns, rowIds })
@@ -285,6 +290,14 @@ export function renameTable(doc: Y.Doc, tableId: string, name: string) {
 
 export function renameColumn(doc: Y.Doc, tableId: string, colId: string, name: string) {
   tablesOf(doc).get(tableId)?.get('cols').get(colId)?.set('name', name)
+}
+
+/** Setzt eine Einstellung der Spalte; `undefined` entfernt sie (= Standardwert des Typs). */
+export function setColumnConfig(doc: Y.Doc, tableId: string, colId: string, key: string, value: unknown) {
+  const c = tablesOf(doc).get(tableId)?.get('cols').get(colId)
+  if (!c) return
+  if (value === undefined) c.delete(CFG + key)
+  else c.set(CFG + key, value)
 }
 
 /** Spaltenbreite in px (`undefined` = Standardbreite des Typs). */

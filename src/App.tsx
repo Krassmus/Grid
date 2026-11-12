@@ -3,6 +3,7 @@ import * as Y from 'yjs'
 import { FakeHub } from './sync'
 import { ClientPane } from './ClientPane'
 import { setWindowTitle } from './windowTitle'
+import { invoke } from '@tauri-apps/api/core'
 import { baseName, isTauri, newMeta, readGrid, writeGrid, type OpenedGrid } from './gridFile'
 import { FileSession } from './fileSession'
 
@@ -28,11 +29,18 @@ function Single() {
   const fromFile = (path: string, o: OpenedGrid) => new FileSession(++counter.current, o.doc, path, o.meta, o.known, setError)
   const adopt = (s: FileSession) => { remember(s.path); setSession(s) }
 
+  const openPath = async (p: string) => {
+    await current.current?.flush()
+    try { adopt(fromFile(p, await readGrid(p))) } catch (e) { setError(`„${baseName(p)}“ konnte nicht geöffnet werden: ${e}`) }
+  }
+
   // Beim Start das zuletzt geöffnete Dokument laden.
   useEffect(() => {
     let alive = true
     ;(async () => {
-      const last = isTauri ? localStorage.getItem(LAST_KEY) : null
+      // Vom Finder angeforderte Datei hat Vorrang vor dem zuletzt geöffneten Dokument.
+      const requested = isTauri ? await invoke<string | null>('take_pending_open').catch(() => null) : null
+      const last = requested ?? (isTauri ? localStorage.getItem(LAST_KEY) : null)
       if (last) {
         try {
           const o = await readGrid(last)
@@ -63,8 +71,7 @@ function Single() {
       const open = async () => {
         const p = await dialog.open({ multiple: false, directory: false, filters: FILTERS })
         if (typeof p !== 'string') return
-        await current.current?.flush()
-        try { adopt(fromFile(p, await readGrid(p))) } catch (e) { setError(`„${baseName(p)}“ konnte nicht geöffnet werden: ${e}`) }
+        await openPath(p)
       }
       const create = async () => {
         const chosen = await dialog.save({ defaultPath: 'Unbenannt.grid', filters: FILTERS })
@@ -105,12 +112,17 @@ function Single() {
         busy.current = true
         run().finally(() => { busy.current = false })
       })
+      // Datei per Finder geöffnet, während die App läuft
+      const unopen = await listen<string>('open-file', (e) => {
+        void invoke('take_pending_open')
+        void openPath(e.payload)
+      })
       const unclose = await getCurrentWindow().onCloseRequested(async (ev) => {
         ev.preventDefault()
         await current.current?.flush()
         await getCurrentWindow().destroy()
       })
-      if (gone) { unlisten(); unclose() } else stops.push(unlisten, unclose)
+      if (gone) { unlisten(); unopen(); unclose() } else stops.push(unlisten, unopen, unclose)
     })()
     return () => { gone = true; stops.forEach((f) => f()) }
   }, [])

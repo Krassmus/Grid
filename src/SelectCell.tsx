@@ -74,7 +74,7 @@ function SelectPicker(props: {
   )
 }
 
-function OptionsEditor(props: { doc: Y.Doc; tableId: string; col: ColumnInfo; onClose: () => void }) {
+export function OptionsEditor(props: { doc: Y.Doc; tableId: string; col: ColumnInfo; onClose: () => void }) {
   const { doc, tableId, col } = props
   const options = col.options ?? []
   const [removing, setRemoving] = useState<SelectOption | null>(null)

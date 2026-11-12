@@ -194,3 +194,36 @@ body.resizing { cursor: col-resize; user-select: none; }
 
 .file-error { position: fixed; left: 16px; bottom: 16px; z-index: 50; max-width: 70vw; display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 10px; background: #fdecea; border: 1px solid #f3b8b1; color: #8a2a20; font-size: 14px; box-shadow: 0 2px 8px #0002; }
 .file-error button { border: none; background: none; cursor: pointer; color: inherit; }
+
+/* Spaltenkopf: Name als Schaltfläche, öffnet die Konfiguration */
+.h-name { all: unset; cursor: pointer; text-transform: uppercase; letter-spacing: inherit; font: inherit; color: inherit; border-radius: 6px; padding: 2px 4px; margin: -2px -4px; }
+.h-name:hover, .h-name:focus-visible { background: #e9edef; color: #3b4a52; }
+
+/* Konfigurationsdialog */
+.columndialog { min-width: 380px; display: flex; flex-direction: column; gap: 14px; }
+.cfg-field { display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
+.cfg-field > span { color: #667781; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
+.cfg-field select, .cfg-field input { font: inherit; padding: 8px 10px; border: 1px solid #d5dce0; border-radius: 8px; background: #fff; }
+.cfg-field button { align-self: flex-start; }
+.cfg-check { display: flex; gap: 10px; align-items: flex-start; font-size: 15px; cursor: pointer; }
+.cfg-check input { margin-top: 4px; }
+.cfg-check small { display: block; color: #8a969c; font-size: 12px; margin-top: 2px; }
+.cfg-static { margin: 0; font-size: 14px; color: #4b5a62; }
+.cfg-static small { color: #8a969c; }
+.cfg-pills { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* Textzellen: fett, mehrzeilig, formatiert */
+.cell.bold { font-weight: 600; }
+textarea.cell { resize: none; line-height: 1.35; overflow: hidden; display: block; }
+.cell-unit { flex: none; color: #8a969c; font-size: 14px; }
+.rich-cell { all: unset; box-sizing: border-box; flex: 1; min-width: 0; cursor: pointer; max-height: 5.6em; overflow: hidden; font-size: 16px; color: #1f2a30; border-radius: 8px; padding: 6px 0; }
+.rich-cell:hover, .rich-cell:focus-visible { background: #f1f4f5; }
+.rich-view p, .rich-view div { margin: 0; }
+.rich-view ul, .rich-view ol { margin: 0; padding-left: 1.3em; }
+.rich-empty { color: #bbb; }
+.richdialog { width: min(640px, 92vw); display: flex; flex-direction: column; gap: 12px; }
+.rich-tools { display: flex; gap: 6px; }
+.rich-tools button { min-width: 36px; }
+.rich-editor { min-height: 200px; max-height: 50vh; overflow: auto; padding: 12px 14px; border: 1px solid #d5dce0; border-radius: 10px; font-size: 16px; line-height: 1.45; outline: none; background: #fff; }
+.rich-editor:focus { border-color: #0a84ff; }
+.rich-editor ul, .rich-editor ol { margin: 0; padding-left: 1.4em; }

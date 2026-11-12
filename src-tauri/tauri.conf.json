@@ -28,6 +28,9 @@
   },
   "bundle": {
     "active": true,
+    "fileAssociations": [
+      { "ext": ["grid"], "name": "Grid-Dokument", "description": "Grid-Dokument", "role": "Editor" }
+    ],
     "targets": [
       "app",
       "dmg"

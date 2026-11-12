@@ -8,6 +8,9 @@ import {
 import { useCell, useFileIndex, useLinkIndex, useRowVersion, useTables } from './useTables'
 import { FileCell } from './FileCell'
 import { SelectCell } from './SelectCell'
+import { ColumnDialog } from './ColumnDialog'
+import { FILE, NUMBER, RELATION, TEXT } from './columnTypes'
+import { RichPreview, RichTextDialog } from './richText'
 import { AnimItem, useAnimatedList } from './animatedList'
 import { ConfirmDialog, Modal, RenameDialog } from './Modal'
 
@@ -142,8 +145,8 @@ function RelationCell(props: {
               onRemove={() => removeLink(doc, table.id, rowId, col.id, e.item)} />
           </AnimItem>
         ))}
-        <button type="button" className="add-tile" onClick={() => setPicking(true)} disabled={!target}
-          title={target ? 'Datensatz verknüpfen' : 'Zieltabelle fehlt'}>+</button>
+        {!(RELATION.config(col).single && ids.length >= 1) && <button type="button" className="add-tile" onClick={() => setPicking(true)} disabled={!target}
+          title={target ? 'Datensatz verknüpfen' : 'Zieltabelle fehlt'}>+</button>}
       </div>
       {picking && target && (
         <Picker doc={doc} target={target} linked={ids}
@@ -181,20 +184,53 @@ function BacklinkCell(props: {
 
 // ---------- Zellen ----------
 
-function Cell({ doc, table, rowId, col, lead }: { doc: Y.Doc; table: string; rowId: string; col: ColumnInfo; lead?: boolean }) {
+function Cell({ doc, table, rowId, col }: { doc: Y.Doc; table: string; rowId: string; col: ColumnInfo; lead?: boolean }) {
   const value = useCell(doc, table, rowId, col.id)
+  if (col.type === 'number') return <NumberInput doc={doc} table={table} rowId={rowId} col={col} value={value} />
+  return <TextInput doc={doc} table={table} rowId={rowId} col={col} value={value} />
+}
+
+function NumberInput({ doc, table, rowId, col, value }: { doc: Y.Doc; table: string; rowId: string; col: ColumnInfo; value: unknown }) {
+  const cfg = NUMBER.config(col)
+  const round = (n: number) => (cfg.decimals >= 0 ? Number(n.toFixed(cfg.decimals)) : n)
   return (
-    <div className={'c'}>
-      <input
-        className="cell"
-        type={col.type === 'number' ? 'number' : 'text'}
-        value={value ?? ''}
-        placeholder={col.name}
-        onChange={(e) => {
-          const v = e.target.value
-          setCell(doc, table, rowId, col.id, col.type === 'number' ? (v === '' ? null : Number(v)) : v)
-        }}
-      />
+    <div className="c">
+      <input className="cell" type="number" value={(value as number | null) ?? ''} placeholder={col.name}
+        step={cfg.decimals >= 0 ? 1 / 10 ** cfg.decimals : 'any'}
+        onChange={(e) => setCell(doc, table, rowId, col.id, e.target.value === '' ? null : Number(e.target.value))}
+        onBlur={() => { if (typeof value === 'number' && round(value) !== value) setCell(doc, table, rowId, col.id, round(value)) }} />
+      {cfg.unit && <span className="cell-unit">{cfg.unit}</span>}
+    </div>
+  )
+}
+
+function TextInput({ doc, table, rowId, col, value }: { doc: Y.Doc; table: string; rowId: string; col: ColumnInfo; value: unknown }) {
+  const cfg = TEXT.config(col)
+  const text = (value as string | null) ?? ''
+  const area = useRef<HTMLTextAreaElement>(null)
+  const [editing, setEditing] = useState(false)
+  useEffect(() => { // Mehrzeilig: Höhe folgt dem Inhalt
+    const el = area.current
+    if (el) { el.style.height = 'auto'; el.style.height = `${el.scrollHeight}px` }
+  }, [text, cfg.mode, col.id])
+  const change = (v: string) => setCell(doc, table, rowId, col.id, v)
+  const cls = `cell ${cfg.bold ? 'bold' : ''}`
+
+  if (cfg.mode === 'rich') {
+    return (
+      <div className="c">
+        <button type="button" className="rich-cell" title="Text bearbeiten" onClick={() => setEditing(true)}>
+          <RichPreview html={text} placeholder={col.name} />
+        </button>
+        {editing && <RichTextDialog doc={doc} tableId={table} rowId={rowId} colId={col.id} title={col.name} html={text} onClose={() => setEditing(false)} />}
+      </div>
+    )
+  }
+  return (
+    <div className="c">
+      {cfg.mode === 'multi'
+        ? <textarea ref={area} className={cls} rows={1} value={text} placeholder={col.name} onChange={(e) => change(e.target.value)} />
+        : <input className={cls} type="text" value={text} placeholder={col.name} onChange={(e) => change(e.target.value)} />}
     </div>
   )
 }
@@ -282,7 +318,7 @@ export function ClientPane(props: {
 
   const backlinks = table
     ? tables.flatMap((t) =>
-        t.columns.filter((c) => c.type === 'relation' && c.target === table.id).map((c) => ({ source: t, col: c })))
+        t.columns.filter((c) => c.type === 'relation' && c.target === table.id && RELATION.config(c).backlink).map((c) => ({ source: t, col: c })))
     : []
 
   const [liveWidth, setLiveWidth] = useState<{ id: string; w: number } | null>(null)
@@ -351,13 +387,11 @@ export function ClientPane(props: {
               <div className="grid-head">
                 {table.columns.map((c) => (
                   <div key={c.id} className={`h reorderable ${hintClass('column', c.id)}`} {...reorderProps('column', c.id, c.name)}>
-                    <button type="button" className="h-menu" title="Spalte umbenennen oder löschen"
-                      onClick={() => setEditing({ kind: 'column', id: c.id })}>⋯</button>
-                    {c.name}
+                    <button type="button" className="h-name" title="Spalte konfigurieren"
+                      onClick={() => setEditing({ kind: 'column', id: c.id })}>{c.name}</button>
                     <span className="col-resize" title="Ziehen: Breite ändern, Doppelklick: zurücksetzen"
                       onMouseDown={(e) => startResize(e, c.id)}
                       onDoubleClick={() => setColumnWidth(doc, table.id, c.id, undefined)} />
-                    <small>{c.type === 'relation' ? `→ ${tables.find((t) => t.id === c.target)?.name ?? '?'}` : c.type === 'file' ? 'Dateien' : c.type === 'select' ? 'Auswahl' : c.type}</small>
                   </div>
                 ))}
                 {backlinks.map(({ source, col }) => (
@@ -397,10 +431,16 @@ export function ClientPane(props: {
         const col = editing.kind === 'column' ? table?.columns.find((c) => c.id === editing.id) : undefined
         const tbl = editing.kind === 'table' ? tables.find((t) => t.id === editing.id) : undefined
         if (!col && !tbl) return null
+        if (col) {
+          return (
+            <ColumnDialog doc={doc} table={table!} tables={tables} column={col} onClose={() => setEditing(null)}
+              onDelete={() => { setDeletingItem(editing); setEditing(null) }} />
+          )
+        }
         return (
-          <RenameDialog title={col ? 'Spalte' : 'Tabelle'} name={(col ?? tbl)!.name}
+          <RenameDialog title="Tabelle" name={tbl!.name}
             onClose={() => setEditing(null)}
-            onSave={(n) => col ? renameColumn(doc, table!.id, col.id, n) : renameTable(doc, tbl!.id, n)}
+            onSave={(n) => renameTable(doc, tbl!.id, n)}
             onDelete={() => { setDeletingItem(editing); setEditing(null) }} />
         )
       })()}
