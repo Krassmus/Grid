@@ -150,7 +150,7 @@ export function readTables(doc: Y.Doc): TableInfo[] {
 
 // ---------- Relationen ----------
 
-const linksOf = (doc: Y.Doc) => doc.getMap<boolean>('links')
+export const linksOf = (doc: Y.Doc) => doc.getMap<boolean>('links')
 const linkKey = (t: string, r: string, c: string, x: string) => `${t}|${r}|${c}|${x}`
 
 export function addLink(doc: Y.Doc, tableId: string, rowId: string, colId: string, targetRowId: string) {
@@ -219,7 +219,7 @@ export function summarize(doc: Y.Doc, table: TableInfo, rowId: string): RowSumma
 
 export interface FileRef { hash: string; name: string; size: number; mime: string }
 
-const filesOf = (doc: Y.Doc) => doc.getMap<{ name: string; size: number; mime: string }>('files')
+export const filesOf = (doc: Y.Doc) => doc.getMap<{ name: string; size: number; mime: string }>('files')
 const fileKey = (t: string, r: string, c: string, hash: string) => `${t}|${r}|${c}|${hash}`
 
 export function addFile(doc: Y.Doc, tableId: string, rowId: string, colId: string, ref: FileRef) {

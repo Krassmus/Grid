@@ -204,6 +204,8 @@ function Cell({ doc, table, rowId, col, lead }: { doc: Y.Doc; table: string; row
 export function ClientPane(props: {
   title: string
   doc: Y.Doc
+  /** IndexedDB-Name für den lokalen Zwischenspeicher; `null` = das Dokument liegt in einer Datei. Standard: nach Titel. */
+  persist?: string | null
   online?: boolean
   onToggle?: () => void
 }) {
@@ -216,10 +218,11 @@ export function ClientPane(props: {
 
   const [synced, setSynced] = useState(false)
   useEffect(() => {
-    const p = new IndexeddbPersistence(`grid-proto-${props.title}`, doc)
+    if (props.persist === null) { setSynced(true); return }
+    const p = new IndexeddbPersistence(props.persist ?? `grid-proto-${props.title}`, doc)
     p.whenSynced.then(() => setSynced(true))
     return () => { p.destroy() }
-  }, [doc, props.title])
+  }, [doc, props.title, props.persist])
 
   const [dialog, setDialog] = useState<'table' | 'column' | null>(null)
   const [deleting, setDeleting] = useState<string | null>(null) // Zeilen-ID, die gelöscht werden soll

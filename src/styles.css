@@ -191,3 +191,6 @@ button.danger-outline { color: #d92d20; border-color: #f0c4c0; background: #fff;
 .col-resize::after { content: ''; position: absolute; top: 25%; bottom: 25%; left: 4px; width: 2px; border-radius: 1px; background: #0a84ff; opacity: 0; }
 .col-resize:hover::after, body.resizing .col-resize::after { opacity: .6; }
 body.resizing { cursor: col-resize; user-select: none; }
+
+.file-error { position: fixed; left: 16px; bottom: 16px; z-index: 50; max-width: 70vw; display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 10px; background: #fdecea; border: 1px solid #f3b8b1; color: #8a2a20; font-size: 14px; box-shadow: 0 2px 8px #0002; }
+.file-error button { border: none; background: none; cursor: pointer; color: inherit; }
