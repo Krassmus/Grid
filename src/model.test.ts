@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import * as Y from 'yjs'
 import { FakeHub } from './sync'
 import { sha256Hex } from './blobStore'
-import { moveColumn, moveTable, deleteColumn, deleteTable, renameColumn, renameTable, addOption, deleteOption, updateOption, moveFile, moveLink, addFile, buildFileIndex, removeFile, addLink, addColumn, addRow, buildLinkIndex, removeLink, summarize, addTable, deleteRow, getCell, readTables, setCell } from './model'
+import { moveColumn, moveTable, deleteColumn, deleteTable, renameColumn, renameTable, addOption, deleteOption, updateOption, moveFile, moveLink, addFile, buildFileIndex, removeFile, addLink, addColumn, addRow, buildLinkIndex, removeLink, summarize, addTable, deleteRow, getCell, readTables, setCell, setColumnWidth } from './model'
 
 function setup() {
   const a = new Y.Doc(), b = new Y.Doc()
@@ -328,5 +328,19 @@ describe('Reihenfolge', () => {
     expect(tableNames(a).sort()).toEqual(['B', 'C', 'Personen'])
     expect(tableNames(a)).toEqual(tableNames(b))
     void t2
+  })
+})
+
+describe('Spaltenbreite', () => {
+  it('wird gespeichert, synchronisiert und lässt sich zurücksetzen', () => {
+    const a = new Y.Doc(), b = new Y.Doc()
+    const t = addTable(a, 'T', { firstRow: false })
+    const col = readTables(a)[0].columns[0].id
+    expect(readTables(a)[0].columns[0].width).toBeUndefined()
+    setColumnWidth(a, t, col, 301.4)
+    Y.applyUpdate(b, Y.encodeStateAsUpdate(a))
+    expect(readTables(b)[0].columns[0].width).toBe(301)
+    setColumnWidth(a, t, col, undefined)
+    expect(readTables(a)[0].columns[0].width).toBeUndefined()
   })
 })

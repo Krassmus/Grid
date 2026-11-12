@@ -29,7 +29,7 @@ export type ColType = 'text' | 'number' | 'relation' | 'file' | 'select'
 export type CellValue = string | number | null
 
 export interface SelectOption { id: string; name: string; color: string }
-export interface ColumnInfo { id: string; name: string; type: ColType; target?: string; options?: SelectOption[] }
+export interface ColumnInfo { id: string; name: string; type: ColType; target?: string; options?: SelectOption[]; width?: number }
 
 /** Farb-IDs für Auswahloptionen; die konkreten Farben stehen in der UI (SelectCell.tsx). */
 export const OPTION_COLORS = ['sand', 'green', 'blue', 'rose', 'violet', 'gray'] as const
@@ -136,7 +136,7 @@ export function readTables(doc: Y.Doc): TableInfo[] {
               .sort((x, y) => x.pos - y.pos || x.id.localeCompare(y.id))
               .map(({ pos: _pos, ...rest }) => rest)
           : undefined
-        return { id: cid, name: c.get('name'), type: c.get('type') as ColType, target: c.get('target') as string | undefined, options }
+        return { id: cid, name: c.get('name'), type: c.get('type') as ColType, target: c.get('target') as string | undefined, options, width: c.get('width') as number | undefined }
       })
     const rowIds = [...new Set<string>(t.get('rowOrder').toArray())].filter((rid) => rows.has(rid))
     out.push({ id, name: t.get('name'), columns, rowIds })
@@ -285,6 +285,14 @@ export function renameTable(doc: Y.Doc, tableId: string, name: string) {
 
 export function renameColumn(doc: Y.Doc, tableId: string, colId: string, name: string) {
   tablesOf(doc).get(tableId)?.get('cols').get(colId)?.set('name', name)
+}
+
+/** Spaltenbreite in px (`undefined` = Standardbreite des Typs). */
+export function setColumnWidth(doc: Y.Doc, tableId: string, colId: string, width: number | undefined) {
+  const c = tablesOf(doc).get(tableId)?.get('cols').get(colId)
+  if (!c) return
+  if (width === undefined) c.delete('width')
+  else c.set('width', Math.round(width))
 }
 
 /** Entfernt alle Link-/Datei-Einträge, für die `drop(tableId, rowId, colId, last)` wahr ist. */

@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState, type DragEvent } from 'react'
+import { useEffect, useRef, useState, type DragEvent, type MouseEvent as ReactMouseEvent } from 'react'
 import * as Y from 'yjs'
 import { IndexeddbPersistence } from 'y-indexeddb'
 import {
-  addColumn, addLink, addRow, addTable, deleteColumn, deleteRow, deleteTable, moveColumn, moveLink, moveTable, removeLink, renameColumn, renameTable, rowExists, setCell, summarize,
+  addColumn, addLink, addRow, addTable, deleteColumn, deleteRow, deleteTable, moveColumn, moveLink, moveTable, removeLink, renameColumn, renameTable, rowExists, setCell, setColumnWidth, summarize,
   type ColType, type ColumnInfo, type LinkIndex, type LinkSlot, type TableInfo,
 } from './model'
 import { useCell, useFileIndex, useLinkIndex, useRowVersion, useTables } from './useTables'
@@ -282,10 +282,31 @@ export function ClientPane(props: {
         t.columns.filter((c) => c.type === 'relation' && c.target === table.id).map((c) => ({ source: t, col: c })))
     : []
 
+  const [liveWidth, setLiveWidth] = useState<{ id: string; w: number } | null>(null)
+  const startResize = (e: ReactMouseEvent, colId: string) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const th = (e.currentTarget as HTMLElement).parentElement!
+    const startX = e.clientX
+    const startW = th.getBoundingClientRect().width
+    let w = startW
+    const move = (ev: MouseEvent) => { w = Math.min(800, Math.max(80, Math.round(startW + ev.clientX - startX))); setLiveWidth({ id: colId, w }) }
+    const up = () => {
+      document.removeEventListener('mousemove', move)
+      document.removeEventListener('mouseup', up)
+      document.body.classList.remove('resizing')
+      if (w !== startW) setColumnWidth(doc, table!.id, colId, w)
+      setLiveWidth(null)
+    }
+    document.body.classList.add('resizing')
+    document.addEventListener('mousemove', move)
+    document.addEventListener('mouseup', up)
+  }
+
   const template = table
     ? [
         ...table.columns.map((c, i) =>
-          i === 0 ? '200px' : c.type === 'relation' || c.type === 'file' ? '240px' : c.type === 'number' ? '120px' : c.type === 'select' ? '160px' : '180px'),
+          liveWidth?.id === c.id ? `${liveWidth.w}px` : c.width ? `${c.width}px` : i === 0 ? '200px' : c.type === 'relation' || c.type === 'file' ? '240px' : c.type === 'number' ? '120px' : c.type === 'select' ? '160px' : '180px'),
         ...backlinks.map(() => '220px'),
         'minmax(120px, 1fr)',
       ].join(' ')
@@ -330,6 +351,9 @@ export function ClientPane(props: {
                     <button type="button" className="h-menu" title="Spalte umbenennen oder löschen"
                       onClick={() => setEditing({ kind: 'column', id: c.id })}>⋯</button>
                     {c.name}
+                    <span className="col-resize" title="Ziehen: Breite ändern, Doppelklick: zurücksetzen"
+                      onMouseDown={(e) => startResize(e, c.id)}
+                      onDoubleClick={() => setColumnWidth(doc, table.id, c.id, undefined)} />
                     <small>{c.type === 'relation' ? `→ ${tables.find((t) => t.id === c.target)?.name ?? '?'}` : c.type === 'file' ? 'Dateien' : c.type === 'select' ? 'Auswahl' : c.type}</small>
                   </div>
                 ))}
