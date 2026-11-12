@@ -1,0 +1,134 @@
+import { useState } from 'react'
+import * as Y from 'yjs'
+import { addOption, deleteOption, setCell, updateOption, OPTION_COLORS, type ColumnInfo, type SelectOption } from './model'
+import { ConfirmDialog, Modal } from './Modal'
+import { useCell } from './useTables'
+
+/** Farben der Optionen: Hintergrund, Text, Punkt. Das Dokument speichert nur die Farb-ID. */
+const PALETTE: Record<string, { bg: string; fg: string; dot: string }> = {
+  sand: { bg: '#f4ecdc', fg: '#6e5a2a', dot: '#8a6d2f' },
+  green: { bg: '#e9f0f6', fg: '#3b5a3c', dot: '#4b6b4c' },
+  blue: { bg: '#e6eef8', fg: '#2f4f78', dot: '#3b6ea5' },
+  rose: { bg: '#f6e6e3', fg: '#7a3b32', dot: '#b4503f' },
+  violet: { bg: '#eee8f6', fg: '#54407a', dot: '#7b5cb0' },
+  gray: { bg: '#eceff1', fg: '#4b5a62', dot: '#7b8890' },
+}
+const paletteOf = (id: string) => PALETTE[id] ?? PALETTE.gray
+
+export function Pill({ option }: { option: SelectOption }) {
+  const p = paletteOf(option.color)
+  return (
+    <span className="pill" style={{ background: p.bg, color: p.fg }}>
+      <i style={{ background: p.dot }} />
+      {option.name}
+    </span>
+  )
+}
+
+function SelectPicker(props: {
+  doc: Y.Doc
+  tableId: string
+  rowId: string
+  col: ColumnInfo
+  value: string | null
+  onManage: () => void
+  onClose: () => void
+}) {
+  const { doc, tableId, rowId, col } = props
+  const options = col.options ?? []
+  const [name, setName] = useState('')
+  const choose = (id: string | null) => { setCell(doc, tableId, rowId, col.id, id); props.onClose() }
+  const create = () => {
+    const n = name.trim()
+    if (!n) return
+    const existing = options.find((o) => o.name.toLowerCase() === n.toLowerCase())
+    choose(existing ? existing.id : addOption(doc, tableId, col.id, n))
+  }
+  return (
+    <Modal onClose={props.onClose}>
+      <div className="dialog selectpicker" onMouseDown={(e) => e.stopPropagation()}
+        onKeyDown={(e) => e.key === 'Escape' && props.onClose()}>
+        <h3>{col.name}</h3>
+        <div className="opt-list">
+          {options.map((o) => (
+            <button key={o.id} type="button" className={`opt-row ${o.id === props.value ? 'on' : ''}`} onClick={() => choose(o.id)}>
+              <Pill option={o} />
+              {o.id === props.value && <span className="check">✓</span>}
+            </button>
+          ))}
+          {options.length === 0 && <p className="hint">Noch keine Optionen. Lege unten eine an.</p>}
+          {props.value && (
+            <button type="button" className="opt-row clear" onClick={() => choose(null)}>Keine Auswahl</button>
+          )}
+        </div>
+        <form className="opt-new" onSubmit={(e) => { e.preventDefault(); create() }}>
+          <input autoFocus placeholder="Neue Option …" value={name} onChange={(e) => setName(e.target.value)} />
+          <button type="submit" className="primary" disabled={!name.trim()}>Anlegen</button>
+        </form>
+        <div className="actions split">
+          <button type="button" onClick={props.onManage}>Optionen verwalten</button>
+          <button type="button" onClick={props.onClose}>Schließen</button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+function OptionsEditor(props: { doc: Y.Doc; tableId: string; col: ColumnInfo; onClose: () => void }) {
+  const { doc, tableId, col } = props
+  const options = col.options ?? []
+  const [removing, setRemoving] = useState<SelectOption | null>(null)
+  return (
+    <Modal onClose={props.onClose}>
+      <div className="dialog optionseditor" onMouseDown={(e) => e.stopPropagation()}
+        onKeyDown={(e) => e.key === 'Escape' && props.onClose()}>
+        <h3>Optionen von „{col.name}“</h3>
+        <div className="opt-edit-list">
+          {options.map((o) => (
+            <div key={o.id} className="opt-edit">
+              <input value={o.name} onChange={(e) => updateOption(doc, tableId, col.id, o.id, { name: e.target.value })} />
+              <div className="swatches">
+                {OPTION_COLORS.map((c) => (
+                  <button key={c} type="button" className={`sw ${c === o.color ? 'on' : ''}`} title={c}
+                    style={{ background: paletteOf(c).dot }} onClick={() => updateOption(doc, tableId, col.id, o.id, { color: c })} />
+                ))}
+              </div>
+              <button type="button" className="del" title="Option löschen" onClick={() => setRemoving(o)}>✕</button>
+            </div>
+          ))}
+          {options.length === 0 && <p className="hint">Keine Optionen.</p>}
+        </div>
+        <div className="actions">
+          <button type="button" className="primary" onClick={() => {
+            const n = addOption(doc, tableId, col.id, 'Neue Option'); void n
+          }}>+ Option</button>
+          <button type="button" onClick={props.onClose}>Fertig</button>
+        </div>
+        {removing && (
+          <ConfirmDialog detail={`Option „${removing.name}“. Zeilen mit dieser Option zeigen danach nichts an.`}
+            onCancel={() => setRemoving(null)}
+            onConfirm={() => { deleteOption(doc, tableId, col.id, removing.id); setRemoving(null) }} />
+        )}
+      </div>
+    </Modal>
+  )
+}
+
+export function SelectCell(props: { doc: Y.Doc; tableId: string; rowId: string; col: ColumnInfo }) {
+  const { doc, tableId, rowId, col } = props
+  const value = useCell(doc, tableId, rowId, col.id) as string | null
+  const current = (col.options ?? []).find((o) => o.id === value)
+  const [mode, setMode] = useState<'pick' | 'edit' | null>(null)
+  return (
+    <div className="c selectcell">
+      <button type="button" className="select-btn" onClick={() => setMode('pick')} title={col.name}>
+        {current ? <Pill option={current} /> : <span className="select-empty">Auswählen …</span>}
+      </button>
+      {mode === 'pick' && (
+        <SelectPicker doc={doc} tableId={tableId} rowId={rowId} col={col} value={current ? value : null}
+          onManage={() => setMode('edit')} onClose={() => setMode(null)} />
+      )}
+      {mode === 'edit' && <OptionsEditor doc={doc} tableId={tableId} col={col} onClose={() => setMode(null)} />}
+    </div>
+  )
+}
