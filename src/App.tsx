@@ -6,6 +6,7 @@ import { setWindowTitle } from './windowTitle'
 import { invoke } from '@tauri-apps/api/core'
 import { baseName, isTauri, newMeta, readGrid, writeGrid, type OpenedGrid } from './gridFile'
 import { FileSession } from './fileSession'
+import { forgetRecent, noteRecent, readRecent, writeRecent } from './recentFiles'
 
 /** Normalfall: ein Dokument, ein Client. Mit ?sim in der URL: zwei simulierte Clients zum Testen von Merges. */
 const SIM = new URLSearchParams(location.search).has('sim')
@@ -15,7 +16,10 @@ const UNSAVED_TITLE = 'Mein Dokument'
 const LAST_KEY = 'grid-last-file'
 const FILTERS = [{ name: 'Grid-Dokument', extensions: ['grid'] }]
 const withExt = (p: string) => (/\.grid$/i.test(p) ? p : `${p}.grid`)
-const remember = (p: string | null) => { try { p ? localStorage.setItem(LAST_KEY, p) : localStorage.removeItem(LAST_KEY) } catch { /* egal */ } }
+const remember = (p: string | null) => {
+  try { p ? localStorage.setItem(LAST_KEY, p) : localStorage.removeItem(LAST_KEY) } catch { /* egal */ }
+  if (p) noteRecent(p)
+}
 
 function Single() {
   const [session, setSession] = useState<FileSession | null>(null)
@@ -31,12 +35,16 @@ function Single() {
 
   const openPath = async (p: string) => {
     await current.current?.flush()
-    try { adopt(fromFile(p, await readGrid(p))) } catch (e) { setError(`„${baseName(p)}“ konnte nicht geöffnet werden: ${e}`) }
+    try { adopt(fromFile(p, await readGrid(p))) } catch (e) {
+      forgetRecent(p) // Datei fehlt oder ist kaputt: nicht weiter im Menü anbieten
+      setError(`„${baseName(p)}“ konnte nicht geöffnet werden: ${e}`)
+    }
   }
 
   // Beim Start das zuletzt geöffnete Dokument laden.
   useEffect(() => {
     let alive = true
+    if (isTauri) writeRecent(readRecent()) // Menü „Zuletzt geöffnet“ füllen
     ;(async () => {
       // Vom Finder angeforderte Datei hat Vorrang vor dem zuletzt geöffneten Dokument.
       const requested = isTauri ? await invoke<string | null>('take_pending_open').catch(() => null) : null
@@ -44,7 +52,7 @@ function Single() {
       if (last) {
         try {
           const o = await readGrid(last)
-          if (alive) setSession(fromFile(last, o))
+          if (alive) { remember(last); setSession(fromFile(last, o)) }
           return
         } catch (e) {
           if (alive) setError(`„${baseName(last)}“ konnte nicht geöffnet werden: ${e}`)
@@ -107,7 +115,9 @@ function Single() {
 
       const actions: Record<string, () => Promise<void>> = { open, new: create, save, save_as: saveAs }
       const unlisten = await listen<string>('menu', (e) => {
-        const run = actions[e.payload]
+        if (e.payload === 'clear_recent') { writeRecent([]); return }
+        const recent = /^recent:(\d+)$/.exec(e.payload)
+        const run = recent ? () => { const p = readRecent()[Number(recent[1])]; return p ? openPath(p) : Promise.resolve() } : actions[e.payload]
         if (!run || busy.current) return
         busy.current = true
         run().finally(() => { busy.current = false })

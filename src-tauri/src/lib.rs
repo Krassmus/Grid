@@ -51,12 +51,52 @@ fn take_pending_open(state: tauri::State<'_, PendingOpen>) -> Option<String> {
   state.0.lock().ok().and_then(|mut p| p.take())
 }
 
+/// Menüleiste: Datei-Befehle gehen als Ereignis „menu“ an die Oberfläche. `recent` sind die Namen der zuletzt
+/// geöffneten Dateien; ein Klick darauf sendet „recent:<Nummer>“, die Oberfläche kennt die zugehörigen Pfade.
+fn build_menu<M: tauri::Manager<tauri::Wry>>(app: &M, recent: &[String]) -> tauri::Result<()> {
+  let item = |id: &str, text: &str, accel: &str| MenuItemBuilder::with_id(id, text).accelerator(accel).build(app);
+  let mut recents = SubmenuBuilder::new(app, "Zuletzt geöffnet");
+  if recent.is_empty() {
+    recents = recents.item(&MenuItemBuilder::with_id("recent_none", "Keine").enabled(false).build(app)?);
+  } else {
+    for (i, name) in recent.iter().enumerate() {
+      recents = recents.item(&MenuItemBuilder::with_id(format!("recent:{i}"), name).build(app)?);
+    }
+    recents = recents.separator().item(&MenuItemBuilder::with_id("clear_recent", "Liste löschen").build(app)?);
+  }
+  let file = SubmenuBuilder::new(app, "Ablage")
+    .item(&item("new", "Neu …", "CmdOrCtrl+N")?)
+    .item(&item("open", "Öffnen …", "CmdOrCtrl+O")?)
+    .item(&recents.build()?)
+    .separator()
+    .item(&item("save", "Sichern", "CmdOrCtrl+S")?)
+    .item(&item("save_as", "Sichern unter …", "CmdOrCtrl+Shift+S")?)
+    .separator()
+    .close_window()
+    .build()?;
+  let edit = SubmenuBuilder::new(app, "Bearbeiten")
+    .undo().redo().separator().cut().copy().paste().select_all()
+    .build()?;
+  let app_menu = SubmenuBuilder::new(app, "Grid")
+    .about(None).separator().hide().hide_others().show_all().separator().quit()
+    .build()?;
+  let window = SubmenuBuilder::new(app, "Fenster").minimize().maximize().build()?;
+  app.app_handle().set_menu(MenuBuilder::new(app).items(&[&app_menu, &file, &edit, &window]).build()?)?;
+  Ok(())
+}
+
+/// Ersetzt das Untermenü „Zuletzt geöffnet“ durch die übergebenen Dateinamen.
+#[tauri::command]
+fn set_recent_menu(app: tauri::AppHandle, names: Vec<String>) -> Result<(), String> {
+  build_menu(&app, &names).map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
     .plugin(tauri_plugin_dialog::init())
     .manage(PendingOpen::default())
-    .invoke_handler(tauri::generate_handler![grid_save, grid_open, take_pending_open])
+    .invoke_handler(tauri::generate_handler![grid_save, grid_open, take_pending_open, set_recent_menu])
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(
@@ -66,25 +106,7 @@ pub fn run() {
         )?;
       }
 
-      // Menüleiste: Datei-Befehle gehen als Ereignis „menu“ an die Oberfläche.
-      let item = |id: &str, text: &str, accel: &str| MenuItemBuilder::with_id(id, text).accelerator(accel).build(app);
-      let file = SubmenuBuilder::new(app, "Ablage")
-        .item(&item("new", "Neu …", "CmdOrCtrl+N")?)
-        .item(&item("open", "Öffnen …", "CmdOrCtrl+O")?)
-        .separator()
-        .item(&item("save", "Sichern", "CmdOrCtrl+S")?)
-        .item(&item("save_as", "Sichern unter …", "CmdOrCtrl+Shift+S")?)
-        .separator()
-        .close_window()
-        .build()?;
-      let edit = SubmenuBuilder::new(app, "Bearbeiten")
-        .undo().redo().separator().cut().copy().paste().select_all()
-        .build()?;
-      let app_menu = SubmenuBuilder::new(app, "Grid")
-        .about(None).separator().hide().hide_others().show_all().separator().quit()
-        .build()?;
-      let window = SubmenuBuilder::new(app, "Fenster").minimize().maximize().build()?;
-      app.set_menu(MenuBuilder::new(app).items(&[&app_menu, &file, &edit, &window]).build()?)?;
+      build_menu(app.handle(), &[])?;
       Ok(())
     })
     .on_menu_event(|app, event| {
