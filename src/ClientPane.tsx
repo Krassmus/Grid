@@ -370,6 +370,17 @@ export function ClientPane(props: {
     [doc, table?.id, sort?.colId, sort?.dir, sortTick, table && !sort ? table.rowIds : null],
   )
 
+  // Nach „+ Zeile“: zur neuen Zeile scrollen und ihre erste Zelle fokussieren
+  const [focusRow, setFocusRow] = useState<string | null>(null)
+  useEffect(() => {
+    if (!focusRow) return
+    const row = sectionRef.current?.querySelector<HTMLElement>(`[data-row="${focusRow}"]`)
+    if (!row) return // noch nicht gerendert: der Effekt läuft mit der nächsten Zeilenliste erneut
+    row.scrollIntoView({ block: 'nearest' })
+    row.querySelector<HTMLElement>('input, textarea, button')?.focus({ preventScroll: true })
+    setFocusRow(null)
+  }, [focusRow, rowIds])
+
   const [liveWidth, setLiveWidth] = useState<{ id: string; w: number } | null>(null)
   const startResize = (e: ReactMouseEvent, colId: string) => {
     e.preventDefault()
@@ -459,7 +470,7 @@ export function ClientPane(props: {
                 <div className="h"><button className="add-col" onClick={() => setDialog('column')}>+ Spalte</button></div>
               </div>
               {rowIds.map((rid) => (
-                <div key={rid} className="row-outer">
+                <div key={rid} className="row-outer" data-row={rid}>
                   <div className="row-inner">
                     {table.columns.map((c, i) =>
                       c.type === 'relation'
@@ -483,7 +494,7 @@ export function ClientPane(props: {
       </div>
       {table && (
         <div className="addrow-bar">
-          <button className="add-row" onClick={() => addRow(doc, table.id)}>+ Zeile</button>
+          <button className="add-row" onClick={() => setFocusRow(addRow(doc, table.id))}>+ Zeile</button>
         </div>
       )}
 
