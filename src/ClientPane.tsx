@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type DragEvent, type MouseEvent as ReactMouseEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent as ReactMouseEvent } from 'react'
 import * as Y from 'yjs'
 import { IndexeddbPersistence } from 'y-indexeddb'
 import {
@@ -9,7 +9,9 @@ import { useCell, useFileIndex, useLinkIndex, useRowVersion, useTables } from '.
 import { FileCell } from './FileCell'
 import { SelectCell } from './SelectCell'
 import { ColumnDialog } from './ColumnDialog'
-import { FILE, NUMBER, RELATION, TEXT } from './columnTypes'
+import { sortedRowIds, type SortDir } from './sorting'
+import { formatDate, toInputValue } from './dateFormat'
+import { DATE, FILE, NUMBER, RELATION, TEXT } from './columnTypes'
 import { RichPreview, RichTextDialog } from './richText'
 import { AnimItem, useAnimatedList } from './animatedList'
 import { ConfirmDialog, Modal, RenameDialog } from './Modal'
@@ -187,7 +189,27 @@ function BacklinkCell(props: {
 function Cell({ doc, table, rowId, col }: { doc: Y.Doc; table: string; rowId: string; col: ColumnInfo; lead?: boolean }) {
   const value = useCell(doc, table, rowId, col.id)
   if (col.type === 'number') return <NumberInput doc={doc} table={table} rowId={rowId} col={col} value={value} />
+  if (col.type === 'date') return <DateInput doc={doc} table={table} rowId={rowId} col={col} value={value} />
   return <TextInput doc={doc} table={table} rowId={rowId} col={col} value={value} />
+}
+
+function DateInput({ doc, table, rowId, col, value }: { doc: Y.Doc; table: string; rowId: string; col: ColumnInfo; value: unknown }) {
+  const cfg = DATE.config(col)
+  const [editing, setEditing] = useState(false)
+  const shown = formatDate(value, cfg.style, cfg.time)
+  return (
+    <div className="c">
+      {editing ? (
+        <input className="cell" autoFocus type={cfg.time ? 'datetime-local' : 'date'} value={toInputValue(value, cfg.time)}
+          onChange={(e) => setCell(doc, table, rowId, col.id, e.target.value || null)}
+          onBlur={() => setEditing(false)} onKeyDown={(e) => e.key === 'Enter' && setEditing(false)} />
+      ) : (
+        <button type="button" className="cell cell-date" onClick={() => setEditing(true)} onFocus={() => setEditing(true)}>
+          {shown || <span className="placeholder">{col.name}</span>}
+        </button>
+      )}
+    </div>
+  )
 }
 
 function NumberInput({ doc, table, rowId, col, value }: { doc: Y.Doc; table: string; rowId: string; col: ColumnInfo; value: unknown }) {
@@ -321,6 +343,33 @@ export function ClientPane(props: {
         t.columns.filter((c) => c.type === 'relation' && c.target === table.id && RELATION.config(c).backlink).map((c) => ({ source: t, col: c })))
     : []
 
+  // Sortierung ist nur eine Ansicht (pro Tabelle, nur auf diesem Gerät); die gespeicherte Reihenfolge bleibt unverändert.
+  // Klick 1: aufsteigend, Klick 2: absteigend, Klick 3: wieder die gespeicherte Reihenfolge.
+  const [sorts, setSorts] = useState<Record<string, { colId: string; dir: SortDir }>>({})
+  const sort = table ? sorts[table.id] : undefined
+  const cycleSort = (colId: string) => {
+    if (!table) return
+    setSorts((all) => {
+      const cur = all[table.id]
+      const next = !cur || cur.colId !== colId ? { colId, dir: 'asc' as const } : cur.dir === 'asc' ? { colId, dir: 'desc' as const } : null
+      const { [table.id]: _, ...rest } = all
+      return next ? { ...rest, [table.id]: next } : rest
+    })
+  }
+  // Während in der Tabelle getippt wird, bleibt die Reihenfolge stehen und wird erst beim Verlassen der Zelle neu sortiert.
+  const [sortTick, setSortTick] = useState(0)
+  const editingInGrid = useRef(false)
+  useEffect(() => {
+    const h = () => { if (!editingInGrid.current) setSortTick((n) => n + 1) }
+    doc.on('update', h)
+    return () => { doc.off('update', h) }
+  }, [doc])
+  const rowIds = useMemo(
+    () => (table && sort ? sortedRowIds(doc, table.id, sort.colId, sort.dir) : table?.rowIds ?? []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [doc, table?.id, sort?.colId, sort?.dir, sortTick, table && !sort ? table.rowIds : null],
+  )
+
   const [liveWidth, setLiveWidth] = useState<{ id: string; w: number } | null>(null)
   const startResize = (e: ReactMouseEvent, colId: string) => {
     e.preventDefault()
@@ -345,7 +394,7 @@ export function ClientPane(props: {
   const template = table
     ? [
         ...table.columns.map((c, i) =>
-          liveWidth?.id === c.id ? `${liveWidth.w}px` : c.width ? `${c.width}px` : i === 0 ? '200px' : c.type === 'relation' || c.type === 'file' ? '240px' : c.type === 'number' ? '120px' : c.type === 'select' ? '160px' : '180px'),
+          liveWidth?.id === c.id ? `${liveWidth.w}px` : c.width ? `${c.width}px` : i === 0 ? '200px' : c.type === 'relation' || c.type === 'file' ? '240px' : c.type === 'number' ? '120px' : c.type === 'date' ? '170px' : c.type === 'select' ? '160px' : '180px'),
         ...backlinks.map(() => '220px'),
         'minmax(120px, 1fr)',
       ].join(' ')
@@ -382,13 +431,19 @@ export function ClientPane(props: {
 
       {table && (
         <>
-          <div className="gridwrap">
+          <div className="gridwrap"
+            onFocus={() => { editingInGrid.current = true }}
+            onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) { editingInGrid.current = false; setSortTick((n) => n + 1) } }}>
             <div className="grid" style={{ ['--cols' as any]: template }}>
               <div className="grid-head">
                 {table.columns.map((c) => (
                   <div key={c.id} className={`h reorderable ${hintClass('column', c.id)}`} {...reorderProps('column', c.id, c.name)}>
                     <button type="button" className="h-name" title="Spalte konfigurieren"
                       onClick={() => setEditing({ kind: 'column', id: c.id })}>{c.name}</button>
+                    <button type="button" draggable={false} className={`h-sort${sort?.colId === c.id ? ' on' : ''}`}
+                      title={sort?.colId === c.id ? (sort.dir === 'asc' ? 'Aufsteigend sortiert – klicken für absteigend' : 'Absteigend sortiert – klicken für die ursprüngliche Reihenfolge') : 'Nach dieser Spalte sortieren'}
+                      aria-label={`Nach ${c.name} sortieren`}
+                      onClick={() => cycleSort(c.id)}>{sort?.colId === c.id ? (sort.dir === 'asc' ? '↑' : '↓') : '↕'}</button>
                     <span className="col-resize" title="Ziehen: Breite ändern, Doppelklick: zurücksetzen"
                       onMouseDown={(e) => startResize(e, c.id)}
                       onDoubleClick={() => setColumnWidth(doc, table.id, c.id, undefined)} />
@@ -401,7 +456,7 @@ export function ClientPane(props: {
                 ))}
                 <div className="h"><button className="add-col" onClick={() => setDialog('column')}>+ Spalte</button></div>
               </div>
-              {table.rowIds.map((rid) => (
+              {rowIds.map((rid) => (
                 <div key={rid} className="row-outer">
                   <div className="row-inner">
                     {table.columns.map((c, i) =>
@@ -512,6 +567,7 @@ function Dialog(props: {
             <option value="relation">Relation (Verknüpfung)</option>
             <option value="file">Datei / Bild</option>
             <option value="select">Auswahl (z. B. Status)</option>
+            <option value="date">Datum</option>
           </select>
         )}
         {props.withType && type === 'relation' && (

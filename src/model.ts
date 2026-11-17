@@ -25,7 +25,7 @@ import * as Y from 'yjs'
  *     (siehe blobStore.ts) und werden später separat mit dem Server abgeglichen.
  */
 
-export type ColType = 'text' | 'number' | 'relation' | 'file' | 'select'
+export type ColType = 'text' | 'number' | 'relation' | 'file' | 'select' | 'date'
 export type CellValue = string | number | null
 
 export interface SelectOption { id: string; name: string; color: string }

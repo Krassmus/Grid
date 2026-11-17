@@ -227,3 +227,12 @@ textarea.cell { resize: none; line-height: 1.35; overflow: hidden; display: bloc
 .rich-editor { min-height: 200px; max-height: 50vh; overflow: auto; padding: 12px 14px; border: 1px solid #d5dce0; border-radius: 10px; font-size: 16px; line-height: 1.45; outline: none; background: #fff; }
 .rich-editor:focus { border-color: #0a84ff; }
 .rich-editor ul, .rich-editor ol { margin: 0; padding-left: 1.4em; }
+
+.cell-date { text-align: left; cursor: text; }
+.cell-date .placeholder { color: #9aa5ab; }
+
+/* Sortiersymbol im Spaltenkopf */
+.h-sort { all: unset; cursor: pointer; margin-left: 6px; padding: 0 5px; border-radius: 6px; font-size: 13px; line-height: 1.4; color: #9aa5ab; opacity: 0; }
+.h:hover .h-sort, .h-sort:focus-visible, .h-sort.on { opacity: 1; }
+.h-sort:hover { background: #e9edef; color: #3b4a52; }
+.h-sort.on { color: #0a84ff; }

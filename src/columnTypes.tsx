@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import * as Y from 'yjs'
 import type { ColType, ColumnInfo, TableInfo } from './model'
+import { DATE_STYLES, type DateStyle } from './dateFormat'
 import { Pill } from './SelectCell'
 
 /** Was ein Konfigurationseditor braucht, um die Einstellungen einer Spalte anzuzeigen und zu ändern. */
@@ -159,11 +160,31 @@ class SelectColumn extends ColumnType<SelectConfig> {
   }
 }
 
+export interface DateConfig { time: boolean; style: DateStyle }
+class DateColumn extends ColumnType<DateConfig> {
+  readonly type = 'date'
+  readonly label = 'Datum'
+  readonly defaults: DateConfig = { time: false, style: 'short' }
+  renderConfig({ config, set }: ConfigContext<DateConfig>) {
+    return (
+      <>
+        <Check checked={config.time} onChange={(time) => set({ time })}>Uhrzeit angeben</Check>
+        <Field label="Darstellung">
+          <select value={config.style} onChange={(e) => set({ style: e.target.value as DateStyle })}>
+            {DATE_STYLES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+          </select>
+        </Field>
+      </>
+    )
+  }
+}
+
 export const TEXT = new TextColumn()
 export const NUMBER = new NumberColumn()
 export const RELATION = new RelationColumn()
 export const FILE = new FileColumn()
 export const SELECT = new SelectColumn()
+export const DATE = new DateColumn()
 
-const REGISTRY: Record<ColType, ColumnType<any>> = { text: TEXT, number: NUMBER, relation: RELATION, file: FILE, select: SELECT }
+const REGISTRY: Record<ColType, ColumnType<any>> = { text: TEXT, number: NUMBER, relation: RELATION, file: FILE, select: SELECT, date: DATE }
 export const columnTypeOf = (type: ColType): ColumnType<any> => REGISTRY[type]
