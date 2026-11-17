@@ -244,3 +244,4 @@ textarea.cell { resize: none; line-height: 1.35; overflow: hidden; display: bloc
 .h:hover .h-sort, .h-sort:focus-visible, .h-sort.on { opacity: 1; }
 .h-sort:hover { background: #e9edef; color: #3b4a52; }
 .h-sort.on { color: #0a84ff; }
+.opt-row.active { background: #eef4ff; border-color: #0a84ff; }

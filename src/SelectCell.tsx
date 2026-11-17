@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import * as Y from 'yjs'
 import { addOption, deleteOption, setCell, updateOption, OPTION_COLORS, type ColumnInfo, type SelectOption } from './model'
 import { ConfirmDialog, Modal } from './Modal'
@@ -37,6 +37,23 @@ function SelectPicker(props: {
   const { doc, tableId, rowId, col } = props
   const options = col.options ?? []
   const [name, setName] = useState('')
+  // Tastatur: Pfeil hoch/runter wählt einen Eintrag aus (Optionen, dann „Keine Auswahl“), Enter übernimmt ihn.
+  const entries: (string | null)[] = [...options.map((o) => o.id), ...(props.value ? [null] : [])]
+  const [active, setActive] = useState<number | null>(null)
+  const listRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (active !== null) listRef.current?.querySelectorAll<HTMLElement>('.opt-row')[active]?.scrollIntoView({ block: 'nearest' })
+  }, [active])
+  const move = (dir: 1 | -1) => {
+    if (entries.length === 0) return
+    setActive((a) => {
+      if (a === null) { // Start: aktuelle Auswahl, sonst erster bzw. letzter Eintrag
+        const cur = entries.indexOf(props.value)
+        return props.value && cur >= 0 ? Math.min(Math.max(cur + dir, 0), entries.length - 1) : dir === 1 ? 0 : entries.length - 1
+      }
+      return Math.min(Math.max(a + dir, 0), entries.length - 1)
+    })
+  }
   const choose = (id: string | null) => { setCell(doc, tableId, rowId, col.id, id); props.onClose() }
   const create = () => {
     const n = name.trim()
@@ -47,22 +64,31 @@ function SelectPicker(props: {
   return (
     <Modal onClose={props.onClose}>
       <div className="dialog selectpicker" onMouseDown={(e) => e.stopPropagation()}
-        onKeyDown={(e) => e.key === 'Escape' && props.onClose()}>
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') props.onClose()
+          else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); move(e.key === 'ArrowDown' ? 1 : -1) }
+        }}>
         <h3>{col.name}</h3>
-        <div className="opt-list">
-          {options.map((o) => (
-            <button key={o.id} type="button" className={`opt-row ${o.id === props.value ? 'on' : ''}`} onClick={() => choose(o.id)}>
+        <div className="opt-list" ref={listRef}>
+          {options.map((o, i) => (
+            <button key={o.id} type="button" className={`opt-row ${o.id === props.value ? 'on' : ''} ${active === i ? 'active' : ''}`}
+              onClick={() => choose(o.id)} onMouseMove={() => setActive(i)}>
               <Pill option={o} />
               {o.id === props.value && <span className="check">✓</span>}
             </button>
           ))}
           {options.length === 0 && <p className="hint">Noch keine Optionen. Lege unten eine an.</p>}
           {props.value && (
-            <button type="button" className="opt-row clear" onClick={() => choose(null)}>Keine Auswahl</button>
+            <button type="button" className={`opt-row clear ${active === options.length ? 'active' : ''}`}
+              onClick={() => choose(null)} onMouseMove={() => setActive(options.length)}>Keine Auswahl</button>
           )}
         </div>
         <form className="opt-new" onSubmit={(e) => { e.preventDefault(); create() }}>
-          <input autoFocus placeholder="Neue Option …" value={name} onChange={(e) => setName(e.target.value)} />
+          <input autoFocus placeholder="Neue Option …" value={name}
+            onChange={(e) => { setName(e.target.value); setActive(null) }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !name.trim() && active !== null) { e.preventDefault(); choose(entries[active] ?? null) }
+            }} />
           <button type="submit" className="primary" disabled={!name.trim()}>Anlegen</button>
         </form>
         <div className="actions split">
@@ -119,9 +145,16 @@ export function SelectCell(props: { doc: Y.Doc; tableId: string; rowId: string; 
   const value = useCell(doc, tableId, rowId, col.id) as string | null
   const current = (col.options ?? []).find((o) => o.id === value)
   const [mode, setMode] = useState<'pick' | 'edit' | null>(null)
+  // Nach dem Schließen des Dialogs zurück auf die Zelle, damit man mit Tab weitermachen kann
+  const btn = useRef<HTMLButtonElement>(null)
+  const wasOpen = useRef(false)
+  useEffect(() => {
+    if (mode === null && wasOpen.current) btn.current?.focus()
+    wasOpen.current = mode !== null
+  }, [mode])
   return (
     <div className="c selectcell">
-      <button type="button" className="select-btn" onClick={() => setMode('pick')} title={col.name}>
+      <button ref={btn} type="button" className="select-btn" onClick={() => setMode('pick')} title={col.name}>
         {current ? <Pill option={current} /> : <span className="select-empty">Auswählen …</span>}
       </button>
       {mode === 'pick' && (
