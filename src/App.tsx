@@ -168,7 +168,7 @@ function Simulation() {
 
 export function App() {
   return (
-    <main>
+    <main className={SIM ? undefined : 'single'}>
       {SIM && <h1>Grid – Simulation</h1>}
       {SIM && <p className="hint">Simulationsmodus: zwei Clients am selben Dokument. Einen offline schalten, beide bearbeiten, wieder online schalten.</p>}
       {SIM ? <Simulation /> : <Single />}

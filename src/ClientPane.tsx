@@ -412,6 +412,8 @@ export function ClientPane(props: {
         </header>
       )}
 
+      {/* Alles bis zur Tabelle scrollt gemeinsam; der Tabellenkopf bleibt oben stehen, die Leiste „+ Zeile“ unten. */}
+      <div className="gridscroll">
       <nav className="tabs">
         {tables.map((t) => (
           <span key={t.id} className={`tabgroup ${hintClass('table', t.id)}`}>
@@ -476,10 +478,13 @@ export function ClientPane(props: {
               ))}
             </div>
           </div>
-          <div className="addrow-bar">
-            <button className="add-row" onClick={() => addRow(doc, table.id)}>+ Zeile</button>
-          </div>
         </>
+      )}
+      </div>
+      {table && (
+        <div className="addrow-bar">
+          <button className="add-row" onClick={() => addRow(doc, table.id)}>+ Zeile</button>
+        </div>
       )}
 
       {editing && (() => {
