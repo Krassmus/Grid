@@ -131,7 +131,7 @@ button.danger { background: #d92d20; border-color: #d92d20; color: #fff; }
 /* Normalmodus: Die Seite selbst scrollt nie. Nur die Tabelle (.gridscroll) scrollt – und federt dabei (Bounce) –,
    die Leiste mit „+ Zeile“ liegt darunter und bewegt sich nicht. */
 html:has(main.single), body:has(main.single) { height: 100%; overflow: hidden; overscroll-behavior: none; }
-main.single { height: 100vh; height: 100dvh; box-sizing: border-box; display: flex; flex-direction: column; padding-bottom: 0; }
+main.single { max-width: none; margin: 0; height: 100vh; height: 100dvh; box-sizing: border-box; display: flex; flex-direction: column; padding-bottom: 0; }
 main.single > .pane { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 0; }
 main.single .tabs { position: sticky; left: 0; width: fit-content; max-width: 100vw; }
 main.single .gridscroll { flex: 1; min-height: 0; overflow: auto; }
