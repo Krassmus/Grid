@@ -24,6 +24,7 @@ export function sortKeys(doc: Y.Doc, table: TableInfo, col: ColumnInfo, tables: 
     let key: Key = null
     switch (col.type) {
       case 'number': key = typeof v === 'number' ? v : null; break
+      case 'checkbox': key = v ? 1 : 0; break // nicht angehakt zählt als 0, nie als leer
       case 'date': key = typeof v === 'string' && v ? v : null; break
       case 'select': { const i = (col.options ?? []).findIndex((o) => o.id === v); key = i >= 0 ? i : null; break }
       case 'relation': {

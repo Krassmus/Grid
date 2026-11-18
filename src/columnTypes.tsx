@@ -179,12 +179,27 @@ class DateColumn extends ColumnType<DateConfig> {
   }
 }
 
+export interface CheckboxConfig { label: string }
+class CheckboxColumn extends ColumnType<CheckboxConfig> {
+  readonly type = 'checkbox'
+  readonly label = 'Checkbox'
+  readonly defaults: CheckboxConfig = { label: '' }
+  renderConfig({ config, set }: ConfigContext<CheckboxConfig>) {
+    return (
+      <Field label="Beschriftung neben dem Kästchen">
+        <input value={config.label} placeholder="z. B. Erledigt" maxLength={40} onChange={(e) => set({ label: e.target.value })} />
+      </Field>
+    )
+  }
+}
+
 export const TEXT = new TextColumn()
 export const NUMBER = new NumberColumn()
 export const RELATION = new RelationColumn()
 export const FILE = new FileColumn()
 export const SELECT = new SelectColumn()
 export const DATE = new DateColumn()
+export const CHECKBOX = new CheckboxColumn()
 
-const REGISTRY: Record<ColType, ColumnType<any>> = { text: TEXT, number: NUMBER, relation: RELATION, file: FILE, select: SELECT, date: DATE }
+const REGISTRY: Record<ColType, ColumnType<any>> = { text: TEXT, number: NUMBER, relation: RELATION, file: FILE, select: SELECT, date: DATE, checkbox: CHECKBOX }
 export const columnTypeOf = (type: ColType): ColumnType<any> => REGISTRY[type]

@@ -28,6 +28,14 @@ describe('Sortieren', () => {
     setCell(doc, t, r1, d, '2026-12-01'); setCell(doc, t, r2, d, '2026-11-17T14:30'); setCell(doc, t, r3, d, '2026-11-17')
     expect(sortedRowIds(doc, t, d, 'asc')).toEqual([r3, r2, r1])
   })
+  it('Checkbox: nicht angehakt zuerst, dann angehakt', () => {
+    const { doc, t, name } = setup()
+    const box = addColumn(doc, t, 'Erledigt', 'checkbox')
+    const [r1, r2, r3] = rowsWith(doc, t, name, ['1', '2', '3'])
+    setCell(doc, t, r2, box, 1)
+    expect(sortedRowIds(doc, t, box, 'asc')).toEqual([r1, r3, r2])
+    expect(sortedRowIds(doc, t, box, 'desc')).toEqual([r2, r1, r3])
+  })
   it('Relation nach Titel der ersten Verknüpfung, Datei nach Dateiname', () => {
     const { doc, t, name } = setup()
     const other = addTable(doc, 'Ziel', { firstRow: false })

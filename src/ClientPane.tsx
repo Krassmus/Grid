@@ -11,7 +11,7 @@ import { SelectCell } from './SelectCell'
 import { ColumnDialog } from './ColumnDialog'
 import { sortedRowIds, type SortDir } from './sorting'
 import { formatDate, toInputValue } from './dateFormat'
-import { DATE, FILE, NUMBER, RELATION, TEXT } from './columnTypes'
+import { CHECKBOX, DATE, FILE, NUMBER, RELATION, TEXT } from './columnTypes'
 import { RichPreview, RichTextDialog } from './richText'
 import { AnimItem, useAnimatedList } from './animatedList'
 import { ConfirmDialog, Modal, RenameDialog } from './Modal'
@@ -189,8 +189,22 @@ function BacklinkCell(props: {
 function Cell({ doc, table, rowId, col }: { doc: Y.Doc; table: string; rowId: string; col: ColumnInfo; lead?: boolean }) {
   const value = useCell(doc, table, rowId, col.id)
   if (col.type === 'number') return <NumberInput doc={doc} table={table} rowId={rowId} col={col} value={value} />
+  if (col.type === 'checkbox') return <CheckboxInput doc={doc} table={table} rowId={rowId} col={col} value={value} />
   if (col.type === 'date') return <DateInput doc={doc} table={table} rowId={rowId} col={col} value={value} />
   return <TextInput doc={doc} table={table} rowId={rowId} col={col} value={value} />
+}
+
+function CheckboxInput({ doc, table, rowId, col, value }: { doc: Y.Doc; table: string; rowId: string; col: ColumnInfo; value: unknown }) {
+  const label = CHECKBOX.config(col).label
+  return (
+    <div className="c">
+      <label className="check-cell">
+        <input type="checkbox" checked={!!value} aria-label={label || col.name}
+          onChange={(e) => setCell(doc, table, rowId, col.id, e.target.checked ? 1 : null)} />
+        {label && <span>{label}</span>}
+      </label>
+    </div>
+  )
 }
 
 function DateInput({ doc, table, rowId, col, value }: { doc: Y.Doc; table: string; rowId: string; col: ColumnInfo; value: unknown }) {
@@ -405,7 +419,7 @@ export function ClientPane(props: {
   const template = table
     ? [
         ...table.columns.map((c, i) =>
-          liveWidth?.id === c.id ? `${liveWidth.w}px` : c.width ? `${c.width}px` : i === 0 ? '200px' : c.type === 'relation' || c.type === 'file' ? '240px' : c.type === 'number' ? '120px' : c.type === 'date' ? '170px' : c.type === 'select' ? '160px' : '180px'),
+          liveWidth?.id === c.id ? `${liveWidth.w}px` : c.width ? `${c.width}px` : i === 0 ? '200px' : c.type === 'relation' || c.type === 'file' ? '240px' : c.type === 'number' ? '120px' : c.type === 'date' ? '170px' : c.type === 'checkbox' ? '110px' : c.type === 'select' ? '160px' : '180px'),
         ...backlinks.map(() => '220px'),
         'minmax(120px, 1fr)',
       ].join(' ')
@@ -584,6 +598,7 @@ function Dialog(props: {
             <option value="file">Datei / Bild</option>
             <option value="select">Auswahl (z. B. Status)</option>
             <option value="date">Datum</option>
+            <option value="checkbox">Checkbox</option>
           </select>
         )}
         {props.withType && type === 'relation' && (

@@ -25,7 +25,7 @@ import * as Y from 'yjs'
  *     (siehe blobStore.ts) und werden später separat mit dem Server abgeglichen.
  */
 
-export type ColType = 'text' | 'number' | 'relation' | 'file' | 'select' | 'date'
+export type ColType = 'text' | 'number' | 'relation' | 'file' | 'select' | 'date' | 'checkbox'
 export type CellValue = string | number | null
 
 export interface SelectOption { id: string; name: string; color: string }
@@ -210,7 +210,7 @@ export interface RowSummary { title: string; subs: string[] }
 export function summarize(doc: Y.Doc, table: TableInfo, rowId: string): RowSummary {
   const row: Y.Map<any> | undefined = tablesOf(doc).get(table.id)?.get('rows').get(rowId)
   const vals = table.columns
-    .filter((c) => c.type !== 'relation' && c.type !== 'file')
+    .filter((c) => c.type !== 'relation' && c.type !== 'file' && c.type !== 'checkbox')
     .map((c) => {
       const v = row?.get(c.id)
       if (c.type === 'select') return c.options?.find((o) => o.id === v)?.name ?? ''
