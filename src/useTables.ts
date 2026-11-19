@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import * as Y from 'yjs'
-import { buildFileIndex, buildLinkIndex, readTables, tablesOf, type FileRef, type LinkIndex, type TableInfo } from './model'
+import { buildFileIndex, buildLinkIndex, readTables, readTabs, readViews, tableOrderOf, tablesOf, viewsOf, type FileRef, type LinkIndex, type TabInfo, type TableInfo, type ViewInfo } from './model'
 
 /** Liest die Tabellenstruktur reaktiv; Zellwerte werden in der Zelle selbst beobachtet. */
 export function useTables(doc: Y.Doc): TableInfo[] {
@@ -64,4 +64,20 @@ export function useFileIndex(doc: Y.Doc): Map<string, FileRef[]> {
     return () => files.unobserve(update)
   }, [doc])
   return index
+}
+
+/** Tabellen, abgeleitete Tabellen und ihre gemeinsame Reihenfolge in der Kopfzeile, reaktiv. */
+export function useTabs(doc: Y.Doc): { tables: TableInfo[]; views: ViewInfo[]; tabs: TabInfo[] } {
+  const read = () => ({ tables: readTables(doc), views: readViews(doc), tabs: readTabs(doc) })
+  const [state, setState] = useState(read)
+  useEffect(() => {
+    const update = () => setState(read())
+    const targets = [tablesOf(doc), viewsOf(doc)]
+    for (const t of targets) t.observeDeep(update)
+    const order = tableOrderOf(doc)
+    order.observe(update)
+    update()
+    return () => { for (const t of targets) t.unobserveDeep(update); order.unobserve(update) }
+  }, [doc])
+  return state
 }

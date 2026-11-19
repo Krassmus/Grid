@@ -248,3 +248,31 @@ textarea.cell { resize: none; line-height: 1.35; overflow: hidden; display: bloc
 
 .check-cell { display: flex; align-items: center; gap: 8px; padding: 6px 0; cursor: pointer; font-size: 15px; }
 .check-cell input { width: 18px; height: 18px; margin: 0; cursor: pointer; accent-color: #0a84ff; }
+
+/* Abgeleitete Tabellen */
+.viewdialog { width: min(560px, 94vw); max-height: 90vh; overflow: auto; }
+.vd-section { display: grid; gap: 8px; padding: 12px; border: 1px solid #e1e7ea; border-radius: 12px; }
+.vd-section h4 { margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: #667781; }
+.vd-filter { display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 6px; align-items: center; }
+.vd-filter select, .vd-filter input, .vd-section > select, .vd-agg select, .vd-agg input { min-width: 0; font: inherit; padding: 7px 8px; border: 1px solid #d5dce0; border-radius: 8px; background: #fff; }
+.vd-add { justify-self: start; }
+.vd-aggs { display: grid; gap: 6px; }
+.vd-agg { display: grid; grid-template-columns: 1fr 1fr 70px; gap: 6px; align-items: center; font-size: 14px; }
+.vd-agg > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.h-name.static { cursor: default; }
+.h-name.static:hover { background: none; color: inherit; }
+.vcell > span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 6px 0; }
+.vcell.num > span { text-align: right; padding-right: 8px; font-variant-numeric: tabular-nums; }
+.view-empty { padding: 16px; }
+
+/* Menü der gewählten Tabelle */
+.tabgroup { position: relative; }
+.tabs button.view { font-style: italic; border-style: dashed; }
+.tabs .active.view { border-style: solid; }
+.tab-caret { opacity: .8; font-size: 12px; }
+.tab-popup { position: absolute; top: calc(100% + 4px); left: 0; z-index: 20; min-width: 190px; display: grid; padding: 4px; background: #fff; border: 1px solid #d5dce0; border-radius: 10px; box-shadow: 0 8px 24px #0003; }
+.tab-popup button { border: none; background: none; text-align: left; padding: 8px 12px; border-radius: 7px; font-style: normal; color: #1f2a30; }
+.tab-popup button:hover, .tab-popup button:focus-visible { background: #eef4ff; outline: none; }
+.tab-popup .danger-item { color: #b4281c; }
+.view-bar { display: flex; align-items: center; gap: 12px; font-size: 14px; color: #667781; }
+.tabs { z-index: 5; }

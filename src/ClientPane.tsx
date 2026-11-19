@@ -2,13 +2,15 @@ import { useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent a
 import * as Y from 'yjs'
 import { IndexeddbPersistence } from 'y-indexeddb'
 import {
-  addColumn, addLink, addRow, addTable, deleteColumn, deleteRow, deleteTable, moveColumn, moveLink, moveTable, removeLink, renameColumn, renameTable, rowExists, setCell, setColumnWidth, summarize,
+  addColumn, addLink, addView, deleteView, updateView, addRow, addTable, deleteColumn, deleteRow, deleteTable, moveColumn, moveLink, moveTable, removeLink, renameColumn, renameTable, rowExists, setCell, setColumnWidth, summarize,
   type ColType, type ColumnInfo, type LinkIndex, type LinkSlot, type TableInfo,
 } from './model'
-import { useCell, useFileIndex, useLinkIndex, useRowVersion, useTables } from './useTables'
+import { useCell, useFileIndex, useLinkIndex, useRowVersion, useTabs } from './useTables'
 import { FileCell } from './FileCell'
 import { SelectCell } from './SelectCell'
 import { ColumnDialog } from './ColumnDialog'
+import { ViewDialog } from './ViewDialog'
+import { ViewGrid } from './ViewGrid'
 import { sortedRowIds, type SortDir } from './sorting'
 import { formatDate, toInputValue } from './dateFormat'
 import { CHECKBOX, DATE, FILE, NUMBER, RELATION, TEXT } from './columnTypes'
@@ -282,11 +284,26 @@ export function ClientPane(props: {
   onToggle?: () => void
 }) {
   const { doc } = props
-  const tables = useTables(doc)
+  const { tables, views, tabs } = useTabs(doc)
   const index = useLinkIndex(doc)
   const fileIndex = useFileIndex(doc)
   const [active, setActive] = useState<string | null>(null)
-  const table = tables.find((t) => t.id === active) ?? tables[0]
+  const tab = tabs.find((t) => t.id === active) ?? tabs[0]
+  const table = tab?.kind === 'table' ? tables.find((t) => t.id === tab.id) : undefined
+  const view = tab?.kind === 'view' ? views.find((v) => v.id === tab.id) : undefined
+  // Menü der gewählten Tabelle (Bearbeiten, Abgeleitete Tabelle, Löschen)
+  const [menuOpen, setMenuOpen] = useState(false)
+  useEffect(() => {
+    if (!menuOpen) return
+    const away = (e: MouseEvent) => { if (!(e.target as Element).closest('.tabgroup.menu-open')) setMenuOpen(false) }
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenuOpen(false) }
+    document.addEventListener('mousedown', away)
+    document.addEventListener('keydown', esc)
+    return () => { document.removeEventListener('mousedown', away); document.removeEventListener('keydown', esc) }
+  }, [menuOpen])
+  type ViewDialogState = { mode: 'new'; sourceId: string } | { mode: 'edit'; id: string }
+  const [viewDialog, setViewDialog] = useState<ViewDialogState | null>(null)
+  const [deletingView, setDeletingView] = useState<string | null>(null)
 
   const [synced, setSynced] = useState(false)
   useEffect(() => {
@@ -343,7 +360,7 @@ export function ClientPane(props: {
       dragReorder = null
       setHint(null)
       // Zielindex in der Liste ohne das gezogene Element
-      const ids = (kind === 'table' ? tables.map((t) => t.id) : table!.columns.map((c) => c.id)).filter((x) => x !== d.id)
+      const ids = (kind === 'table' ? tabs.map((t) => t.id) : table!.columns.map((c) => c.id)).filter((x) => x !== d.id)
       const to = ids.indexOf(id) + (side === 'after' ? 1 : 0)
       if (kind === 'table') moveTable(doc, d.id, to)
       else moveColumn(doc, table!.id, d.id, to)
@@ -440,21 +457,38 @@ export function ClientPane(props: {
       {/* Alles bis zur Tabelle scrollt gemeinsam; der Tabellenkopf bleibt oben stehen, die Leiste „+ Zeile“ unten. */}
       <div className="gridscroll">
       <nav className="tabs">
-        {tables.map((t) => (
-          <span key={t.id} className={`tabgroup ${hintClass('table', t.id)}`}>
-            <button className={t.id === table?.id ? 'active' : ''} onClick={() => setActive(t.id)}
-              title="Ziehen zum Umsortieren" {...reorderProps('table', t.id, t.name)}>{t.name}</button>
-            {t.id === table?.id && (
-              <button type="button" className="tab-menu" title="Tabelle umbenennen oder löschen"
-                onClick={() => setEditing({ kind: 'table', id: t.id })}>⋯</button>
-            )}
-          </span>
-        ))}
+        {tabs.map((t) => {
+          const current = t.id === tab?.id
+          return (
+            <span key={t.id} className={`tabgroup ${hintClass('table', t.id)}${current && menuOpen ? ' menu-open' : ''}`}>
+              <button className={`${current ? 'active' : ''}${t.kind === 'view' ? ' view' : ''}`} aria-haspopup={current ? 'menu' : undefined} aria-expanded={current ? menuOpen : undefined}
+                onClick={() => { if (current) setMenuOpen((o) => !o); else { setActive(t.id); setMenuOpen(false) } }}
+                title={current ? 'Menü öffnen – Ziehen zum Umsortieren' : 'Ziehen zum Umsortieren'}
+                {...reorderProps('table', t.id, t.name)}>{t.name}{current && <span className="tab-caret"> ▾</span>}</button>
+              {current && menuOpen && (
+                <div className="tab-popup" role="menu">
+                  <button type="button" role="menuitem" autoFocus onClick={() => {
+                    setMenuOpen(false)
+                    if (t.kind === 'table') setEditing({ kind: 'table', id: t.id }); else setViewDialog({ mode: 'edit', id: t.id })
+                  }}>Bearbeiten …</button>
+                  {t.kind === 'table' && (
+                    <button type="button" role="menuitem" onClick={() => { setMenuOpen(false); setViewDialog({ mode: 'new', sourceId: t.id }) }}>Abgeleitete Tabelle …</button>
+                  )}
+                  <button type="button" role="menuitem" className="danger-item" onClick={() => {
+                    setMenuOpen(false)
+                    if (t.kind === 'table') setDeletingItem({ kind: 'table', id: t.id }); else setDeletingView(t.id)
+                  }}>Löschen …</button>
+                </div>
+              )}
+            </span>
+          )
+        })}
         <button onClick={() => setDialog('table')}>+ Tabelle</button>
       </nav>
 
       {!synced && <p className="hint">Lade lokale Daten …</p>}
-      {synced && !table && <p className="hint">Noch keine Tabelle. Lege eine an.</p>}
+      {synced && !tab && <p className="hint">Noch keine Tabelle. Lege eine an.</p>}
+      {view && <ViewGrid key={view.id} doc={doc} view={view} />}
 
       {table && (
         <>
@@ -511,6 +545,12 @@ export function ClientPane(props: {
           <button className="add-row" onClick={() => setFocusRow(addRow(doc, table.id))}>+ Zeile</button>
         </div>
       )}
+      {view && (
+        <div className="addrow-bar view-bar">
+          <span>Abgeleitete Tabelle aus „{tables.find((t) => t.id === view.def.source)?.name ?? '?'}“ – nur Lesen.</span>
+          <button type="button" onClick={() => setViewDialog({ mode: 'edit', id: view.id })}>Bearbeiten …</button>
+        </div>
+      )}
 
       {editing && (() => {
         const col = editing.kind === 'column' ? table?.columns.find((c) => c.id === editing.id) : undefined
@@ -536,7 +576,7 @@ export function ClientPane(props: {
         if (!col && !tbl) return null
         const detail = col
           ? `Spalte „${col.name}“ mit allen Werten, Verknüpfungen und Dateien dieser Spalte.`
-          : `Tabelle „${tbl!.name}“ mit ${tbl!.rowIds.length} ${tbl!.rowIds.length === 1 ? 'Zeile' : 'Zeilen'}. Verknüpfungen darauf werden entfernt.`
+          : `Tabelle „${tbl!.name}“ mit ${tbl!.rowIds.length} ${tbl!.rowIds.length === 1 ? 'Zeile' : 'Zeilen'}. Verknüpfungen darauf werden entfernt.${views.some((v) => v.def.source === tbl!.id) ? ` Abgeleitete Tabellen daraus (${views.filter((v) => v.def.source === tbl!.id).length}) werden ebenfalls gelöscht.` : ''}`
         return (
           <ConfirmDialog detail={detail} onCancel={() => setDeletingItem(null)}
             onConfirm={() => {
@@ -544,6 +584,30 @@ export function ClientPane(props: {
               else { deleteTable(doc, tbl!.id); setActive(null) }
               setDeletingItem(null)
             }} />
+        )
+      })()}
+
+      {viewDialog && (() => {
+        const editing = viewDialog.mode === 'edit' ? views.find((v) => v.id === viewDialog.id) : undefined
+        const source = tables.find((t) => t.id === (editing ? editing.def.source : viewDialog.mode === 'new' ? viewDialog.sourceId : ''))
+        if (!source) return null
+        return (
+          <ViewDialog doc={doc} source={source} initial={editing && { name: editing.name, def: editing.def }}
+            onClose={() => setViewDialog(null)}
+            onSubmit={(name, def) => {
+              if (editing) updateView(doc, editing.id, { name, def })
+              else setActive(addView(doc, name, def))
+              setViewDialog(null)
+            }} />
+        )
+      })()}
+      {deletingView && (() => {
+        const v = views.find((x) => x.id === deletingView)
+        if (!v) return null
+        return (
+          <ConfirmDialog detail={`Abgeleitete Tabelle „${v.name}“. Die Quelltabelle und ihre Daten bleiben unverändert.`}
+            onCancel={() => setDeletingView(null)}
+            onConfirm={() => { deleteView(doc, v.id); setActive(null); setDeletingView(null) }} />
         )
       })()}
 

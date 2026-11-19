@@ -1,0 +1,149 @@
+import { useMemo, useState } from 'react'
+import * as Y from 'yjs'
+import { emptyViewDef, type ColumnInfo, type FilterOp, type TableInfo, type ViewDef, type ViewFilter } from './model'
+import { Modal } from './Modal'
+import { OPS_BY_TYPE, aggLabel, aggOf, allowedAggs, computeView, opLabel, opNeedsValue } from './viewEngine'
+
+/** Neue abgeleitete Tabelle anlegen oder eine vorhandene bearbeiten (Bedingungen, Gruppierung, Zusammenfassung je Spalte). */
+export function ViewDialog(props: {
+  doc: Y.Doc
+  source: TableInfo
+  /** Zum Bearbeiten: bisheriger Name und Definition. */
+  initial?: { name: string; def: ViewDef }
+  onSubmit: (name: string, def: ViewDef) => void
+  onClose: () => void
+}) {
+  const { doc, source } = props
+  const [name, setName] = useState(props.initial?.name ?? `${source.name} – abgeleitet`)
+  const [def, setDef] = useState<ViewDef>(props.initial?.def ?? emptyViewDef(source.id))
+  const cols = source.columns
+  const colOf = (id: string) => cols.find((c) => c.id === id)
+  const result = useMemo(() => computeView(doc, def), [doc, def])
+
+  const setFilter = (i: number, patch: Partial<ViewFilter>) =>
+    setDef((d) => ({ ...d, filters: d.filters.map((f, j) => (j === i ? { ...f, ...patch } : f)) }))
+  const addFilter = () => {
+    const c = cols[0]
+    if (!c) return
+    setDef((d) => ({ ...d, filters: [...d.filters, { col: c.id, op: OPS_BY_TYPE[c.type][0], value: '' }] }))
+  }
+  const changeFilterColumn = (i: number, colId: string) => {
+    const c = colOf(colId)!
+    const cur = def.filters[i]
+    setFilter(i, { col: colId, op: OPS_BY_TYPE[c.type].includes(cur.op) ? cur.op : OPS_BY_TYPE[c.type][0], value: '' })
+  }
+  const groupCol = def.group.mode === 'column' ? colOf(def.group.col ?? '') : undefined
+  const setAgg = (c: ColumnInfo, patch: { fn?: string; sep?: string }) =>
+    setDef((d) => {
+      const cur = aggOf(d, c)
+      return { ...d, aggs: { ...d.aggs, [c.id]: { ...cur, ...patch } as any } }
+    })
+
+  const valid = name.trim() !== '' && (def.group.mode !== 'column' || !!groupCol)
+  const submit = () => { if (valid) props.onSubmit(name.trim(), def) }
+
+  const valueInput = (f: ViewFilter, i: number, c: ColumnInfo) => {
+    if (!opNeedsValue(f.op)) return <span />
+    if (c.type === 'select') {
+      return (
+        <select value={f.value} onChange={(e) => setFilter(i, { value: e.target.value })}>
+          <option value="">Option wählen …</option>
+          {(c.options ?? []).map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+        </select>
+      )
+    }
+    return (
+      <input type={c.type === 'number' ? 'number' : c.type === 'date' ? 'date' : 'text'} step="any" value={f.value} placeholder="Wert"
+        onChange={(e) => setFilter(i, { value: e.target.value })} />
+    )
+  }
+
+  return (
+    <Modal onClose={props.onClose}>
+      <form className="dialog columndialog viewdialog" onMouseDown={(e) => e.stopPropagation()}
+        onSubmit={(e) => { e.preventDefault(); submit() }}
+        onKeyDown={(e) => e.key === 'Escape' && props.onClose()}>
+        <h3>{props.initial ? 'Abgeleitete Tabelle bearbeiten' : 'Abgeleitete Tabelle'}</h3>
+        <p className="cfg-static">Aus Tabelle: <strong>{source.name}</strong> <small>(nur Lesen, aktualisiert sich automatisch)</small></p>
+        <label className="cfg-field">
+          <span>Name</span>
+          <input autoFocus value={name} onFocus={(e) => e.target.select()} onChange={(e) => setName(e.target.value)} />
+        </label>
+
+        <section className="vd-section">
+          <h4>Bedingungen</h4>
+          {def.filters.length > 1 && (
+            <select value={def.match} onChange={(e) => setDef({ ...def, match: e.target.value as 'all' | 'any' })}>
+              <option value="all">Alle Bedingungen müssen zutreffen</option>
+              <option value="any">Mindestens eine Bedingung muss zutreffen</option>
+            </select>
+          )}
+          {def.filters.map((f, i) => {
+            const c = colOf(f.col)
+            return (
+              <div key={i} className="vd-filter">
+                <select value={f.col} onChange={(e) => changeFilterColumn(i, e.target.value)}>
+                  {!c && <option value={f.col}>(Spalte gelöscht)</option>}
+                  {cols.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+                </select>
+                {c ? (
+                  <select value={f.op} onChange={(e) => setFilter(i, { op: e.target.value as FilterOp })}>
+                    {OPS_BY_TYPE[c.type].map((op) => <option key={op} value={op}>{opLabel(c.type, op)}</option>)}
+                  </select>
+                ) : <span />}
+                {c ? valueInput(f, i, c) : <span />}
+                <button type="button" className="del" title="Bedingung entfernen"
+                  onClick={() => setDef((d) => ({ ...d, filters: d.filters.filter((_, j) => j !== i) }))}>✕</button>
+              </div>
+            )
+          })}
+          {def.filters.length === 0 && <p className="hint">Keine Bedingung: alle Zeilen der Tabelle.</p>}
+          <button type="button" className="vd-add" onClick={addFilter}>+ Bedingung</button>
+        </section>
+
+        <section className="vd-section">
+          <h4>Gruppierung</h4>
+          <select value={def.group.mode}
+            onChange={(e) => {
+              const mode = e.target.value as ViewDef['group']['mode']
+              setDef({ ...def, group: { mode, col: mode === 'column' ? def.group.col ?? cols[0]?.id : undefined } })
+            }}>
+            <option value="none">Keine (jede Zeile bleibt eine Zeile)</option>
+            <option value="column">Nach dem Wert einer Spalte</option>
+            <option value="all">Ganze Tabelle in eine Zeile</option>
+          </select>
+          {def.group.mode === 'column' && (
+            <select value={def.group.col ?? ''} onChange={(e) => setDef({ ...def, group: { mode: 'column', col: e.target.value } })}>
+              {cols.map((x) => <option key={x.id} value={x.id}>Gruppieren nach „{x.name}“</option>)}
+            </select>
+          )}
+          {def.group.mode !== 'none' && (
+            <div className="vd-aggs">
+              <p className="hint">Was soll pro Gruppe aus den übrigen Spalten werden?</p>
+              {cols.filter((c) => c !== groupCol).map((c) => {
+                const a = aggOf(def, c)
+                return (
+                  <div key={c.id} className="vd-agg">
+                    <span title={c.name}>{c.name}</span>
+                    <select value={a.fn} onChange={(e) => setAgg(c, { fn: e.target.value })}>
+                      {allowedAggs(c.type).map((fn) => <option key={fn} value={fn}>{aggLabel(c.type, fn)}</option>)}
+                    </select>
+                    {a.fn === 'concat'
+                      ? <input value={a.sep ?? ', '} maxLength={12} title="Trennzeichen" aria-label={`Trennzeichen für ${c.name}`} onChange={(e) => setAgg(c, { sep: e.target.value })} />
+                      : <span />}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </section>
+
+        <p className="cfg-static">Ergebnis: <strong>{result.rows.length}</strong> {result.rows.length === 1 ? 'Zeile' : 'Zeilen'}</p>
+        <div className="actions">
+          <button type="button" onClick={props.onClose}>Abbrechen</button>
+          <button type="submit" className="primary" disabled={!valid}>{props.initial ? 'Speichern' : 'Anlegen'}</button>
+        </div>
+      </form>
+    </Modal>
+  )
+}

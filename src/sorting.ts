@@ -5,7 +5,7 @@ import { TEXT } from './columnTypes'
 
 export type SortDir = 'asc' | 'desc'
 
-type Key = number | string | null // null = leer (steht immer am Ende)
+export type Key = number | string | null // null = leer (steht immer am Ende)
 
 const collator = new Intl.Collator('de', { numeric: true, sensitivity: 'base' })
 
@@ -44,20 +44,27 @@ export function sortKeys(doc: Y.Doc, table: TableInfo, col: ColumnInfo, tables: 
   return out
 }
 
-/** Zeilen-IDs der Tabelle, nach der Spalte sortiert. Leere Zellen stehen immer hinten, Gleiche behalten ihre Reihenfolge. */
+export const compareKeys = (a: number | string, b: number | string): number =>
+  typeof a === 'number' && typeof b === 'number' ? a - b : collator.compare(String(a), String(b))
+
+/** Ordnet IDs nach ihren Sortierwerten. Leere stehen immer hinten, Gleiche behalten ihre Reihenfolge. */
+export function orderByKeys(ids: string[], keys: Map<string, Key>, dir: SortDir): string[] {
+  const sign = dir === 'asc' ? 1 : -1
+  return ids
+    .map((id, i) => ({ id, i, k: keys.get(id) ?? null }))
+    .sort((a, b) => {
+      if (a.k === null || b.k === null) return a.k === b.k ? a.i - b.i : a.k === null ? 1 : -1
+      const c = compareKeys(a.k, b.k)
+      return c ? c * sign : a.i - b.i
+    })
+    .map((x) => x.id)
+}
+
+/** Zeilen-IDs der Tabelle, nach der Spalte sortiert. */
 export function sortedRowIds(doc: Y.Doc, tableId: string, colId: string, dir: SortDir): string[] {
   const tables = readTables(doc)
   const table = tables.find((t) => t.id === tableId)
   const col = table?.columns.find((c) => c.id === colId)
   if (!table || !col) return table?.rowIds ?? []
-  const keys = sortKeys(doc, table, col, tables)
-  const sign = dir === 'asc' ? 1 : -1
-  return table.rowIds
-    .map((id, i) => ({ id, i, k: keys.get(id) ?? null }))
-    .sort((a, b) => {
-      if (a.k === null || b.k === null) return a.k === b.k ? a.i - b.i : a.k === null ? 1 : -1
-      const c = typeof a.k === 'number' && typeof b.k === 'number' ? a.k - b.k : collator.compare(String(a.k), String(b.k))
-      return c ? c * sign : a.i - b.i
-    })
-    .map((x) => x.id)
+  return orderByKeys(table.rowIds, sortKeys(doc, table, col, tables), dir)
 }

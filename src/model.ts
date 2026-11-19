@@ -40,10 +40,29 @@ export interface TableInfo {
   rowIds: string[]
 }
 
+// ---------- Abgeleitete Tabellen (Views) ----------
+
+export type FilterOp = 'eq' | 'ne' | 'contains' | 'ncontains' | 'starts' | 'gt' | 'ge' | 'lt' | 'le' | 'empty' | 'nempty' | 'checked' | 'unchecked'
+export interface ViewFilter { col: string; op: FilterOp; value: string }
+export type AggFn = 'min' | 'max' | 'sum' | 'concat' | 'count' | 'hide'
+export interface ViewAgg { fn: AggFn; sep?: string }
+/** Definition einer abgeleiteten Tabelle: Quelle, Bedingungen (WHERE), Gruppierung und Zusammenfassung je Spalte. */
+export interface ViewDef {
+  source: string
+  match: 'all' | 'any'
+  filters: ViewFilter[]
+  group: { mode: 'none' | 'column' | 'all'; col?: string }
+  aggs: Record<string, ViewAgg>
+}
+export interface ViewInfo { id: string; name: string; def: ViewDef }
+
+export const emptyViewDef = (source: string): ViewDef => ({ source, match: 'all', filters: [], group: { mode: 'none' }, aggs: {} })
+
 export const uid = () => crypto.randomUUID().slice(0, 8)
 
 export const tablesOf = (doc: Y.Doc) => doc.getMap<Y.Map<any>>('tables')
-const tableOrderOf = (doc: Y.Doc) => doc.getArray<string>('tableOrder')
+export const viewsOf = (doc: Y.Doc) => doc.getMap<Y.Map<any>>('views')
+export const tableOrderOf = (doc: Y.Doc) => doc.getArray<string>('tableOrder')
 
 /**
  * Legt eine Tabelle an. Sie enthält sofort die Textspalte „Name“ (dient auch als Titel der Kacheln)
@@ -151,6 +170,66 @@ export function readTables(doc: Y.Doc): TableInfo[] {
   for (const tid of tableOrderOf(doc).toArray()) if (!rank.has(tid)) rank.set(tid, rank.size)
   out.sort((a, b) => (rank.get(a.id) ?? Infinity) - (rank.get(b.id) ?? Infinity) || a.id.localeCompare(b.id))
   return out
+}
+
+export function readViews(doc: Y.Doc): ViewInfo[] {
+  const out: ViewInfo[] = []
+  viewsOf(doc).forEach((v, id) => {
+    const raw = (v.get('def') ?? {}) as Partial<ViewDef>
+    const def: ViewDef = {
+      source: raw.source ?? '',
+      match: raw.match === 'any' ? 'any' : 'all',
+      filters: Array.isArray(raw.filters) ? raw.filters : [],
+      group: raw.group && ['none', 'column', 'all'].includes(raw.group.mode) ? raw.group : { mode: 'none' },
+      aggs: raw.aggs && typeof raw.aggs === 'object' ? raw.aggs : {},
+    }
+    out.push({ id, name: (v.get('name') as string) ?? '', def })
+  })
+  return out
+}
+
+export interface TabInfo { kind: 'table' | 'view'; id: string; name: string }
+
+/** Tabellen und abgeleitete Tabellen in der Reihenfolge der Kopfzeile. */
+export function readTabs(doc: Y.Doc): TabInfo[] {
+  const tabs: TabInfo[] = [
+    ...readTables(doc).map((t) => ({ kind: 'table' as const, id: t.id, name: t.name })),
+    ...readViews(doc).map((v) => ({ kind: 'view' as const, id: v.id, name: v.name })),
+  ]
+  const rank = new Map<string, number>()
+  for (const id of tableOrderOf(doc).toArray()) if (!rank.has(id)) rank.set(id, rank.size)
+  return tabs.sort((a, b) => (rank.get(a.id) ?? Infinity) - (rank.get(b.id) ?? Infinity) || a.id.localeCompare(b.id))
+}
+
+export function addView(doc: Y.Doc, name: string, def: ViewDef): string {
+  const id = uid()
+  doc.transact(() => {
+    const v = new Y.Map<any>()
+    v.set('name', name)
+    v.set('def', def)
+    viewsOf(doc).set(id, v)
+    tableOrderOf(doc).push([id])
+  })
+  return id
+}
+
+/** Ersetzt Name und/oder Definition (die Definition als Ganzes: bei gleichzeitigen Änderungen gewinnt eine). */
+export function updateView(doc: Y.Doc, id: string, patch: { name?: string; def?: ViewDef }) {
+  const v = viewsOf(doc).get(id)
+  if (!v) return
+  doc.transact(() => {
+    if (patch.name !== undefined) v.set('name', patch.name)
+    if (patch.def !== undefined) v.set('def', patch.def)
+  })
+}
+
+export function deleteView(doc: Y.Doc, id: string) {
+  doc.transact(() => {
+    viewsOf(doc).delete(id)
+    const order = tableOrderOf(doc)
+    const arr = order.toArray()
+    for (let i = arr.length - 1; i >= 0; i--) if (arr[i] === id) order.delete(i, 1)
+  })
 }
 
 // ---------- Relationen ----------
@@ -343,6 +422,7 @@ export function deleteTable(doc: Y.Doc, tableId: string) {
     const rowIds = new Set<string>(t.get('rows').keys())
     purgeRefs(doc, (tt, _r, _c, x) => tt === tableId || rowIds.has(x))
     tablesOf(doc).delete(tableId)
+    for (const v of readViews(doc)) if (v.def.source === tableId) deleteView(doc, v.id) // abgeleitete Tabellen ohne Quelle sind sinnlos
     const order = tableOrderOf(doc)
     const arr = order.toArray()
     for (let i = arr.length - 1; i >= 0; i--) if (arr[i] === tableId) order.delete(i, 1)
@@ -365,7 +445,7 @@ function reorder(ids: string[], id: string, toIndex: number): string[] | null {
 
 /** `toIndex` zählt in der Liste ohne die verschobene Tabelle. */
 export function moveTable(doc: Y.Doc, tableId: string, toIndex: number) {
-  const next = reorder(readTables(doc).map((t) => t.id), tableId, toIndex)
+  const next = reorder(readTabs(doc).map((t) => t.id), tableId, toIndex)
   if (next) doc.transact(() => rewriteOrder(tableOrderOf(doc), next))
 }
 
