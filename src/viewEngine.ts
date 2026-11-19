@@ -4,7 +4,7 @@
  */
 import * as Y from 'yjs'
 import { readTables, type ColType, type ColumnInfo, type FilterOp, type TableInfo, type ViewAgg, type ViewDef } from './model'
-import { columnCells, summarizeGroup, type Cell, type Key } from './cells'
+import { columnCells, newCtx, summarizeGroup, type Cell, type Key } from './cells'
 import { aggLabel, allowedAggs, defaultAgg } from './aggregate'
 import { effectiveType } from './columnTypes'
 
@@ -20,7 +20,8 @@ export const OPS_BY_TYPE: Record<ColType, FilterOp[]> = {
   checkbox: ['checked', 'unchecked'],
   relation: ['contains', 'ncontains', 'empty', 'nempty'],
   file: ['contains', 'ncontains', 'empty', 'nempty'],
-  rollup: [], // Rollup-Spalten zählen mit ihrem effektiven Typ (effectiveType)
+  rollup: [], // berechnete Spalten zählen mit ihrem effektiven Typ (effectiveType)
+  formula: [],
 }
 
 export const opNeedsValue = (op: FilterOp) => !['empty', 'nempty', 'checked', 'unchecked'].includes(op)
@@ -93,7 +94,8 @@ export function computeView(doc: Y.Doc, def: ViewDef): ViewResult {
   const table = tables.find((t) => t.id === def.source)
   if (!table) return { missing: true, sourceName: '', columns: [], rows: [], matched: 0 }
   const cells = new Map<string, Map<string, Cell>>()
-  for (const c of table.columns) cells.set(c.id, columnCells(doc, tables, table, c))
+  const ctx = newCtx()
+  for (const c of table.columns) cells.set(c.id, columnCells(doc, tables, table, c, ctx))
 
   // Bedingungen: unvollständige (ohne Wert) und solche auf gelöschte Spalten werden ignoriert
   const active = def.filters.flatMap((f) => {

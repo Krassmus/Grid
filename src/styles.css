@@ -293,3 +293,13 @@ textarea.cell { resize: none; line-height: 1.35; overflow: hidden; display: bloc
 .foot-popup button { border: none; background: none; text-align: left; padding: 7px 12px; border-radius: 7px; color: #1f2a30; }
 .foot-popup button:hover, .foot-popup button:focus-visible { background: #eef4ff; outline: none; }
 .foot-popup button.on { font-weight: 600; color: #0a84ff; }
+
+/* Formel-Spalten */
+.formula-input { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 14px; }
+.formula-error { margin: 0; padding: 8px 10px; border-radius: 8px; background: #fdecea; color: #8a2a20; font-size: 13px; }
+.formula-help { margin: 0; font-size: 12px; line-height: 1.5; max-width: none; }
+.formula-help code { background: #eef1f3; padding: 1px 5px; border-radius: 4px; }
+.formula-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.formula-chips button { padding: 3px 9px; font-size: 13px; border-radius: 999px; }
+.formula-chips button.path { border-style: dashed; }
+.vcell.err > span { color: #b4281c; font-weight: 600; cursor: help; }

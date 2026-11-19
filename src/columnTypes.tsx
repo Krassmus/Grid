@@ -4,6 +4,8 @@ import type { AggFn, ColType, ColumnInfo, TableInfo } from './model'
 import { DATE_STYLES, type DateStyle } from './dateFormat'
 import { Pill } from './SelectCell'
 import { aggLabel, allowedAggs } from './aggregate'
+import { FormulaEditor } from './FormulaEditor'
+import { FormulaSyntaxError, inferType, parseFormula } from './formula'
 
 /** Was ein Konfigurationseditor braucht, um die Einstellungen einer Spalte anzuzeigen und zu ändern. */
 export interface ConfigContext<C> {
@@ -236,6 +238,15 @@ class RollupColumn extends ColumnType<RollupConfig> {
   }
 }
 
+/** Formel: berechnet den Wert je Zeile aus anderen Spalten (siehe formula.ts). Der Wert wird nie gespeichert. */
+export interface FormulaConfig { expr: string; decimals: number; unit: string }
+class FormulaColumn extends ColumnType<FormulaConfig> {
+  readonly type = 'formula'
+  readonly label = 'Formel'
+  readonly defaults: FormulaConfig = { expr: '', decimals: -1, unit: '' }
+  renderConfig(ctx: ConfigContext<FormulaConfig>) { return <FormulaEditor {...ctx} /> }
+}
+
 export const TEXT = new TextColumn()
 export const NUMBER = new NumberColumn()
 export const RELATION = new RelationColumn()
@@ -244,8 +255,9 @@ export const SELECT = new SelectColumn()
 export const DATE = new DateColumn()
 export const CHECKBOX = new CheckboxColumn()
 export const ROLLUP = new RollupColumn()
+export const FORMULA = new FormulaColumn()
 
-const REGISTRY: Record<ColType, ColumnType<any>> = { text: TEXT, number: NUMBER, relation: RELATION, file: FILE, select: SELECT, date: DATE, checkbox: CHECKBOX, rollup: ROLLUP }
+const REGISTRY: Record<ColType, ColumnType<any>> = { text: TEXT, number: NUMBER, relation: RELATION, file: FILE, select: SELECT, date: DATE, checkbox: CHECKBOX, rollup: ROLLUP, formula: FORMULA }
 export const columnTypeOf = (type: ColType): ColumnType<any> => REGISTRY[type]
 
 /**
@@ -253,6 +265,7 @@ export const columnTypeOf = (type: ColType): ColumnType<any> => REGISTRY[type]
  * Rollup: Summe und Anzahl sind Zahlen, Minimum/Maximum behalten Zahl oder Datum, alles andere ist Text.
  */
 export function effectiveType(col: ColumnInfo, tables: TableInfo[], depth = 0): ColType {
+  if (col.type === 'formula') return formulaType(col, tables, depth)
   if (col.type !== 'rollup') return col.type
   if (depth > 4) return 'text'
   const cfg = ROLLUP.config(col)
@@ -266,4 +279,23 @@ export function effectiveType(col: ColumnInfo, tables: TableInfo[], depth = 0): 
     return t === 'number' || t === 'date' ? t : 'text'
   }
   return 'text'
+}
+
+/** Typ einer Formel-Spalte aus dem Ausdruck (ohne auszuwerten): Rechnen → Zahl, Vergleiche → Kästchen, sonst Text. */
+function formulaType(col: ColumnInfo, tables: TableInfo[], depth: number): ColType {
+  if (depth > 4) return 'text'
+  let ast
+  try { ast = parseFormula(FORMULA.config(col).expr) } catch (e) { if (e instanceof FormulaSyntaxError) return 'text'; throw e }
+  const own = tables.find((t) => t.columns.some((c) => c.id === col.id))
+  if (!own) return 'text'
+  const norm = (s: string) => s.trim().toLowerCase()
+  return inferType(ast, (parts) => {
+    let cur: TableInfo | undefined = own
+    for (const part of parts.slice(0, -1)) {
+      const rel: ColumnInfo | undefined = cur?.columns.find((c) => norm(c.name) === norm(part) && c.type === 'relation')
+      cur = tables.find((t) => t.id === rel?.target)
+    }
+    const c = cur?.columns.find((x) => norm(x.name) === norm(parts[parts.length - 1]))
+    return !c || c.id === col.id ? undefined : effectiveType(c, tables, depth + 1)
+  })
 }

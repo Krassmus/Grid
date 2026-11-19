@@ -10,7 +10,8 @@ import { FileCell } from './FileCell'
 import { SelectCell } from './SelectCell'
 import { ColumnDialog } from './ColumnDialog'
 import { FooterCell } from './Footer'
-import { columnCells, type Cell as CellData } from './cells'
+import { columnCells, newCtx, type Cell as CellData } from './cells'
+import { FormulaSyntaxError, parseFormula } from './formula'
 import { effectiveType } from './columnTypes'
 import { ViewDialog } from './ViewDialog'
 import { ViewGrid } from './ViewGrid'
@@ -409,7 +410,8 @@ export function ClientPane(props: {
   const cellData = useMemo(() => {
     const m = new Map<string, Map<string, CellData>>()
     if (!table) return m
-    for (const c of table.columns) if (c.type === 'rollup' || c.footer) m.set(c.id, columnCells(doc, tables, table, c))
+    const ctx = newCtx() // gemeinsamer Zwischenspeicher: jede Spalte (auch von Formeln benutzte) wird nur einmal berechnet
+    for (const c of table.columns) if (c.type === 'rollup' || c.type === 'formula' || c.footer) m.set(c.id, columnCells(doc, tables, table, c, ctx))
     return m
     // `index` (Verknüpfungen) und `tables` (Werte, Struktur) decken alle Änderungen ab, die das Ergebnis beeinflussen
   }, [doc, tables, table?.id, index])
@@ -449,7 +451,7 @@ export function ClientPane(props: {
   const template = table
     ? [
         ...table.columns.map((c, i) =>
-          liveWidth?.id === c.id ? `${liveWidth.w}px` : c.width ? `${c.width}px` : i === 0 ? '200px' : c.type === 'relation' || c.type === 'file' ? '240px' : c.type === 'number' ? '120px' : c.type === 'date' ? '170px' : c.type === 'checkbox' ? '110px' : c.type === 'rollup' ? '150px' : c.type === 'select' ? '160px' : '180px'),
+          liveWidth?.id === c.id ? `${liveWidth.w}px` : c.width ? `${c.width}px` : i === 0 ? '200px' : c.type === 'relation' || c.type === 'file' ? '240px' : c.type === 'number' ? '120px' : c.type === 'date' ? '170px' : c.type === 'checkbox' ? '110px' : c.type === 'rollup' || c.type === 'formula' ? '150px' : c.type === 'select' ? '160px' : '180px'),
         ...backlinks.map(() => '220px'),
         'minmax(120px, 1fr)',
       ].join(' ')
@@ -534,10 +536,15 @@ export function ClientPane(props: {
                 <div key={rid} className="row-outer" data-row={rid}>
                   <div className="row-inner">
                     {table.columns.map((c, i) =>
-                      c.type === 'rollup'
-                        ? <div key={c.id} className={`c vcell${effectiveType(c, tables) === 'number' ? ' num' : ''}`}>
-                            <span title={cellData.get(c.id)?.get(rid)?.text}>{cellData.get(c.id)?.get(rid)?.text}</span>
-                          </div>
+                      c.type === 'rollup' || c.type === 'formula'
+                        ? (() => {
+                            const cell = cellData.get(c.id)?.get(rid)
+                            return (
+                              <div key={c.id} className={`c vcell${cell?.error ? ' err' : ''}`}>
+                                <span title={cell?.error ?? cell?.text}>{cell?.text}</span>
+                              </div>
+                            )
+                          })()
                         : c.type === 'relation'
                         ? <RelationCell key={c.id} doc={doc} tables={tables} table={table} rowId={rid} col={c} index={index} />
                         : c.type === 'file'
@@ -679,8 +686,18 @@ function Dialog(props: {
   const rfns: AggFn[] = rcolInfo ? allowedAggs(effectiveType(rcolInfo, props.tables)).filter((f) => f !== 'hide') : []
   const [fn, setFn] = useState<AggFn>('sum')
   const rollupReady = !!rcolInfo && rfns.includes(fn)
+  const [expr, setExpr] = useState('')
+  const exprError = (() => {
+    if (!expr.trim()) return null
+    try { parseFormula(expr); return null } catch (e) { return e instanceof FormulaSyntaxError ? e.message : String(e) }
+  })()
   const submit = () => {
     if (!name.trim()) return
+    if (type === 'formula') {
+      if (!expr.trim() || exprError) return
+      props.onSubmit({ name: name.trim(), type, config: { expr: expr.trim() } })
+      return
+    }
     if (type === 'rollup') {
       if (!rollupReady) return
       props.onSubmit({ name: name.trim(), type, config: { rel, col: rcol, fn } })
@@ -705,6 +722,7 @@ function Dialog(props: {
             <option value="select">Auswahl (z. B. Status)</option>
             <option value="date">Datum</option>
             <option value="checkbox">Checkbox</option>
+            <option value="formula">Formel (Berechnung aus anderen Spalten)</option>
             <option value="rollup" disabled={!props.table || relations.length === 0}>Rollup (Summe u. a. über verknüpfte Zeilen)</option>
           </select>
         )}
@@ -712,6 +730,13 @@ function Dialog(props: {
           <select value={target} onChange={(e) => setTarget(e.target.value)}>
             {props.tables.map((t) => <option key={t.id} value={t.id}>auf Tabelle „{t.name}“</option>)}
           </select>
+        )}
+        {props.withType && type === 'formula' && (
+          <>
+            <textarea rows={3} spellCheck={false} className="formula-input" placeholder={'z. B. [Führer] + [Unterführer] + [Helfer]\noder SUMME(Gruppen.Führer)'}
+              value={expr} onChange={(e) => setExpr(e.target.value)} />
+            {exprError && <p className="formula-error" role="alert">{exprError}</p>}
+          </>
         )}
         {props.withType && type === 'rollup' && (
           <>
@@ -738,7 +763,7 @@ function Dialog(props: {
         )}
         <div className="actions">
           <button type="button" onClick={props.onClose}>Abbrechen</button>
-          <button type="submit" className="primary" disabled={!name.trim() || (type === 'rollup' && !rollupReady)}>Anlegen</button>
+          <button type="submit" className="primary" disabled={!name.trim() || (type === 'rollup' && !rollupReady) || (type === 'formula' && (!expr.trim() || !!exprError))}>Anlegen</button>
         </div>
       </form>
     </Modal>
