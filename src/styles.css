@@ -276,8 +276,8 @@ textarea.cell { resize: none; line-height: 1.35; overflow: hidden; display: bloc
 .view-bar { display: flex; align-items: center; gap: 12px; font-size: 14px; color: #667781; }
 .tabs { z-index: 5; }
 
-/* Summenzeile: bleibt beim Scrollen am unteren Rand des Tabellenbereichs */
-.grid-foot { position: sticky; bottom: 0; z-index: 2; background: #f9faf8; border-top: 1px solid #e1e7ea; border-radius: 0 0 15px 15px; }
+/* Summenzeile: gehört zur Tabelle und scrollt mit */
+.grid-foot { background: #f9faf8; border-top: 1px solid #e1e7ea; border-radius: 0 0 15px 15px; }
 .grid-foot .row-inner { align-items: center; }
 .foot-cell { position: relative; padding-top: 0; padding-bottom: 0; }
 .foot-btn { all: unset; box-sizing: border-box; cursor: pointer; flex: 1 1 0; min-width: 0; padding: 9px 8px; margin: 0 -8px; font-size: 13px; color: #4b5a62; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-radius: 6px; }
