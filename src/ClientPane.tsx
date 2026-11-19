@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent as ReactMouseEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent as ReactMouseEvent } from 'react'
 import * as Y from 'yjs'
 import { IndexeddbPersistence } from 'y-indexeddb'
 import {
-  addColumn, addLink, addView, deleteView, updateView, addRow, addTable, deleteColumn, deleteRow, deleteTable, moveColumn, moveLink, moveTable, removeLink, renameColumn, renameTable, rowExists, setCell, setColumnWidth, summarize,
+  addColumn, addLink, addView, deleteView, updateView, addRow, addTable, deleteColumn, deleteRow, deleteTable, moveColumn, moveLink, moveTable, removeLink, renameColumn, rowExists, setCell, setColumnWidth, summarize,
   type AggFn, type ColType, type ColumnInfo, type LinkIndex, type LinkSlot, type TableInfo,
 } from './model'
 import { useCell, useFileIndex, useLinkIndex, useRowVersion, useTabs } from './useTables'
@@ -10,6 +10,8 @@ import { FileCell } from './FileCell'
 import { SelectCell } from './SelectCell'
 import { ColumnDialog } from './ColumnDialog'
 import { FooterCell } from './Footer'
+import { ReprContext, TileContent, tileClasses, useReprs } from './ReprTile'
+import { initials, reprMap, type Repr } from './repr'
 import { columnCells, newCtx, type Cell as CellData } from './cells'
 import { FormulaSyntaxError, parseFormula } from './formula'
 import { effectiveType } from './columnTypes'
@@ -21,7 +23,8 @@ import { formatDate, toInputValue } from './dateFormat'
 import { CHECKBOX, DATE, FILE, ROLLUP, NUMBER, RELATION, TEXT } from './columnTypes'
 import { RichPreview, RichTextDialog } from './richText'
 import { AnimItem, useAnimatedList } from './animatedList'
-import { ConfirmDialog, Modal, RenameDialog } from './Modal'
+import { ConfirmDialog, Modal } from './Modal'
+import { TableDialog } from './TableDialog'
 
 // ---------- Kacheln ----------
 
@@ -33,9 +36,6 @@ let dragging: DragInfo | null = null
 type ReorderKind = 'table' | 'column'
 let dragReorder: { kind: ReorderKind; id: string } | null = null
 type DropHint = { kind: ReorderKind; id: string; side: 'before' | 'after' }
-
-const initials = (t: string) =>
-  t.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join('')
 
 function Tile(props: {
   doc: Y.Doc
@@ -51,9 +51,12 @@ function Tile(props: {
   const [isDragging, setIsDragging] = useState(false)
   useRowVersion(doc, table?.id ?? '', rowId)
   const exists = !!table && rowExists(doc, table.id, rowId)
-  const s = exists ? summarize(doc, table!, rowId) : null
+  const reprs = useReprs()
+  const fromRepr = exists ? reprs(table!.id)?.get(rowId) : undefined
+  const fallback = exists && !fromRepr ? summarize(doc, table!, rowId) : null // z. B. Tabelle ohne vorberechnete Darstellung
+  const s = fromRepr ?? (fallback ? { ...fallback, avatar: { text: initials(fallback.title) }, avatarInCells: false, subInCells: false } : null)
   return (
-    <div className={`tile ${exists ? '' : 'deleted'} ${props.onClick ? 'clickable' : ''} ${props.muted ? 'muted' : ''} ${isDragging ? 'dragging' : ''}`}
+    <div className={`tile ${tileClasses(s)} ${exists ? '' : 'deleted'} ${props.onClick ? 'clickable' : ''} ${props.muted ? 'muted' : ''} ${isDragging ? 'dragging' : ''}`}
       onClick={props.onClick}
       draggable={!!props.drag}
       onDragStart={props.drag ? (e) => {
@@ -63,11 +66,7 @@ function Tile(props: {
         setIsDragging(true)
       } : undefined}
       onDragEnd={props.drag ? () => { dragging = null; setIsDragging(false) } : undefined}>
-      {s && <div className="avatar">{initials(s.title)}</div>}
-      <div className="tile-body">
-        <div className="tile-title">{s ? s.title : 'gelöscht'}</div>
-        {s?.subs.map((x, i) => <div key={i} className="tile-sub">{x}</div>)}
-      </div>
+      {s ? <TileContent repr={s} /> : <div className="tile-body"><div className="tile-title">gelöscht</div></div>}
       {props.onRemove && (
         <button type="button" className="tile-x" title="Verknüpfung entfernen"
           onClick={(e) => { e.stopPropagation(); props.onRemove!() }}>✕</button>
@@ -84,10 +83,11 @@ function Picker(props: {
   onClose: () => void
 }) {
   const [q, setQ] = useState('')
+  const reprs = useReprs()
   const rows = props.target.rowIds
     .filter((id) => !props.linked.includes(id))
     .filter((id) => {
-      const s = summarize(props.doc, props.target, id)
+      const s = reprs(props.target.id)?.get(id) ?? summarize(props.doc, props.target, id)
       return [s.title, ...s.subs].join(' ').toLowerCase().includes(q.toLowerCase())
     })
   return (
@@ -407,14 +407,21 @@ export function ClientPane(props: {
   )
 
   // Berechnete Spalten (Rollup) und Spalten mit Summenzeile: je Spalte einmal für alle Zeilen ausgewertet
-  const cellData = useMemo(() => {
+  const { cellData, reprs } = useMemo(() => {
     const m = new Map<string, Map<string, CellData>>()
-    if (!table) return m
+    const r = new Map<string, Map<string, Repr>>()
+    if (!table) return { cellData: m, reprs: r }
     const ctx = newCtx() // gemeinsamer Zwischenspeicher: jede Spalte (auch von Formeln benutzte) wird nur einmal berechnet
     for (const c of table.columns) if (c.type === 'rollup' || c.type === 'formula' || c.footer) m.set(c.id, columnCells(doc, tables, table, c, ctx))
-    return m
-    // `index` (Verknüpfungen) und `tables` (Werte, Struktur) decken alle Änderungen ab, die das Ergebnis beeinflussen
-  }, [doc, tables, table?.id, index])
+    // Darstellung der Zeilen für alles, was hier als Kachel erscheint: Ziele der Relationen, Quellen der Rückverweise, die Tabelle selbst
+    const wanted = new Set<string>([table.id])
+    for (const c of table.columns) if (c.type === 'relation' && c.target) wanted.add(c.target)
+    for (const t of tables) if (t.columns.some((c) => c.type === 'relation' && c.target === table.id)) wanted.add(t.id)
+    for (const t of tables) if (wanted.has(t.id)) r.set(t.id, reprMap(doc, tables, t, ctx))
+    return { cellData: m, reprs: r }
+    // `index` (Verknüpfungen), `fileIndex` (Bilder) und `tables` (Werte, Struktur) decken alle Änderungen ab, die das Ergebnis beeinflussen
+  }, [doc, tables, table?.id, index, fileIndex])
+  const reprOf = useCallback((id: string) => reprs.get(id), [reprs])
 
   // Nach „+ Zeile“: zur neuen Zeile scrollen und ihre erste Zelle fokussieren
   const [focusRow, setFocusRow] = useState<string | null>(null)
@@ -448,9 +455,10 @@ export function ClientPane(props: {
     document.addEventListener('mouseup', up)
   }
 
+  const shownColumns = table ? table.columns.filter((c) => !c.hidden) : [] // ausgeblendete Spalten bleiben für Formeln und Darstellung nutzbar
   const template = table
     ? [
-        ...table.columns.map((c, i) =>
+        ...shownColumns.map((c, i) =>
           liveWidth?.id === c.id ? `${liveWidth.w}px` : c.width ? `${c.width}px` : i === 0 ? '200px' : c.type === 'relation' || c.type === 'file' ? '240px' : c.type === 'number' ? '120px' : c.type === 'date' ? '170px' : c.type === 'checkbox' ? '110px' : c.type === 'rollup' || c.type === 'formula' ? '150px' : c.type === 'select' ? '160px' : '180px'),
         ...backlinks.map(() => '220px'),
         'minmax(120px, 1fr)',
@@ -458,6 +466,7 @@ export function ClientPane(props: {
     : ''
 
   return (
+    <ReprContext.Provider value={reprOf}>
     <section ref={sectionRef} className={`pane ${props.online === false ? 'offline' : ''}`}>
       {/* Titel und Online-Schalter nur im Simulationsmodus (mehrere Clients) */}
       {props.onToggle && (
@@ -512,7 +521,7 @@ export function ClientPane(props: {
             onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) { editingInGrid.current = false; setSortTick((n) => n + 1) } }}>
             <div className="grid" style={{ ['--cols' as any]: template }}>
               <div className="grid-head">
-                {table.columns.map((c) => (
+                {shownColumns.map((c) => (
                   <div key={c.id} className={`h reorderable ${hintClass('column', c.id)}`} {...reorderProps('column', c.id, c.name)}>
                     <button type="button" className="h-name" title="Spalte konfigurieren"
                       onClick={() => setEditing({ kind: 'column', id: c.id })}>{c.name}</button>
@@ -535,7 +544,7 @@ export function ClientPane(props: {
               {rowIds.map((rid) => (
                 <div key={rid} className="row-outer" data-row={rid}>
                   <div className="row-inner">
-                    {table.columns.map((c, i) =>
+                    {shownColumns.map((c, i) =>
                       c.type === 'rollup' || c.type === 'formula'
                         ? (() => {
                             const cell = cellData.get(c.id)?.get(rid)
@@ -561,7 +570,7 @@ export function ClientPane(props: {
               ))}
               <div className="grid-foot">
                 <div className="row-inner">
-                  {table.columns.map((c) => (
+                  {shownColumns.map((c) => (
                     <FooterCell key={c.id} doc={doc} tableId={table.id} col={c} tables={tables} cells={cellData.get(c.id)} />
                   ))}
                   {backlinks.map(({ col }) => <div key={col.id} className="c" />)}
@@ -596,9 +605,8 @@ export function ClientPane(props: {
           )
         }
         return (
-          <RenameDialog title="Tabelle" name={tbl!.name}
+          <TableDialog doc={doc} table={tbl!} tables={tables}
             onClose={() => setEditing(null)}
-            onSave={(n) => renameTable(doc, tbl!.id, n)}
             onDelete={() => { setDeletingItem(editing); setEditing(null) }} />
         )
       })()}
@@ -660,6 +668,7 @@ export function ClientPane(props: {
           onSubmit={(f) => { addColumn(doc, table.id, f.name, f.type, f.target, f.options, f.config); setDialog(null) }} />
       )}
     </section>
+    </ReprContext.Provider>
   )
 }
 

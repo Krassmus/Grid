@@ -14,7 +14,7 @@ const fmtSize = (n: number) =>
 const ext = (name: string) => (name.includes('.') ? name.split('.').pop()!.slice(0, 4).toUpperCase() : 'DATEI')
 
 /** Lädt den ersten vorhandenen Blob aus `keys` und liefert eine Object-URL (wird beim Aufräumen freigegeben). */
-function useBlobUrl(keys: string[]): { url: string | null; missing: boolean } {
+export function useBlobUrl(keys: string[]): { url: string | null; missing: boolean } {
   const [state, setState] = useState<{ url: string | null; missing: boolean }>({ url: null, missing: false })
   const dep = keys.join('|')
   useEffect(() => {

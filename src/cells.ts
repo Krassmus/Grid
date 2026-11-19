@@ -3,7 +3,8 @@
  * abgeleitete Tabellen, Rollup-Spalten und die Summenzeile. Berechnete Werte (Rollup) werden hier erzeugt und nie gespeichert.
  */
 import * as Y from 'yjs'
-import { buildFileIndex, buildLinkIndex, summarize, tablesOf, type ColumnInfo, type TableInfo, type ViewAgg } from './model'
+import { reprMap } from './repr'
+import { buildFileIndex, buildLinkIndex, tablesOf, type ColumnInfo, type TableInfo, type ViewAgg } from './model'
 import { formatDate } from './dateFormat'
 import { plainText } from './richText'
 import { DATE, FORMULA, NUMBER, ROLLUP, TEXT, effectiveType } from './columnTypes'
@@ -29,7 +30,10 @@ const EMPTY: Cell = { raw: null, text: '', key: null }
 export interface CellCtx {
   cache: Map<string, Map<string, Cell>>
   links?: Map<string, string[]>
-  files?: Map<string, { name: string }[]>
+  files?: Map<string, { name: string; mime?: string; hash?: string }[]>
+  /** Darstellung der Zeilen je Tabelle (repr.ts) */
+  reprs?: Map<string, Map<string, import('./repr').Repr>>
+  reprBusy?: Set<string>
 }
 export const newCtx = (): CellCtx => ({ cache: new Map() })
 const MAX_DEPTH = 12
@@ -58,7 +62,7 @@ function inRowOrder(ids: string[], target: TableInfo): string[] {
 }
 
 function linkIndex(doc: Y.Doc, ctx: CellCtx) { return (ctx.links ??= buildLinkIndex(doc).forward) }
-function fileIndex(doc: Y.Doc, ctx: CellCtx) { return (ctx.files ??= buildFileIndex(doc)) }
+export function fileIndex(doc: Y.Doc, ctx: CellCtx) { return (ctx.files ??= buildFileIndex(doc)) }
 
 function rollupCells(doc: Y.Doc, tables: TableInfo[], table: TableInfo, col: ColumnInfo, ctx: CellCtx, stack: string[]): Map<string, Cell> {
   const out = new Map<string, Cell>()
@@ -106,7 +110,7 @@ function plainCells(doc: Y.Doc, tables: TableInfo[], table: TableInfo, col: Colu
       }
       case 'checkbox': text = raw ? '✓' : ''; key = raw ? 1 : 0; break // nicht angehakt zählt als 0, nie als leer
       case 'relation': {
-        const titles = (links?.get(`${rid}|${col.id}`) ?? []).map((x) => (target ? summarize(doc, target, x).title : ''))
+        const titles = (links?.get(`${rid}|${col.id}`) ?? []).map((x) => (target ? reprMap(doc, tables, target, ctx).get(x)?.title ?? '' : ''))
         text = titles.filter(Boolean).join(', ')
         key = titles[0] || null
         break
@@ -242,7 +246,7 @@ function formulaCells(doc: Y.Doc, tables: TableInfo[], table: TableInfo, col: Co
         const lastTable = finalTable
         if (lastTable) ids = inRowOrder(ids, lastTable)
         // Relationsspalte allein: die verknüpften Zeilen selbst (Titel), sonst die Werte der gewählten Spalte
-        return ids.map((id) => (cells ? valueOf(r.col, cells.get(id)) : finalTable ? summarize(doc, finalTable, id).title : null))
+        return ids.map((id) => (cells ? valueOf(r.col, cells.get(id)) : finalTable ? reprMap(doc, tables, finalTable, ctx).get(id)?.title ?? null : null))
       }
     }
     const g = scalar(n)

@@ -117,8 +117,8 @@ export function computeView(doc: Y.Doc, def: ViewDef): ViewResult {
   if (def.group.mode === 'none' || (def.group.mode === 'column' && !groupCol)) {
     return {
       ...base,
-      columns: table.columns.map((c) => ({ id: c.id, name: c.name, type: effectiveType(c, tables), width: c.width })),
-      rows: ids.map((rid) => ({ id: rid, cells: Object.fromEntries(table.columns.map((c) => [c.id, cellOf(c, rid)])) })),
+      columns: table.columns.filter((c) => !c.hidden).map((c) => ({ id: c.id, name: c.name, type: effectiveType(c, tables), width: c.width })),
+      rows: ids.map((rid) => ({ id: rid, cells: Object.fromEntries(table.columns.filter((c) => !c.hidden).map((c) => [c.id, cellOf(c, rid)])) })),
     }
   }
 
@@ -130,7 +130,7 @@ export function computeView(doc: Y.Doc, def: ViewDef): ViewResult {
     if (g) g.push(rid); else groups.set(k, [rid])
   } else groups.set('', ids)
 
-  const shown = table.columns.filter((c) => c === groupCol || aggOf(def, c, tables).fn !== 'hide')
+  const shown = table.columns.filter((c) => c === groupCol || (!c.hidden && aggOf(def, c, tables).fn !== 'hide'))
   const columns: ViewColumn[] = shown.map((c) => {
     const ct = effectiveType(c, tables)
     if (c === groupCol) return { id: c.id, name: c.name, type: ct, width: c.width }

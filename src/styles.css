@@ -90,7 +90,6 @@ button.primary:disabled { opacity: .4; cursor: default; }
 .tile-x { border: none; background: none; padding: 0 2px; color: #bbb; font-size: 12px; opacity: 0; }
 .tile:hover .tile-x { opacity: 1; }
 .avatar { flex: none; width: 28px; height: 28px; border-radius: 8px; background: #e9e0d4; color: #6b5a43; font-size: 11px; font-weight: 600; display: grid; place-items: center; }
-.c .avatar, .c .tile-sub { display: none; }
 .c .tile { padding: 5px 12px; border-radius: 8px; }
 .add-tile { width: 30px; height: 30px; border-radius: 8px; border-style: dashed; color: #6e6e73; padding: 0; background: #fff; }
 .add-tile:disabled { opacity: .4; }
@@ -303,3 +302,14 @@ textarea.cell { resize: none; line-height: 1.35; overflow: hidden; display: bloc
 .formula-chips button { padding: 3px 9px; font-size: 13px; border-radius: 999px; }
 .formula-chips button.path { border-style: dashed; }
 .vcell.err > span { color: #b4281c; font-weight: 600; cursor: help; }
+
+/* Darstellung von Datensätzen: Avatar und Untertitel in Zellen nur, wenn ausdrücklich eingestellt */
+.c .tile:not(.rich-avatar) .avatar { display: none; }
+.c .tile:not(.rich-sub) .tile-sub { display: none; }
+.c .tile.rich-avatar, .c .tile.rich-sub { padding: 5px 12px 5px 6px; }
+.avatar.image { object-fit: cover; background: #e9edef; padding: 0; }
+.avatar.symbol { background: transparent; font-size: 20px; font-weight: 400; width: 28px; }
+
+.tabledialog { width: min(520px, 94vw); max-height: 90vh; overflow: auto; }
+.repr-preview { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px; border-radius: 10px; background: #f4f7f8; }
+.hidden-col { display: flex; justify-content: space-between; align-items: center; font-size: 14px; }

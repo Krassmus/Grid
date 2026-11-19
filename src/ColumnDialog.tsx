@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import * as Y from 'yjs'
-import { renameColumn, setColumnConfig, type ColumnInfo, type TableInfo } from './model'
+import { renameColumn, setColumnConfig, setColumnHidden, type ColumnInfo, type TableInfo } from './model'
 import { columnTypeOf } from './columnTypes'
 import { Modal } from './Modal'
 import { OptionsEditor } from './SelectCell'
@@ -47,6 +47,10 @@ export function ColumnDialog(props: {
         </label>
         <p className="cfg-static">Typ: <strong>{type.label}</strong> <small>(lässt sich nicht ändern)</small></p>
         {type.renderConfig({ doc, table, tables, column, config, set, editOptions: () => setOptions(true) })}
+        <label className="cfg-check">
+          <input type="checkbox" checked={!!column.hidden} onChange={(e) => setColumnHidden(doc, table.id, column.id, e.target.checked)} />
+          <span>In der Tabelle ausblenden<small>Die Spalte bleibt für Formeln und die Darstellung nutzbar. Einblenden: Menü der Tabelle → Bearbeiten.</small></span>
+        </label>
         <div className="actions split">
           <button type="button" className="danger-outline" onClick={props.onDelete}>Löschen …</button>
           <button type="submit" className="primary">Fertig</button>

@@ -29,7 +29,7 @@ export type ColType = 'text' | 'number' | 'relation' | 'file' | 'select' | 'date
 export type CellValue = string | number | null
 
 export interface SelectOption { id: string; name: string; color: string }
-export interface ColumnInfo { id: string; name: string; type: ColType; target?: string; options?: SelectOption[]; width?: number; config?: Record<string, unknown>; footer?: string }
+export interface ColumnInfo { id: string; name: string; type: ColType; target?: string; options?: SelectOption[]; width?: number; config?: Record<string, unknown>; footer?: string; hidden?: boolean }
 
 /** Farb-IDs für Auswahloptionen; die konkreten Farben stehen in der UI (SelectCell.tsx). */
 export const OPTION_COLORS = ['sand', 'green', 'blue', 'rose', 'violet', 'gray'] as const
@@ -38,6 +38,8 @@ export interface TableInfo {
   name: string
   columns: ColumnInfo[]
   rowIds: string[]
+  /** Darstellung eines Datensatzes in anderen Tabellen (siehe repr.ts); je Einstellung ein Schlüssel `repr.<name>`. */
+  repr: Record<string, unknown>
 }
 
 // ---------- Abgeleitete Tabellen (Views) ----------
@@ -142,6 +144,7 @@ export function getCell(doc: Y.Doc, tableId: string, rowId: string, colId: strin
 /** Snapshot für die UI. Doppelte Zeilen-IDs (durch Merge) werden entfernt, verwaiste ignoriert. */
 /** Typspezifische Spaltenkonfiguration: je Einstellung ein eigener Schlüssel `cfg.<name>` (parallele Änderungen verschiedener Einstellungen gehen nicht verloren). */
 const CFG = 'cfg.'
+const REPR = 'repr.'
 
 export function readTables(doc: Y.Doc): TableInfo[] {
   const out: TableInfo[] = []
@@ -161,10 +164,12 @@ export function readTables(doc: Y.Doc): TableInfo[] {
           : undefined
         const config: Record<string, unknown> = {}
         c.forEach((v, k) => { if (k.startsWith(CFG)) config[k.slice(CFG.length)] = v })
-        return { id: cid, name: c.get('name'), config, type: c.get('type') as ColType, target: c.get('target') as string | undefined, options, width: c.get('width') as number | undefined, footer: c.get('footer') as string | undefined }
+        return { id: cid, name: c.get('name'), config, type: c.get('type') as ColType, target: c.get('target') as string | undefined, options, width: c.get('width') as number | undefined, footer: c.get('footer') as string | undefined, hidden: c.get('hidden') === true ? true : undefined }
       })
     const rowIds = [...new Set<string>(t.get('rowOrder').toArray())].filter((rid) => rows.has(rid))
-    out.push({ id, name: t.get('name'), columns, rowIds })
+    const repr: Record<string, unknown> = {}
+    t.forEach((v, k) => { if (k.startsWith(REPR)) repr[k.slice(REPR.length)] = v })
+    out.push({ id, name: t.get('name'), columns, rowIds, repr })
   })
   // Reihenfolge laut tableOrder (dedupliziert); unbekannte Tabellen (Altdaten, parallel angelegt) danach nach ID.
   const rank = new Map<string, number>()
@@ -381,6 +386,20 @@ export function setColumnConfig(doc: Y.Doc, tableId: string, colId: string, key:
 }
 
 /** Spaltenbreite in px (`undefined` = Standardbreite des Typs). */
+/** Setzt eine Einstellung der Darstellung; `undefined` entfernt sie (= Standard). */
+export function setTableRepr(doc: Y.Doc, tableId: string, key: string, value: unknown) {
+  const t = tablesOf(doc).get(tableId)
+  if (!t) return
+  if (value === undefined) t.delete(REPR + key); else t.set(REPR + key, value)
+}
+
+/** Blendet eine Spalte in der Tabelle aus (sie bleibt für Formeln und die Darstellung nutzbar). */
+export function setColumnHidden(doc: Y.Doc, tableId: string, colId: string, hidden: boolean) {
+  const c = tablesOf(doc).get(tableId)?.get('cols').get(colId)
+  if (!c) return
+  if (hidden) c.set('hidden', true); else c.delete('hidden')
+}
+
 /** Auswertung in der Summenzeile (`undefined` = keine). */
 export function setColumnFooter(doc: Y.Doc, tableId: string, colId: string, fn: string | undefined) {
   const c = tablesOf(doc).get(tableId)?.get('cols').get(colId)
