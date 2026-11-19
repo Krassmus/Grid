@@ -10,10 +10,10 @@ import { useCell } from './useTables'
 import { TileContent, useReprs } from './ReprTile'
 import type { Repr } from './repr'
 
-const MAP_W = 200, MAP_H = 84, MAP_ZOOM = 14
+const MAP_W = 200, MAP_H = 96, MAP_ZOOM = 14
 
 /** Kleine, feste Karte um den Punkt (nur Kacheln, keine Bedienung). Fehlt die Verbindung, bleiben Hintergrund und Markierung. */
-function MiniMap({ point }: { point: LatLon }) {
+function MiniMap({ point, repr }: { point: LatLon; repr?: Repr }) {
   const [failed, setFailed] = useState(0)
   const tiles = tilesAround(point, MAP_ZOOM, MAP_W, MAP_H)
   return (
@@ -21,7 +21,9 @@ function MiniMap({ point }: { point: LatLon }) {
       {tiles.map((t) => (
         <img key={t.src} src={t.src} alt="" draggable={false} style={{ left: t.left, top: t.top }} onError={() => setFailed((n) => n + 1)} />
       ))}
-      <i className="geo-pin"><span /></i>
+      {repr
+        ? <div className="geo-tag-host compact"><div className="geo-tag"><div className="tile rich-avatar"><TileContent repr={repr} /></div><i className="geo-tag-arrow" /></div></div>
+        : <i className="geo-pin"><span /></i>}
       {failed > 0 && <small>{formatGeo(point, 'dd')}</small>}
     </span>
   )
@@ -43,7 +45,7 @@ export function GeoCell(props: { doc: Y.Doc; tableId: string; rowId: string; col
     <div className="c geocell">
       <button ref={btn} type="button" className={`cell-geo${format === 'map' && point ? ' with-map' : ''}`} title={col.name} onClick={() => setOpen(true)}>
         {!point ? <span className="select-empty">Position wählen …</span>
-          : format === 'map' ? <MiniMap point={point} />
+          : format === 'map' ? <MiniMap point={point} repr={repr} />
           : <span className="geo-text">{formatGeo(point, format)}</span>}
       </button>
       {open && (
