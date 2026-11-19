@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type
 import * as Y from 'yjs'
 import { IndexeddbPersistence } from 'y-indexeddb'
 import {
-  addColumn, addLink, addView, deleteView, updateView, addRow, addTable, deleteColumn, deleteRow, deleteTable, moveColumn, moveLink, moveTable, removeLink, renameColumn, rowExists, setCell, setColumnWidth, summarize,
+  addColumn, addLink, addView, deleteView, updateView, addRow, addTable, deleteColumn, deleteRow, deleteTable, moveColumn, moveLink, moveTable, removeLink, renameColumn, isComputed, rowExists, setCell, setColumnWidth, summarize,
   type AggFn, type ColType, type ColumnInfo, type LinkIndex, type LinkSlot, type TableInfo,
 } from './model'
 import { useCell, useFileIndex, useLinkIndex, useRowVersion, useTabs } from './useTables'
@@ -10,10 +10,11 @@ import { FileCell } from './FileCell'
 import { SelectCell } from './SelectCell'
 import { ColumnDialog } from './ColumnDialog'
 import { FooterCell } from './Footer'
+import { GeoCell } from './GeoCell'
 import { ReprContext, TileContent, tileClasses, useReprs } from './ReprTile'
 import { initials, reprMap, type Repr } from './repr'
 import { columnCells, newCtx, type Cell as CellData } from './cells'
-import { FormulaSyntaxError, parseFormula } from './formula'
+import { FormulaSyntaxError, parseFormula, parseTemplate } from './formula'
 import { effectiveType } from './columnTypes'
 import { ViewDialog } from './ViewDialog'
 import { ViewGrid } from './ViewGrid'
@@ -196,6 +197,7 @@ function BacklinkCell(props: {
 function Cell({ doc, table, rowId, col }: { doc: Y.Doc; table: string; rowId: string; col: ColumnInfo; lead?: boolean }) {
   const value = useCell(doc, table, rowId, col.id)
   if (col.type === 'number') return <NumberInput doc={doc} table={table} rowId={rowId} col={col} value={value} />
+  if (col.type === 'geo') return <GeoCell doc={doc} tableId={table} rowId={rowId} col={col} />
   if (col.type === 'checkbox') return <CheckboxInput doc={doc} table={table} rowId={rowId} col={col} value={value} />
   if (col.type === 'date') return <DateInput doc={doc} table={table} rowId={rowId} col={col} value={value} />
   return <TextInput doc={doc} table={table} rowId={rowId} col={col} value={value} />
@@ -412,7 +414,7 @@ export function ClientPane(props: {
     const r = new Map<string, Map<string, Repr>>()
     if (!table) return { cellData: m, reprs: r }
     const ctx = newCtx() // gemeinsamer Zwischenspeicher: jede Spalte (auch von Formeln benutzte) wird nur einmal berechnet
-    for (const c of table.columns) if (c.type === 'rollup' || c.type === 'formula' || c.footer) m.set(c.id, columnCells(doc, tables, table, c, ctx))
+    for (const c of table.columns) if (isComputed(c) || c.footer) m.set(c.id, columnCells(doc, tables, table, c, ctx))
     // Darstellung der Zeilen für alles, was hier als Kachel erscheint: Ziele der Relationen, Quellen der Rückverweise, die Tabelle selbst
     const wanted = new Set<string>([table.id])
     for (const c of table.columns) if (c.type === 'relation' && c.target) wanted.add(c.target)
@@ -459,7 +461,7 @@ export function ClientPane(props: {
   const template = table
     ? [
         ...shownColumns.map((c, i) =>
-          liveWidth?.id === c.id ? `${liveWidth.w}px` : c.width ? `${c.width}px` : i === 0 ? '200px' : c.type === 'relation' || c.type === 'file' ? '240px' : c.type === 'number' ? '120px' : c.type === 'date' ? '170px' : c.type === 'checkbox' ? '110px' : c.type === 'rollup' || c.type === 'formula' ? '150px' : c.type === 'select' ? '160px' : '180px'),
+          liveWidth?.id === c.id ? `${liveWidth.w}px` : c.width ? `${c.width}px` : i === 0 ? '200px' : c.type === 'relation' || c.type === 'file' ? '240px' : c.type === 'number' ? '120px' : c.type === 'date' ? '170px' : c.type === 'checkbox' ? '110px' : isComputed(c) ? '150px' : c.type === 'geo' ? (c.config?.format === 'map' ? '240px' : '210px') : c.type === 'select' ? '160px' : '180px'),
         ...backlinks.map(() => '220px'),
         'minmax(120px, 1fr)',
       ].join(' ')
@@ -545,7 +547,7 @@ export function ClientPane(props: {
                 <div key={rid} className="row-outer" data-row={rid}>
                   <div className="row-inner">
                     {shownColumns.map((c, i) =>
-                      c.type === 'rollup' || c.type === 'formula'
+                      isComputed(c)
                         ? (() => {
                             const cell = cellData.get(c.id)?.get(rid)
                             return (
@@ -698,13 +700,13 @@ function Dialog(props: {
   const [expr, setExpr] = useState('')
   const exprError = (() => {
     if (!expr.trim()) return null
-    try { parseFormula(expr); return null } catch (e) { return e instanceof FormulaSyntaxError ? e.message : String(e) }
+    try { if (type === 'template') parseTemplate(expr); else parseFormula(expr); return null } catch (e) { return e instanceof FormulaSyntaxError ? e.message : String(e) }
   })()
   const submit = () => {
     if (!name.trim()) return
-    if (type === 'formula') {
+    if (type === 'formula' || type === 'template') {
       if (!expr.trim() || exprError) return
-      props.onSubmit({ name: name.trim(), type, config: { expr: expr.trim() } })
+      props.onSubmit({ name: name.trim(), type, config: type === 'template' ? { tpl: expr } : { expr: expr.trim() } })
       return
     }
     if (type === 'rollup') {
@@ -732,6 +734,8 @@ function Dialog(props: {
             <option value="date">Datum</option>
             <option value="checkbox">Checkbox</option>
             <option value="formula">Formel (Berechnung aus anderen Spalten)</option>
+            <option value="geo">Geokoordinate</option>
+            <option value="template">Text mit Platzhaltern {'({{…}})'}</option>
             <option value="rollup" disabled={!props.table || relations.length === 0}>Rollup (Summe u. a. über verknüpfte Zeilen)</option>
           </select>
         )}
@@ -739,6 +743,13 @@ function Dialog(props: {
           <select value={target} onChange={(e) => setTarget(e.target.value)}>
             {props.tables.map((t) => <option key={t.id} value={t.id}>auf Tabelle „{t.name}“</option>)}
           </select>
+        )}
+        {props.withType && type === 'template' && (
+          <>
+            <textarea rows={3} spellCheck={false} className="formula-input" placeholder={'z. B. {{Vorname}} {{Name}} – {{[Führer] + [Helfer]}} Personen'}
+              value={expr} onChange={(e) => setExpr(e.target.value)} />
+            {exprError && <p className="formula-error" role="alert">{exprError}</p>}
+          </>
         )}
         {props.withType && type === 'formula' && (
           <>
@@ -772,7 +783,7 @@ function Dialog(props: {
         )}
         <div className="actions">
           <button type="button" onClick={props.onClose}>Abbrechen</button>
-          <button type="submit" className="primary" disabled={!name.trim() || (type === 'rollup' && !rollupReady) || (type === 'formula' && (!expr.trim() || !!exprError))}>Anlegen</button>
+          <button type="submit" className="primary" disabled={!name.trim() || (type === 'rollup' && !rollupReady) || ((type === 'formula' || type === 'template') && (!expr.trim() || !!exprError))}>Anlegen</button>
         </div>
       </form>
     </Modal>

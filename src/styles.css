@@ -313,3 +313,28 @@ textarea.cell { resize: none; line-height: 1.35; overflow: hidden; display: bloc
 .tabledialog { width: min(520px, 94vw); max-height: 90vh; overflow: auto; }
 .repr-preview { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px; border-radius: 10px; background: #f4f7f8; }
 .hidden-col { display: flex; justify-content: space-between; align-items: center; font-size: 14px; }
+
+/* Geokoordinaten */
+.cell-geo { all: unset; box-sizing: border-box; cursor: pointer; max-width: 100%; border-radius: 8px; padding: 6px 0; }
+.cell-geo:hover, .cell-geo:focus-visible { box-shadow: 0 0 0 2px #cfe3ff; }
+.cell-geo .geo-text { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.cell-geo.with-map { padding: 2px 0; }
+.minimap { position: relative; display: block; overflow: hidden; border-radius: 8px; border: 1px solid #d5dce0; background: #e9edef; max-width: 100%; }
+.minimap img { position: absolute; width: 256px; height: 256px; max-width: none; user-select: none; }
+.minimap small { position: absolute; left: 6px; bottom: 4px; padding: 1px 6px; border-radius: 6px; background: #fffc; color: #4b5a62; font-size: 11px; }
+.geo-pin { position: absolute; left: 50%; top: 50%; width: 22px; height: 22px; margin: -22px 0 0 -11px; display: block; }
+.geo-pin span { position: absolute; inset: 0; background: #0a84ff; border: 3px solid #fff; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); box-shadow: 0 1px 4px #0006; }
+.geo-pin-wrap { background: none; border: none; }
+.geo-pin-wrap .geo-pin { left: 0; top: 0; margin: 3px 0 0 3px; }
+.geodialog { width: min(640px, 94vw); }
+.geomap { width: 100%; height: min(380px, 50vh); border-radius: 10px; border: 1px solid #d5dce0; overflow: hidden; z-index: 0; }
+.geo-inputs { display: grid; grid-template-columns: 1fr 1.3fr; gap: 8px; }
+.geo-inputs input, .geo-inputs select { font: inherit; padding: 8px; border: 1px solid #d2d2d7; border-radius: 8px; min-width: 0; }
+
+/* Schild mit der Darstellung der Zeile über der Markierung; die Spitze zeigt auf die Position */
+.geo-tag-wrap { background: none; border: none; overflow: visible; }
+.geo-tag-host { position: absolute; left: 0; bottom: 0; transform: translateX(-50%); width: max-content; cursor: grab; }
+.geo-tag-host::after { content: ''; position: absolute; left: 50%; bottom: -3px; width: 6px; height: 6px; margin-left: -3px; border-radius: 50%; background: #0a84ff; border: 1px solid #fff; }
+.geo-tag { display: flex; flex-direction: column; align-items: center; }
+.geo-tag .tile { background: #fff; border: 1px solid #cfd6da; box-shadow: 0 2px 8px #0003; max-width: 240px; }
+.geo-tag-arrow { display: block; width: 0; height: 0; margin-top: -1px; border-left: 9px solid transparent; border-right: 9px solid transparent; border-top: 12px solid #fff; filter: drop-shadow(0 1px 1px #0003); }

@@ -22,6 +22,8 @@ export const OPS_BY_TYPE: Record<ColType, FilterOp[]> = {
   file: ['contains', 'ncontains', 'empty', 'nempty'],
   rollup: [], // berechnete Spalten zählen mit ihrem effektiven Typ (effectiveType)
   formula: [],
+  template: [],
+  geo: ['contains', 'ncontains', 'empty', 'nempty'], // „contains“ sucht im angezeigten Text
 }
 
 export const opNeedsValue = (op: FilterOp) => !['empty', 'nempty', 'checked', 'unchecked'].includes(op)

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import * as Y from 'yjs'
 import { addColumn, addLink, addRow, addTable, readTables, setCell } from './model'
 import { columnCells } from './cells'
-import { FormulaSyntaxError, parseFormula } from './formula'
+import { FormulaSyntaxError, parseFormula, parseTemplate } from './formula'
 import { effectiveType } from './columnTypes'
 import { sortedRowIds } from './sorting'
 
@@ -110,5 +110,39 @@ describe('Formel-Spalte', () => {
     const gruppen = s.tables().find((t) => t.name === 'Gruppen')!
     setCell(s.doc, gruppen.id, gruppen.rowIds[0], gruppen.columns.find((c) => c.name === 'Helfer')!.id, 100)
     expect(s.texts(f)[0]).toBe('103')
+  })
+})
+
+describe('Text mit Platzhaltern', () => {
+  const tpl = (s: ReturnType<typeof setup>, text: string) => {
+    const col = addColumn(s.doc, s.gebiete, 'T', 'template', undefined, [], { tpl: text })
+    return s.e.map((r) => s.run(col).get(r)!)
+  }
+  it('setzt Spalten, Rechnungen und Aggregate in den Text ein', () => {
+    const s = setup()
+    expect(tpl(s, '{{Name}} hat {{[Σ Führer] + [Σ Unterführer] + [Σ Helfer]}} Personen in {{ANZAHL(Gruppen)}} Gruppen').map((c) => c.text)).toEqual([
+      'EAL 1 hat 22 Personen in 2 Gruppen', 'EAL 2 hat 1 Personen in 1 Gruppen', 'EAL 3 hat 0 Personen in 0 Gruppen',
+    ])
+  })
+  it('kennt Text ohne Platzhalter, mehrzeilige Texte und Formeln mit Text', () => {
+    const s = setup()
+    expect(tpl(s, 'nur Text')[0].text).toBe('nur Text')
+    expect(tpl(s, 'Zeile 1\n{{Name}}')[0].text).toBe('Zeile 1\nEAL 1')
+    expect(tpl(s, '{{WENN([Σ Helfer] > 10; "}}viele"; "wenige")}}')[0].text).toBe('}}viele') // "}}" in Anführungszeichen beendet den Platzhalter nicht
+    expect(tpl(s, '').every((c) => c.text === '')).toBe(true)
+  })
+  it('meldet Fehler im Platzhalter mit seiner Formel', () => {
+    expect(() => parseTemplate('Hallo {{Name')).toThrow(/nicht mit }} abgeschlossen/)
+    expect(() => parseTemplate('Hallo {{ }}')).toThrow(/Leerer Platzhalter/)
+    expect(() => parseTemplate('{{1 +}}')).toThrow(/Platzhalter \{\{1 \+\}\}: Die Formel ist unvollständig/)
+    const s = setup()
+    const c = tpl(s, 'x {{[Gibt es nicht]}}')[0]
+    expect([c.text, c.error]).toEqual(['#NAME?', 'Spalte „Gibt es nicht“ gibt es nicht'])
+  })
+  it('ist Text, sortierbar und im Typ „Text“', () => {
+    const s = setup()
+    const col = addColumn(s.doc, s.gebiete, 'T', 'template', undefined, [], { tpl: '{{[Σ Helfer]}} Helfer' })
+    expect(effectiveType(s.gt().columns.find((c) => c.id === col)!, s.tables())).toBe('text')
+    expect(sortedRowIds(s.doc, s.gebiete, col, 'desc')[0]).toBe(s.e[0]) // „17 Helfer“ nach natürlicher Sortierung zuletzt = absteigend zuerst
   })
 })

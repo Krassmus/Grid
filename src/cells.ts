@@ -4,11 +4,12 @@
  */
 import * as Y from 'yjs'
 import { reprMap } from './repr'
-import { buildFileIndex, buildLinkIndex, tablesOf, type ColumnInfo, type TableInfo, type ViewAgg } from './model'
+import { buildFileIndex, buildLinkIndex, isComputed, tablesOf, type ColumnInfo, type TableInfo, type ViewAgg } from './model'
 import { formatDate } from './dateFormat'
+import { decodeGeo, formatGeo } from './geo'
 import { plainText } from './richText'
-import { DATE, FORMULA, NUMBER, ROLLUP, TEXT, effectiveType } from './columnTypes'
-import { FormulaSyntaxError, parseFormula, type Node } from './formula'
+import { DATE, FORMULA, GEO, NUMBER, ROLLUP, TEMPLATE, TEXT, effectiveType } from './columnTypes'
+import { FormulaSyntaxError, parseFormula, parseTemplate, type Node } from './formula'
 import { allowedAggs, type FooterFn } from './aggregate'
 
 export type Key = number | string | null // null = leer (steht beim Sortieren immer am Ende)
@@ -41,15 +42,15 @@ const MAX_DEPTH = 12
 /** Zellen einer Spalte, je Zeilen-ID. `stack` (Spalten, die gerade berechnet werden) erkennt Zyklen. */
 export function columnCells(doc: Y.Doc, tables: TableInfo[], table: TableInfo, col: ColumnInfo, ctx: CellCtx = newCtx(), stack: string[] = []): Map<string, Cell> {
   const me = `${table.id}.${col.id}`
-  const computed = col.type === 'rollup' || col.type === 'formula'
+  const computed = isComputed(col)
   if (computed && (stack.includes(me) || stack.length > MAX_DEPTH)) {
-    const cyc: Cell = col.type === 'formula' ? { raw: null, text: '#ZYKLUS', key: null, error: 'Die Formel verweist (auch über andere Spalten) auf sich selbst' } : EMPTY
+    const cyc: Cell = col.type !== 'rollup' ? { raw: null, text: '#ZYKLUS', key: null, error: 'Die Formel verweist (auch über andere Spalten) auf sich selbst' } : EMPTY
     return new Map(table.rowIds.map((rid) => [rid, cyc]))
   }
   const hit = ctx.cache.get(me)
   if (hit) return hit
   const out = col.type === 'rollup' ? rollupCells(doc, tables, table, col, ctx, [...stack, me])
-    : col.type === 'formula' ? formulaCells(doc, tables, table, col, ctx, [...stack, me])
+    : col.type === 'formula' || col.type === 'template' ? formulaCells(doc, tables, table, col, ctx, [...stack, me])
     : plainCells(doc, tables, table, col, ctx)
   ctx.cache.set(me, out)
   return out
@@ -108,6 +109,11 @@ function plainCells(doc: Y.Doc, tables: TableInfo[], table: TableInfo, col: Colu
         if (i >= 0) { text = col.options![i].name; key = i }
         break
       }
+      case 'geo': { // Sortierung nach Breite (Nord-Süd), Text im eingestellten Format
+        const g = decodeGeo(raw)
+        if (g) { text = formatGeo(g, GEO.config(col).format); key = g.lat }
+        break
+      }
       case 'checkbox': text = raw ? '✓' : ''; key = raw ? 1 : 0; break // nicht angehakt zählt als 0, nie als leer
       case 'relation': {
         const titles = (links?.get(`${rid}|${col.id}`) ?? []).map((x) => (target ? reprMap(doc, tables, target, ctx).get(x)?.title ?? '' : ''))
@@ -155,7 +161,7 @@ function valueOf(col: ColumnInfo, c: Cell | undefined): Val {
     case 'number': return typeof c.key === 'number' ? c.key : null
     case 'checkbox': return !!c.raw
     case 'date': return typeof c.key === 'string' ? c.key : null
-    case 'rollup': case 'formula': return (c.raw as Val) ?? null
+    case 'rollup': case 'formula': case 'template': return (c.raw as Val) ?? null
     default: return c.text === '' ? null : c.text
   }
 }
@@ -173,7 +179,8 @@ function compareVals(a: Val, b: Val, op: string): Val {
 
 function formulaCells(doc: Y.Doc, tables: TableInfo[], table: TableInfo, col: ColumnInfo, ctx: CellCtx, stack: string[]): Map<string, Cell> {
   const out = new Map<string, Cell>()
-  const cfg = FORMULA.config(col)
+  const template = col.type === 'template'
+  const cfg = template ? { expr: TEMPLATE.config(col).tpl, decimals: -1, unit: '' } : FORMULA.config(col)
   const fillAll = (c: Cell) => { for (const rid of table.rowIds) out.set(rid, c); return out }
   if (!cfg.expr.trim()) return fillAll(EMPTY)
 
@@ -321,7 +328,7 @@ function formulaCells(doc: Y.Doc, tables: TableInfo[], table: TableInfo, col: Co
   }
 
   let get: Getter
-  try { get = scalar(parseFormula(cfg.expr)) } catch (e) {
+  try { get = scalar(template ? parseTemplate(cfg.expr) : parseFormula(cfg.expr)) } catch (e) {
     if (e instanceof FormulaSyntaxError) return fillAll({ raw: null, text: '#SYNTAX', key: null, error: e.message })
     if (e instanceof FErr) return fillAll({ raw: null, text: e.code, key: null, error: e.msg })
     throw e
@@ -336,7 +343,7 @@ function formulaCells(doc: Y.Doc, tables: TableInfo[], table: TableInfo, col: Co
       out.set(rid, { raw: v, text: cfg.unit ? `${s} ${cfg.unit}` : s, key: v })
     }
     else if (typeof v === 'boolean') out.set(rid, { raw: v, text: v ? 'Wahr' : 'Falsch', key: v ? 1 : 0 })
-    else out.set(rid, { raw: v, text: v, key: v || null })
+    else out.set(rid, v === '' ? EMPTY : { raw: v, text: v, key: v })
   }
   return out
 }

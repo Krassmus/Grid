@@ -4,7 +4,8 @@ import type { AggFn, ColType, ColumnInfo, TableInfo } from './model'
 import { DATE_STYLES, type DateStyle } from './dateFormat'
 import { Pill } from './SelectCell'
 import { aggLabel, allowedAggs } from './aggregate'
-import { FormulaEditor } from './FormulaEditor'
+import { FormulaEditor, TemplateEditor } from './FormulaEditor'
+import { GEO_FORMATS, type GeoFormat } from './geo'
 import { FormulaSyntaxError, inferType, parseFormula } from './formula'
 
 /** Was ein Konfigurationseditor braucht, um die Einstellungen einer Spalte anzuzeigen und zu ändern. */
@@ -247,6 +248,34 @@ class FormulaColumn extends ColumnType<FormulaConfig> {
   renderConfig(ctx: ConfigContext<FormulaConfig>) { return <FormulaEditor {...ctx} /> }
 }
 
+/** Text mit Platzhaltern: Text mit eingestreuten `{{Formel}}`. Das Ergebnis ist Text und wird nie gespeichert. */
+export interface TemplateConfig { tpl: string }
+class TemplateColumn extends ColumnType<TemplateConfig> {
+  readonly type = 'template'
+  readonly label = 'Text mit Platzhaltern'
+  readonly defaults: TemplateConfig = { tpl: '' }
+  renderConfig(ctx: ConfigContext<TemplateConfig>) { return <TemplateEditor {...ctx} /> }
+}
+
+/** Geokoordinate: einheitlich als WGS84 gespeichert (siehe geo.ts), nur die Darstellung ist einstellbar. */
+export interface GeoConfig { format: GeoFormat }
+class GeoColumn extends ColumnType<GeoConfig> {
+  readonly type = 'geo'
+  readonly label = 'Geokoordinate'
+  readonly defaults: GeoConfig = { format: 'dd' }
+  renderConfig({ config, set }: ConfigContext<GeoConfig>) {
+    const ex = GEO_FORMATS.find((f) => f.id === config.format)?.example
+    return (
+      <Field label="Darstellung">
+        <select value={config.format} onChange={(e) => set({ format: e.target.value as GeoFormat })}>
+          {GEO_FORMATS.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
+        </select>
+        <small className="hint">{ex ? `Beispiel: ${ex}` : 'Eine kleine Karte um die Position. Ein Klick öffnet die große Karte.'} Gespeichert wird immer einheitlich (WGS84); im Dialog kann man jedes Format eingeben.</small>
+      </Field>
+    )
+  }
+}
+
 export const TEXT = new TextColumn()
 export const NUMBER = new NumberColumn()
 export const RELATION = new RelationColumn()
@@ -256,8 +285,10 @@ export const DATE = new DateColumn()
 export const CHECKBOX = new CheckboxColumn()
 export const ROLLUP = new RollupColumn()
 export const FORMULA = new FormulaColumn()
+export const TEMPLATE = new TemplateColumn()
+export const GEO = new GeoColumn()
 
-const REGISTRY: Record<ColType, ColumnType<any>> = { text: TEXT, number: NUMBER, relation: RELATION, file: FILE, select: SELECT, date: DATE, checkbox: CHECKBOX, rollup: ROLLUP, formula: FORMULA }
+const REGISTRY: Record<ColType, ColumnType<any>> = { text: TEXT, number: NUMBER, relation: RELATION, file: FILE, select: SELECT, date: DATE, checkbox: CHECKBOX, rollup: ROLLUP, formula: FORMULA, template: TEMPLATE, geo: GEO }
 export const columnTypeOf = (type: ColType): ColumnType<any> => REGISTRY[type]
 
 /**
@@ -266,6 +297,7 @@ export const columnTypeOf = (type: ColType): ColumnType<any> => REGISTRY[type]
  */
 export function effectiveType(col: ColumnInfo, tables: TableInfo[], depth = 0): ColType {
   if (col.type === 'formula') return formulaType(col, tables, depth)
+  if (col.type === 'template') return 'text'
   if (col.type !== 'rollup') return col.type
   if (depth > 4) return 'text'
   const cfg = ROLLUP.config(col)

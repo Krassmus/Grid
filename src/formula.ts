@@ -175,3 +175,34 @@ export function inferType(n: Node, typeOfRef: (parts: string[]) => ColType | und
       }
   }
 }
+
+/**
+ * Text mit Platzhaltern: Text mit eingestreuten `{{Formel}}`, z. B. `Gruppe {{[Name]}} hat {{[Führer] + [Helfer]}} Personen`.
+ * Wird zu einer Formel, die alle Teile mit & verbindet; in `{{ }}` gilt die ganze Formelsprache.
+ */
+export function parseTemplate(src: string): Node {
+  let tree: Node = { t: 'str', v: '' } // erzwingt Text als Ergebnis
+  const add = (n: Node) => { tree = { t: 'bin', op: '&', a: tree, b: n } }
+  let lit = ''
+  let i = 0
+  while (i < src.length) {
+    if (!src.startsWith('{{', i)) { lit += src[i++]; continue }
+    if (lit) { add({ t: 'str', v: lit }); lit = '' }
+    // Ende suchen, "}}" in Anführungszeichen zählt nicht
+    let j = i + 2, inStr = false
+    for (; j < src.length; j++) {
+      if (src[j] === '"') inStr = !inStr
+      else if (!inStr && src.startsWith('}}', j)) break
+    }
+    if (j >= src.length) throw new FormulaSyntaxError('Der Platzhalter ist nicht mit }} abgeschlossen', i)
+    const inner = src.slice(i + 2, j)
+    if (!inner.trim()) throw new FormulaSyntaxError('Leerer Platzhalter {{ }}', i)
+    try { add(parseFormula(inner)) } catch (e) {
+      if (e instanceof FormulaSyntaxError) throw new FormulaSyntaxError(`Platzhalter {{${inner.trim()}}}: ${e.message}`, i)
+      throw e
+    }
+    i = j + 2
+  }
+  if (lit) add({ t: 'str', v: lit })
+  return tree
+}

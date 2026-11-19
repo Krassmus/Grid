@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { ConfigContext, FormulaConfig } from './columnTypes'
-import { FUNCTIONS, FormulaSyntaxError, parseFormula } from './formula'
+import type { ConfigContext, FormulaConfig, TemplateConfig } from './columnTypes'
+import { FUNCTIONS, FormulaSyntaxError, parseFormula, parseTemplate } from './formula'
 
 /** Namen mit Leerzeichen oder Sonderzeichen brauchen eckige Klammern. */
 export const refName = (name: string) => (/^[\p{L}_][\p{L}\p{N}_]*$/u.test(name) ? name : `[${name}]`)
@@ -65,6 +65,55 @@ export function FormulaEditor({ config, set, table, tables, column }: ConfigCont
         <span>Einheit</span>
         <input value={config.unit} placeholder="z. B. € oder kg" maxLength={12} onChange={(e) => set({ unit: e.target.value })} />
       </label>
+    </>
+  )
+}
+
+/** Text mit Platzhaltern bearbeiten: wie die Formel, aber mit `{{ … }}` im Text. */
+export function TemplateEditor({ config, set, table, tables, column }: ConfigContext<TemplateConfig>) {
+  const [draft, setDraft] = useState(config.tpl)
+  const area = useRef<HTMLTextAreaElement>(null)
+  const latest = useRef({ draft, saved: config.tpl, set })
+  latest.current = { draft, saved: config.tpl, set }
+  useEffect(() => () => {
+    const { draft: d, saved, set: s } = latest.current
+    if (d !== saved) s({ tpl: d })
+  }, [])
+  const apply = () => { if (draft !== config.tpl) set({ tpl: draft }) }
+  const error = useMemo(() => {
+    if (!draft.trim()) return null
+    try { parseTemplate(draft); return null } catch (e) { return e instanceof FormulaSyntaxError ? e.message : String(e) }
+  }, [draft])
+  const insert = (text: string) => {
+    const el = area.current
+    const at = el ? [el.selectionStart, el.selectionEnd] : [draft.length, draft.length]
+    setDraft(draft.slice(0, at[0]) + text + draft.slice(at[1]))
+    requestAnimationFrame(() => { el?.focus(); el?.setSelectionRange(at[0] + text.length, at[0] + text.length) })
+  }
+  const own = table.columns.filter((c) => c.id !== column.id)
+  const paths = table.columns.filter((c) => c.type === 'relation').flatMap((rel) => {
+    const target = tables.find((t) => t.id === rel.target)
+    return (target?.columns ?? []).map((c) => ({ key: `${rel.id}.${c.id}`, text: `SUMME(${refName(rel.name)}.${refName(c.name)})` }))
+  })
+  return (
+    <>
+      <label className="cfg-field">
+        <span>Text mit Platzhaltern</span>
+        <textarea ref={area} className="formula-input" rows={4} spellCheck={false} value={draft}
+          placeholder={'z. B. {{Vorname}} {{Name}} – {{[Führer] + [Helfer]}} Personen'}
+          onChange={(e) => setDraft(e.target.value)} onBlur={apply}
+          onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); apply() } }} />
+      </label>
+      {error ? <p className="formula-error" role="alert">{error}</p>
+        : <p className="hint formula-help">Alles in <code>{'{{ }}'}</code> wird ausgewertet und darf eine ganze Formel sein, z. B. <code>{'{{RUNDEN([Preis] * 1.19; 2)}}'}</code>. Funktionen: {FUNCTIONS.join(', ')}.</p>}
+      <div className="cfg-field">
+        <span>Platzhalter einfügen</span>
+        <div className="formula-chips">
+          {own.map((c) => <button key={c.id} type="button" onClick={() => insert(`{{${refName(c.name)}}}`)}>{c.name}</button>)}
+          {paths.map((p) => <button key={p.key} type="button" className="path" onClick={() => insert(`{{${p.text}}}`)}>{p.text}</button>)}
+          {own.length + paths.length === 0 && <span className="hint">Keine weiteren Spalten.</span>}
+        </div>
+      </div>
     </>
   )
 }

@@ -25,7 +25,7 @@ import * as Y from 'yjs'
  *     (siehe blobStore.ts) und werden später separat mit dem Server abgeglichen.
  */
 
-export type ColType = 'text' | 'number' | 'relation' | 'file' | 'select' | 'date' | 'checkbox' | 'rollup' | 'formula'
+export type ColType = 'text' | 'number' | 'relation' | 'file' | 'select' | 'date' | 'checkbox' | 'rollup' | 'formula' | 'template' | 'geo'
 export type CellValue = string | number | null
 
 export interface SelectOption { id: string; name: string; color: string }
@@ -33,6 +33,9 @@ export interface ColumnInfo { id: string; name: string; type: ColType; target?: 
 
 /** Farb-IDs für Auswahloptionen; die konkreten Farben stehen in der UI (SelectCell.tsx). */
 export const OPTION_COLORS = ['sand', 'green', 'blue', 'rose', 'violet', 'gray'] as const
+/** Berechnete Spalten: ihr Wert wird nie gespeichert. */
+export const isComputed = (c: Pick<ColumnInfo, 'type'>) => c.type === 'rollup' || c.type === 'formula' || c.type === 'template'
+
 export interface TableInfo {
   id: string
   name: string
@@ -295,7 +298,7 @@ export interface RowSummary { title: string; subs: string[] }
 export function summarize(doc: Y.Doc, table: TableInfo, rowId: string): RowSummary {
   const row: Y.Map<any> | undefined = tablesOf(doc).get(table.id)?.get('rows').get(rowId)
   const vals = table.columns
-    .filter((c) => c.type !== 'relation' && c.type !== 'file' && c.type !== 'checkbox' && c.type !== 'rollup' && c.type !== 'formula')
+    .filter((c) => c.type !== 'relation' && c.type !== 'file' && c.type !== 'checkbox' && c.type !== 'geo' && !isComputed(c))
     .map((c) => {
       const v = row?.get(c.id)
       if (c.type === 'select') return c.options?.find((o) => o.id === v)?.name ?? ''
