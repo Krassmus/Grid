@@ -25,11 +25,11 @@ import * as Y from 'yjs'
  *     (siehe blobStore.ts) und werden später separat mit dem Server abgeglichen.
  */
 
-export type ColType = 'text' | 'number' | 'relation' | 'file' | 'select' | 'date' | 'checkbox'
+export type ColType = 'text' | 'number' | 'relation' | 'file' | 'select' | 'date' | 'checkbox' | 'rollup'
 export type CellValue = string | number | null
 
 export interface SelectOption { id: string; name: string; color: string }
-export interface ColumnInfo { id: string; name: string; type: ColType; target?: string; options?: SelectOption[]; width?: number; config?: Record<string, unknown> }
+export interface ColumnInfo { id: string; name: string; type: ColType; target?: string; options?: SelectOption[]; width?: number; config?: Record<string, unknown>; footer?: string }
 
 /** Farb-IDs für Auswahloptionen; die konkreten Farben stehen in der UI (SelectCell.tsx). */
 export const OPTION_COLORS = ['sand', 'green', 'blue', 'rose', 'violet', 'gray'] as const
@@ -89,7 +89,7 @@ let posCounter = 0
 const nextPos = () => Date.now() * 1000 + (posCounter++ % 1000)
 
 export function addColumn(
-  doc: Y.Doc, tableId: string, name: string, type: ColType, target?: string, options: string[] = [],
+  doc: Y.Doc, tableId: string, name: string, type: ColType, target?: string, options: string[] = [], config: Record<string, unknown> = {},
 ): string {
   const id = uid()
   doc.transact(() => {
@@ -98,6 +98,7 @@ export function addColumn(
     c.set('name', name)
     c.set('type', type)
     if (type === 'relation' && target) c.set('target', target)
+    for (const [k, v] of Object.entries(config)) c.set(CFG + k, v)
     if (type === 'select') {
       const opts = new Y.Map<any>()
       options.forEach((n, i) => opts.set(uid(), { name: n, color: OPTION_COLORS[i % OPTION_COLORS.length], pos: nextPos() }))
@@ -160,7 +161,7 @@ export function readTables(doc: Y.Doc): TableInfo[] {
           : undefined
         const config: Record<string, unknown> = {}
         c.forEach((v, k) => { if (k.startsWith(CFG)) config[k.slice(CFG.length)] = v })
-        return { id: cid, name: c.get('name'), config, type: c.get('type') as ColType, target: c.get('target') as string | undefined, options, width: c.get('width') as number | undefined }
+        return { id: cid, name: c.get('name'), config, type: c.get('type') as ColType, target: c.get('target') as string | undefined, options, width: c.get('width') as number | undefined, footer: c.get('footer') as string | undefined }
       })
     const rowIds = [...new Set<string>(t.get('rowOrder').toArray())].filter((rid) => rows.has(rid))
     out.push({ id, name: t.get('name'), columns, rowIds })
@@ -289,7 +290,7 @@ export interface RowSummary { title: string; subs: string[] }
 export function summarize(doc: Y.Doc, table: TableInfo, rowId: string): RowSummary {
   const row: Y.Map<any> | undefined = tablesOf(doc).get(table.id)?.get('rows').get(rowId)
   const vals = table.columns
-    .filter((c) => c.type !== 'relation' && c.type !== 'file' && c.type !== 'checkbox')
+    .filter((c) => c.type !== 'relation' && c.type !== 'file' && c.type !== 'checkbox' && c.type !== 'rollup')
     .map((c) => {
       const v = row?.get(c.id)
       if (c.type === 'select') return c.options?.find((o) => o.id === v)?.name ?? ''
@@ -380,6 +381,13 @@ export function setColumnConfig(doc: Y.Doc, tableId: string, colId: string, key:
 }
 
 /** Spaltenbreite in px (`undefined` = Standardbreite des Typs). */
+/** Auswertung in der Summenzeile (`undefined` = keine). */
+export function setColumnFooter(doc: Y.Doc, tableId: string, colId: string, fn: string | undefined) {
+  const c = tablesOf(doc).get(tableId)?.get('cols').get(colId)
+  if (!c) return
+  if (fn === undefined) c.delete('footer'); else c.set('footer', fn)
+}
+
 export function setColumnWidth(doc: Y.Doc, tableId: string, colId: string, width: number | undefined) {
   const c = tablesOf(doc).get(tableId)?.get('cols').get(colId)
   if (!c) return

@@ -2,18 +2,21 @@ import { useMemo, useState } from 'react'
 import * as Y from 'yjs'
 import { emptyViewDef, type ColumnInfo, type FilterOp, type TableInfo, type ViewDef, type ViewFilter } from './model'
 import { Modal } from './Modal'
+import { effectiveType } from './columnTypes'
 import { OPS_BY_TYPE, aggLabel, aggOf, allowedAggs, computeView, opLabel, opNeedsValue } from './viewEngine'
 
 /** Neue abgeleitete Tabelle anlegen oder eine vorhandene bearbeiten (Bedingungen, Gruppierung, Zusammenfassung je Spalte). */
 export function ViewDialog(props: {
   doc: Y.Doc
   source: TableInfo
+  tables: TableInfo[]
   /** Zum Bearbeiten: bisheriger Name und Definition. */
   initial?: { name: string; def: ViewDef }
   onSubmit: (name: string, def: ViewDef) => void
   onClose: () => void
 }) {
-  const { doc, source } = props
+  const { doc, source, tables } = props
+  const typeOf = (c: ColumnInfo) => effectiveType(c, tables)
   const [name, setName] = useState(props.initial?.name ?? `${source.name} – abgeleitet`)
   const [def, setDef] = useState<ViewDef>(props.initial?.def ?? emptyViewDef(source.id))
   const cols = source.columns
@@ -25,17 +28,17 @@ export function ViewDialog(props: {
   const addFilter = () => {
     const c = cols[0]
     if (!c) return
-    setDef((d) => ({ ...d, filters: [...d.filters, { col: c.id, op: OPS_BY_TYPE[c.type][0], value: '' }] }))
+    setDef((d) => ({ ...d, filters: [...d.filters, { col: c.id, op: OPS_BY_TYPE[typeOf(c)][0], value: '' }] }))
   }
   const changeFilterColumn = (i: number, colId: string) => {
     const c = colOf(colId)!
     const cur = def.filters[i]
-    setFilter(i, { col: colId, op: OPS_BY_TYPE[c.type].includes(cur.op) ? cur.op : OPS_BY_TYPE[c.type][0], value: '' })
+    setFilter(i, { col: colId, op: OPS_BY_TYPE[typeOf(c)].includes(cur.op) ? cur.op : OPS_BY_TYPE[typeOf(c)][0], value: '' })
   }
   const groupCol = def.group.mode === 'column' ? colOf(def.group.col ?? '') : undefined
   const setAgg = (c: ColumnInfo, patch: { fn?: string; sep?: string }) =>
     setDef((d) => {
-      const cur = aggOf(d, c)
+      const cur = aggOf(d, c, tables)
       return { ...d, aggs: { ...d.aggs, [c.id]: { ...cur, ...patch } as any } }
     })
 
@@ -44,7 +47,7 @@ export function ViewDialog(props: {
 
   const valueInput = (f: ViewFilter, i: number, c: ColumnInfo) => {
     if (!opNeedsValue(f.op)) return <span />
-    if (c.type === 'select') {
+    if (typeOf(c) === 'select') {
       return (
         <select value={f.value} onChange={(e) => setFilter(i, { value: e.target.value })}>
           <option value="">Option wählen …</option>
@@ -53,7 +56,7 @@ export function ViewDialog(props: {
       )
     }
     return (
-      <input type={c.type === 'number' ? 'number' : c.type === 'date' ? 'date' : 'text'} step="any" value={f.value} placeholder="Wert"
+      <input type={typeOf(c) === 'number' ? 'number' : typeOf(c) === 'date' ? 'date' : 'text'} step="any" value={f.value} placeholder="Wert"
         onChange={(e) => setFilter(i, { value: e.target.value })} />
     )
   }
@@ -88,7 +91,7 @@ export function ViewDialog(props: {
                 </select>
                 {c ? (
                   <select value={f.op} onChange={(e) => setFilter(i, { op: e.target.value as FilterOp })}>
-                    {OPS_BY_TYPE[c.type].map((op) => <option key={op} value={op}>{opLabel(c.type, op)}</option>)}
+                    {OPS_BY_TYPE[typeOf(c)].map((op) => <option key={op} value={op}>{opLabel(typeOf(c), op)}</option>)}
                   </select>
                 ) : <span />}
                 {c ? valueInput(f, i, c) : <span />}
@@ -121,12 +124,13 @@ export function ViewDialog(props: {
             <div className="vd-aggs">
               <p className="hint">Was soll pro Gruppe aus den übrigen Spalten werden?</p>
               {cols.filter((c) => c !== groupCol).map((c) => {
-                const a = aggOf(def, c)
+                const a = aggOf(def, c, tables)
+                const ct = typeOf(c)
                 return (
                   <div key={c.id} className="vd-agg">
                     <span title={c.name}>{c.name}</span>
                     <select value={a.fn} onChange={(e) => setAgg(c, { fn: e.target.value })}>
-                      {allowedAggs(c.type).map((fn) => <option key={fn} value={fn}>{aggLabel(c.type, fn)}</option>)}
+                      {allowedAggs(ct).map((fn) => <option key={fn} value={fn}>{aggLabel(ct, fn)}</option>)}
                     </select>
                     {a.fn === 'concat'
                       ? <input value={a.sep ?? ', '} maxLength={12} title="Trennzeichen" aria-label={`Trennzeichen für ${c.name}`} onChange={(e) => setAgg(c, { sep: e.target.value })} />

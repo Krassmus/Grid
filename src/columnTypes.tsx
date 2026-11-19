@@ -1,8 +1,9 @@
 import type { ReactNode } from 'react'
 import * as Y from 'yjs'
-import type { ColType, ColumnInfo, TableInfo } from './model'
+import type { AggFn, ColType, ColumnInfo, TableInfo } from './model'
 import { DATE_STYLES, type DateStyle } from './dateFormat'
 import { Pill } from './SelectCell'
+import { aggLabel, allowedAggs } from './aggregate'
 
 /** Was ein Konfigurationseditor braucht, um die Einstellungen einer Spalte anzuzeigen und zu ändern. */
 export interface ConfigContext<C> {
@@ -193,6 +194,48 @@ class CheckboxColumn extends ColumnType<CheckboxConfig> {
   }
 }
 
+/** Rollup: fasst eine Spalte der über eine Relation verknüpften Zeilen zusammen. Der Wert wird berechnet, nie gespeichert. */
+export interface RollupConfig { rel: string; col: string; fn: AggFn; sep: string }
+class RollupColumn extends ColumnType<RollupConfig> {
+  readonly type = 'rollup'
+  readonly label = 'Rollup'
+  readonly defaults: RollupConfig = { rel: '', col: '', fn: 'sum', sep: ', ' }
+  renderConfig({ config, set, table, tables, column }: ConfigContext<RollupConfig>) {
+    const relations = table.columns.filter((c) => c.type === 'relation')
+    const rel = relations.find((c) => c.id === config.rel)
+    const target = tables.find((t) => t.id === rel?.target)
+    const targetCols = (target?.columns ?? []).filter((c) => c.id !== column.id)
+    const tcol = targetCols.find((c) => c.id === config.col)
+    const fns = tcol ? allowedAggs(effectiveType(tcol, tables)).filter((f) => f !== 'hide') : []
+    return (
+      <>
+        <Field label="Über Relation">
+          <select value={config.rel} onChange={(e) => set({ rel: e.target.value, col: '' })}>
+            <option value="">Relation wählen …</option>
+            {relations.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </Field>
+        <Field label="Spalte der verknüpften Zeilen">
+          <select value={config.col} disabled={!target} onChange={(e) => set({ col: e.target.value })}>
+            <option value="">Spalte wählen …</option>
+            {targetCols.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </Field>
+        <Field label="Zusammenfassen als">
+          <select value={config.fn} disabled={!tcol} onChange={(e) => set({ fn: e.target.value as AggFn })}>
+            {fns.map((f) => <option key={f} value={f}>{aggLabel(tcol!.type, f)}</option>)}
+          </select>
+        </Field>
+        {config.fn === 'concat' && (
+          <Field label="Trennzeichen">
+            <input value={config.sep} maxLength={12} onChange={(e) => set({ sep: e.target.value })} />
+          </Field>
+        )}
+      </>
+    )
+  }
+}
+
 export const TEXT = new TextColumn()
 export const NUMBER = new NumberColumn()
 export const RELATION = new RelationColumn()
@@ -200,6 +243,27 @@ export const FILE = new FileColumn()
 export const SELECT = new SelectColumn()
 export const DATE = new DateColumn()
 export const CHECKBOX = new CheckboxColumn()
+export const ROLLUP = new RollupColumn()
 
-const REGISTRY: Record<ColType, ColumnType<any>> = { text: TEXT, number: NUMBER, relation: RELATION, file: FILE, select: SELECT, date: DATE, checkbox: CHECKBOX }
+const REGISTRY: Record<ColType, ColumnType<any>> = { text: TEXT, number: NUMBER, relation: RELATION, file: FILE, select: SELECT, date: DATE, checkbox: CHECKBOX, rollup: ROLLUP }
 export const columnTypeOf = (type: ColType): ColumnType<any> => REGISTRY[type]
+
+/**
+ * Wie sich die Spalte beim Filtern, Zusammenfassen und Darstellen verhält. Normale Spalten: ihr Typ.
+ * Rollup: Summe und Anzahl sind Zahlen, Minimum/Maximum behalten Zahl oder Datum, alles andere ist Text.
+ */
+export function effectiveType(col: ColumnInfo, tables: TableInfo[], depth = 0): ColType {
+  if (col.type !== 'rollup') return col.type
+  if (depth > 4) return 'text'
+  const cfg = ROLLUP.config(col)
+  const own = tables.find((t) => t.columns.some((c) => c.id === col.id))
+  const rel = own?.columns.find((c) => c.id === cfg.rel && c.type === 'relation')
+  const tcol = tables.find((t) => t.id === rel?.target)?.columns.find((c) => c.id === cfg.col)
+  if (!tcol) return 'text'
+  if (cfg.fn === 'sum' || cfg.fn === 'count') return 'number'
+  if (cfg.fn === 'min' || cfg.fn === 'max') {
+    const t = effectiveType(tcol, tables, depth + 1)
+    return t === 'number' || t === 'date' ? t : 'text'
+  }
+  return 'text'
+}

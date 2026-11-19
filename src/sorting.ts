@@ -1,51 +1,17 @@
 import * as Y from 'yjs'
-import { buildFileIndex, buildLinkIndex, readTables, summarize, tablesOf, type ColumnInfo, type TableInfo } from './model'
-import { plainText } from './richText'
-import { TEXT } from './columnTypes'
+import { readTables, type ColumnInfo, type TableInfo } from './model'
+import { columnCells, compareKeys, type Key } from './cells'
 
 export type SortDir = 'asc' | 'desc'
+export { compareKeys }
+export type { Key }
 
-export type Key = number | string | null // null = leer (steht immer am Ende)
-
-const collator = new Intl.Collator('de', { numeric: true, sensitivity: 'base' })
-
-/**
- * Sortierwert einer Zelle: Zahl → Zahl, Datum → ISO-Text, Auswahl → Position der Option,
- * Relation → Titel der ersten verknüpften Zeile, Datei → Name der ersten Datei, Text → Text (bei formatiertem ohne Markup).
- */
+/** Sortierwerte einer Spalte je Zeile (Zahl → Zahl, Datum → ISO-Text, Auswahl → Position der Option, Relation → Titel der ersten Verknüpfung, Datei → erster Dateiname, Rollup → Ergebnis). */
 export function sortKeys(doc: Y.Doc, table: TableInfo, col: ColumnInfo, tables: TableInfo[]): Map<string, Key> {
   const out = new Map<string, Key>()
-  const links = col.type === 'relation' ? buildLinkIndex(doc).forward : null
-  const files = col.type === 'file' ? buildFileIndex(doc) : null
-  const target = col.type === 'relation' ? tables.find((t) => t.id === col.target) : undefined
-  const rows: Y.Map<Y.Map<any>> | undefined = tablesOf(doc).get(table.id)?.get('rows')
-  for (const rid of table.rowIds) {
-    const v = rows?.get(rid)?.get(col.id)
-    let key: Key = null
-    switch (col.type) {
-      case 'number': key = typeof v === 'number' ? v : null; break
-      case 'checkbox': key = v ? 1 : 0; break // nicht angehakt zählt als 0, nie als leer
-      case 'date': key = typeof v === 'string' && v ? v : null; break
-      case 'select': { const i = (col.options ?? []).findIndex((o) => o.id === v); key = i >= 0 ? i : null; break }
-      case 'relation': {
-        const first = links?.get(`${rid}|${col.id}`)?.[0]
-        key = first && target ? summarize(doc, target, first).title : null
-        break
-      }
-      case 'file': key = files?.get(`${rid}|${col.id}`)?.[0]?.name ?? null; break
-      default: {
-        if (v === undefined || v === null || v === '') break
-        const s = TEXT.config(col).mode === 'rich' ? plainText(String(v)).trim() : String(v)
-        key = s || null
-      }
-    }
-    out.set(rid, key)
-  }
+  for (const [rid, c] of columnCells(doc, tables, table, col)) out.set(rid, c.key)
   return out
 }
-
-export const compareKeys = (a: number | string, b: number | string): number =>
-  typeof a === 'number' && typeof b === 'number' ? a - b : collator.compare(String(a), String(b))
 
 /** Ordnet IDs nach ihren Sortierwerten. Leere stehen immer hinten, Gleiche behalten ihre Reihenfolge. */
 export function orderByKeys(ids: string[], keys: Map<string, Key>, dir: SortDir): string[] {

@@ -3,17 +3,21 @@ import * as Y from 'yjs'
 import { IndexeddbPersistence } from 'y-indexeddb'
 import {
   addColumn, addLink, addView, deleteView, updateView, addRow, addTable, deleteColumn, deleteRow, deleteTable, moveColumn, moveLink, moveTable, removeLink, renameColumn, renameTable, rowExists, setCell, setColumnWidth, summarize,
-  type ColType, type ColumnInfo, type LinkIndex, type LinkSlot, type TableInfo,
+  type AggFn, type ColType, type ColumnInfo, type LinkIndex, type LinkSlot, type TableInfo,
 } from './model'
 import { useCell, useFileIndex, useLinkIndex, useRowVersion, useTabs } from './useTables'
 import { FileCell } from './FileCell'
 import { SelectCell } from './SelectCell'
 import { ColumnDialog } from './ColumnDialog'
+import { FooterCell } from './Footer'
+import { columnCells, type Cell as CellData } from './cells'
+import { effectiveType } from './columnTypes'
 import { ViewDialog } from './ViewDialog'
 import { ViewGrid } from './ViewGrid'
+import { aggLabel, allowedAggs, defaultAgg } from './aggregate'
 import { sortedRowIds, type SortDir } from './sorting'
 import { formatDate, toInputValue } from './dateFormat'
-import { CHECKBOX, DATE, FILE, NUMBER, RELATION, TEXT } from './columnTypes'
+import { CHECKBOX, DATE, FILE, ROLLUP, NUMBER, RELATION, TEXT } from './columnTypes'
 import { RichPreview, RichTextDialog } from './richText'
 import { AnimItem, useAnimatedList } from './animatedList'
 import { ConfirmDialog, Modal, RenameDialog } from './Modal'
@@ -401,6 +405,15 @@ export function ClientPane(props: {
     [doc, table?.id, sort?.colId, sort?.dir, sortTick, table && !sort ? table.rowIds : null],
   )
 
+  // Berechnete Spalten (Rollup) und Spalten mit Summenzeile: je Spalte einmal für alle Zeilen ausgewertet
+  const cellData = useMemo(() => {
+    const m = new Map<string, Map<string, CellData>>()
+    if (!table) return m
+    for (const c of table.columns) if (c.type === 'rollup' || c.footer) m.set(c.id, columnCells(doc, tables, table, c))
+    return m
+    // `index` (Verknüpfungen) und `tables` (Werte, Struktur) decken alle Änderungen ab, die das Ergebnis beeinflussen
+  }, [doc, tables, table?.id, index])
+
   // Nach „+ Zeile“: zur neuen Zeile scrollen und ihre erste Zelle fokussieren
   const [focusRow, setFocusRow] = useState<string | null>(null)
   useEffect(() => {
@@ -436,7 +449,7 @@ export function ClientPane(props: {
   const template = table
     ? [
         ...table.columns.map((c, i) =>
-          liveWidth?.id === c.id ? `${liveWidth.w}px` : c.width ? `${c.width}px` : i === 0 ? '200px' : c.type === 'relation' || c.type === 'file' ? '240px' : c.type === 'number' ? '120px' : c.type === 'date' ? '170px' : c.type === 'checkbox' ? '110px' : c.type === 'select' ? '160px' : '180px'),
+          liveWidth?.id === c.id ? `${liveWidth.w}px` : c.width ? `${c.width}px` : i === 0 ? '200px' : c.type === 'relation' || c.type === 'file' ? '240px' : c.type === 'number' ? '120px' : c.type === 'date' ? '170px' : c.type === 'checkbox' ? '110px' : c.type === 'rollup' ? '150px' : c.type === 'select' ? '160px' : '180px'),
         ...backlinks.map(() => '220px'),
         'minmax(120px, 1fr)',
       ].join(' ')
@@ -521,7 +534,11 @@ export function ClientPane(props: {
                 <div key={rid} className="row-outer" data-row={rid}>
                   <div className="row-inner">
                     {table.columns.map((c, i) =>
-                      c.type === 'relation'
+                      c.type === 'rollup'
+                        ? <div key={c.id} className={`c vcell${effectiveType(c, tables) === 'number' ? ' num' : ''}`}>
+                            <span title={cellData.get(c.id)?.get(rid)?.text}>{cellData.get(c.id)?.get(rid)?.text}</span>
+                          </div>
+                        : c.type === 'relation'
                         ? <RelationCell key={c.id} doc={doc} tables={tables} table={table} rowId={rid} col={c} index={index} />
                         : c.type === 'file'
                         ? <FileCell key={c.id} doc={doc} tableId={table.id} rowId={rid} col={c} index={fileIndex} />
@@ -535,6 +552,15 @@ export function ClientPane(props: {
                   </div>
                 </div>
               ))}
+              <div className="grid-foot">
+                <div className="row-inner">
+                  {table.columns.map((c) => (
+                    <FooterCell key={c.id} doc={doc} tableId={table.id} col={c} tables={tables} cells={cellData.get(c.id)} />
+                  ))}
+                  {backlinks.map(({ col }) => <div key={col.id} className="c" />)}
+                  <div className="c" />
+                </div>
+              </div>
             </div>
           </div>
         </>
@@ -592,7 +618,7 @@ export function ClientPane(props: {
         const source = tables.find((t) => t.id === (editing ? editing.def.source : viewDialog.mode === 'new' ? viewDialog.sourceId : ''))
         if (!source) return null
         return (
-          <ViewDialog doc={doc} source={source} initial={editing && { name: editing.name, def: editing.def }}
+          <ViewDialog doc={doc} source={source} tables={tables} initial={editing && { name: editing.name, def: editing.def }}
             onClose={() => setViewDialog(null)}
             onSubmit={(name, def) => {
               if (editing) updateView(doc, editing.id, { name, def })
@@ -622,9 +648,9 @@ export function ClientPane(props: {
           onSubmit={(f) => { setActive(addTable(doc, f.name)); setFocusFirst(true); setDialog(null) }} />
       )}
       {dialog === 'column' && table && (
-        <Dialog title={`Neue Spalte in „${table.name}“`} withType tables={tables} defaultTarget={table.id}
+        <Dialog title={`Neue Spalte in „${table.name}“`} withType tables={tables} table={table} defaultTarget={table.id}
           onClose={() => setDialog(null)}
-          onSubmit={(f) => { addColumn(doc, table.id, f.name, f.type, f.target, f.options); setDialog(null) }} />
+          onSubmit={(f) => { addColumn(doc, table.id, f.name, f.type, f.target, f.options, f.config); setDialog(null) }} />
       )}
     </section>
   )
@@ -636,14 +662,30 @@ function Dialog(props: {
   tables: TableInfo[]
   defaultTarget?: string
   onClose: () => void
-  onSubmit: (f: { name: string; type: ColType; target?: string; options?: string[] }) => void
+  /** Spalten der aktuellen Tabelle (für Rollup: welche Relation). */
+  table?: TableInfo
+  onSubmit: (f: { name: string; type: ColType; target?: string; options?: string[]; config?: Record<string, unknown> }) => void
 }) {
   const [name, setName] = useState('')
   const [type, setType] = useState<ColType>('text')
   const [target, setTarget] = useState(props.defaultTarget ?? props.tables[0]?.id)
   const [optionsText, setOptionsText] = useState('')
+  // Rollup: Relation dieser Tabelle, Spalte der verknüpften Zeilen, Zusammenfassung
+  const relations = (props.table?.columns ?? []).filter((c) => c.type === 'relation')
+  const [rel, setRel] = useState(relations[0]?.id ?? '')
+  const rollupTarget = props.tables.find((t) => t.id === relations.find((c) => c.id === rel)?.target)
+  const [rcol, setRcol] = useState('')
+  const rcolInfo = rollupTarget?.columns.find((c) => c.id === rcol)
+  const rfns: AggFn[] = rcolInfo ? allowedAggs(effectiveType(rcolInfo, props.tables)).filter((f) => f !== 'hide') : []
+  const [fn, setFn] = useState<AggFn>('sum')
+  const rollupReady = !!rcolInfo && rfns.includes(fn)
   const submit = () => {
     if (!name.trim()) return
+    if (type === 'rollup') {
+      if (!rollupReady) return
+      props.onSubmit({ name: name.trim(), type, config: { rel, col: rcol, fn } })
+      return
+    }
     const options = optionsText.split('\n').map((x) => x.trim()).filter(Boolean)
     props.onSubmit({ name: name.trim(), type, target: type === 'relation' ? target : undefined, options: type === 'select' ? options : undefined })
   }
@@ -663,6 +705,7 @@ function Dialog(props: {
             <option value="select">Auswahl (z. B. Status)</option>
             <option value="date">Datum</option>
             <option value="checkbox">Checkbox</option>
+            <option value="rollup" disabled={!props.table || relations.length === 0}>Rollup (Summe u. a. über verknüpfte Zeilen)</option>
           </select>
         )}
         {props.withType && type === 'relation' && (
@@ -670,13 +713,32 @@ function Dialog(props: {
             {props.tables.map((t) => <option key={t.id} value={t.id}>auf Tabelle „{t.name}“</option>)}
           </select>
         )}
+        {props.withType && type === 'rollup' && (
+          <>
+            <select value={rel} onChange={(e) => { setRel(e.target.value); setRcol('') }}>
+              {relations.map((c) => <option key={c.id} value={c.id}>über Relation „{c.name}“</option>)}
+            </select>
+            <select value={rcol} onChange={(e) => {
+              const id = e.target.value
+              setRcol(id)
+              const ci = rollupTarget?.columns.find((c) => c.id === id)
+              if (ci) setFn(defaultAgg(effectiveType(ci, props.tables)))
+            }}>
+              <option value="">Spalte der verknüpften Zeilen …</option>
+              {(rollupTarget?.columns ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            <select value={fn} disabled={!rcolInfo} onChange={(e) => setFn(e.target.value as AggFn)}>
+              {rfns.map((f) => <option key={f} value={f}>{aggLabel(rcolInfo!.type, f)}</option>)}
+            </select>
+          </>
+        )}
         {props.withType && type === 'select' && (
           <textarea rows={4} placeholder={'Optionen, eine pro Zeile\nz. B. Entwurf\nIn Arbeit'} value={optionsText}
             onChange={(e) => setOptionsText(e.target.value)} />
         )}
         <div className="actions">
           <button type="button" onClick={props.onClose}>Abbrechen</button>
-          <button type="submit" className="primary" disabled={!name.trim()}>Anlegen</button>
+          <button type="submit" className="primary" disabled={!name.trim() || (type === 'rollup' && !rollupReady)}>Anlegen</button>
         </div>
       </form>
     </Modal>

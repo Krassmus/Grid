@@ -262,7 +262,7 @@ textarea.cell { resize: none; line-height: 1.35; overflow: hidden; display: bloc
 .h-name.static { cursor: default; }
 .h-name.static:hover { background: none; color: inherit; }
 .vcell > span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 6px 0; }
-.vcell.num > span { text-align: right; padding-right: 8px; font-variant-numeric: tabular-nums; }
+.vcell.num > span { font-variant-numeric: tabular-nums; }
 .view-empty { padding: 16px; }
 
 /* Menü der gewählten Tabelle */
@@ -276,3 +276,20 @@ textarea.cell { resize: none; line-height: 1.35; overflow: hidden; display: bloc
 .tab-popup .danger-item { color: #b4281c; }
 .view-bar { display: flex; align-items: center; gap: 12px; font-size: 14px; color: #667781; }
 .tabs { z-index: 5; }
+
+/* Summenzeile: bleibt beim Scrollen am unteren Rand des Tabellenbereichs */
+.grid-foot { position: sticky; bottom: 0; z-index: 2; background: #f9faf8; border-top: 1px solid #e1e7ea; border-radius: 0 0 15px 15px; }
+.grid-foot .row-inner { align-items: center; }
+.foot-cell { position: relative; padding-top: 0; padding-bottom: 0; }
+.foot-btn { all: unset; box-sizing: border-box; cursor: pointer; flex: 1 1 0; min-width: 0; padding: 9px 8px; margin: 0 -8px; font-size: 13px; color: #4b5a62; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-radius: 6px; }
+.foot-btn { display: flex; align-items: baseline; gap: 6px; }
+.foot-btn small { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: #8a969c; text-transform: uppercase; letter-spacing: .06em; font-size: 11px; }
+.foot-btn strong { flex: none; }
+.foot-btn strong { font-weight: 600; font-variant-numeric: tabular-nums; color: #1f2a30; }
+.foot-hint { opacity: 0; color: #8a969c; }
+.grid-foot:hover .foot-hint, .foot-btn:focus-visible .foot-hint { opacity: 1; }
+.foot-btn:hover, .foot-btn:focus-visible { background: #e9edef; }
+.foot-popup { position: absolute; bottom: calc(100% + 4px); left: 8px; z-index: 30; min-width: 170px; display: grid; padding: 4px; background: #fff; border: 1px solid #d5dce0; border-radius: 10px; box-shadow: 0 8px 24px #0003; }
+.foot-popup button { border: none; background: none; text-align: left; padding: 7px 12px; border-radius: 7px; color: #1f2a30; }
+.foot-popup button:hover, .foot-popup button:focus-visible { background: #eef4ff; outline: none; }
+.foot-popup button.on { font-weight: 600; color: #0a84ff; }
