@@ -11,7 +11,7 @@ export type AvatarMode = 'default' | 'none' | 'initial' | 'image' | 'icon' | 'te
 export interface ReprConfig {
   /** Spalte für den Titel; '' = Standard (erste Textspalte). */
   title: string
-  /** Spalte für den Untertitel; '' = Standard (automatisch), '-' = keiner. */
+  /** Spalte für den Untertitel; '' = keiner. */
   sub: string
   avatar: AvatarMode
   /** Dateispalte (Bild) bzw. Textspalte (Symbol aus Spalte). */
@@ -56,7 +56,7 @@ export function computeRepr(doc: Y.Doc, tables: TableInfo[], table: TableInfo, c
   const cfg = reprConfig(table)
   const col = (id: string) => table.columns.find((c) => c.id === id)
   const titleCol = cfg.title ? col(cfg.title) : undefined
-  const subCol = cfg.sub && cfg.sub !== '-' ? col(cfg.sub) : undefined
+  const subCol = cfg.sub ? col(cfg.sub) : undefined
   const iconCol = cfg.avatar === 'text' ? col(cfg.avatarCol) : undefined
   const imgCol = cfg.avatar === 'image' ? col(cfg.avatarCol) : undefined
   const cellsOf = (c: ColumnInfo | undefined) => (c && titleCapable(c) ? columnCells(doc, tables, table, c, ctx) : undefined)
@@ -69,11 +69,8 @@ export function computeRepr(doc: Y.Doc, tables: TableInfo[], table: TableInfo, c
   for (const rid of table.rowIds) {
     const base = summarize(doc, table, rid)
     const title = titles ? titles.get(rid)?.text || 'Ohne Titel' : base.title
-    let subList: string[]
-    if (cfg.sub === '-') subList = []
-    else if (subs) { const t = subs.get(rid)?.text; subList = t ? [t] : [] }
-    else subList = base.subs
-    subList = subList.filter((s) => s !== title)
+    const t = subs?.get(rid)?.text
+    const subList = t && t !== title ? [t] : []
 
     let avatar: ReprAvatar | undefined
     const fallback = { text: initials(title) }

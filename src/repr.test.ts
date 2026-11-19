@@ -27,10 +27,11 @@ function setup() {
 }
 
 describe('Darstellung eines Datensatzes', () => {
-  it('Standard wie bisher: erste Textspalte als Titel, Initialen, keine Anzeige in Zellen', () => {
+  it('Standard: erste Textspalte als Titel, Initialen, kein Untertitel, keine Anzeige in Zellen', () => {
     const s = setup()
     const r = s.repr()
     expect(r.title).toBe('Meier')
+    expect(r.subs).toEqual([])
     expect(r.avatar).toEqual({ text: 'M' })
     expect(r.avatarInCells).toBe(false)
     expect(r.subInCells).toBe(false)
@@ -44,7 +45,7 @@ describe('Darstellung eines Datensatzes', () => {
     expect(r.title).toBe('Anna Meier')
     expect(r.subs).toEqual(['Herr der Wahnsinns'])
     expect(r.subInCells).toBe(true)
-    setTableRepr(s.doc, s.personen, 'sub', '-')
+    setTableRepr(s.doc, s.personen, 'sub', undefined)
     expect(s.repr().subs).toEqual([])
   })
   it('Avatar: keiner, Initialen, festes Symbol, Symbol aus Spalte, Bild', () => {

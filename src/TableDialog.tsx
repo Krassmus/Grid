@@ -68,8 +68,7 @@ export function TableDialog(props: {
           <label className="cfg-field">
             <span>Untertitel (klein und grau)</span>
             <select value={cfg.sub} onChange={(e) => set('sub', e.target.value)}>
-              <option value="">Standard (automatisch, nur in der Auswahl)</option>
-              <option value="-">Keiner</option>
+              <option value="">Keiner</option>
               {valueCols.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </label>

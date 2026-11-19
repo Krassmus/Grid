@@ -54,7 +54,7 @@ function Tile(props: {
   const reprs = useReprs()
   const fromRepr = exists ? reprs(table!.id)?.get(rowId) : undefined
   const fallback = exists && !fromRepr ? summarize(doc, table!, rowId) : null // z. B. Tabelle ohne vorberechnete Darstellung
-  const s = fromRepr ?? (fallback ? { ...fallback, avatar: { text: initials(fallback.title) }, avatarInCells: false, subInCells: false } : null)
+  const s = fromRepr ?? (fallback ? { title: fallback.title, subs: [], avatar: { text: initials(fallback.title) }, avatarInCells: false, subInCells: false } : null)
   return (
     <div className={`tile ${tileClasses(s)} ${exists ? '' : 'deleted'} ${props.onClick ? 'clickable' : ''} ${props.muted ? 'muted' : ''} ${isDragging ? 'dragging' : ''}`}
       onClick={props.onClick}
