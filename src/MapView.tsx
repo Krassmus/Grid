@@ -138,7 +138,12 @@ export function MapView(props: { doc: Y.Doc; map: MapInfo; tables: TableInfo[]; 
         if (!p) continue
         const marker = g.L.marker([p.lat, p.lon], { keyboard: false, icon: g.L.divIcon({ className: 'geo-tag-wrap', html: '', iconSize: [0, 0], iconAnchor: [0, 0] }) }).addTo(g.data)
         let moved = false
-        marker.on('click', () => { if (moved) { moved = false; return } if (live.current.mode === 'select') openRef.current(t.id, rid) })
+        marker.on('click', (e: any) => {
+          if (moved) { moved = false; return }
+          // Öffnen nur über das Label (oder den Pin ohne Label); alles darunter ist zum Ziehen da
+          const hit = (e.originalEvent?.target as HTMLElement | null)?.closest('.tile, .geo-pin')
+          if (hit && live.current.mode === 'select') openRef.current(t.id, rid)
+        })
         const icon: HTMLElement | undefined = marker.getElement()
         if (!icon) continue
         const host = document.createElement('div')
@@ -146,10 +151,10 @@ export function MapView(props: { doc: Y.Doc; map: MapInfo; tables: TableInfo[]; 
         icon.appendChild(host)
         // Verschieben: die Spitze (Pfeil bzw. Punkt) ziehen und loslassen; ein Klick auf die Kachel öffnet weiter das Formular
         // Leaflet schwenkt die Karte bei mousedown/touchstart: dort darf die Spitze nicht durchgereicht werden
-        const onTip = (e: Event) => !!(e.target as HTMLElement).closest('.geo-tag-arrow, .geo-pin') && live.current.mode === 'select'
+        const onTip = (e: Event) => !(e.target as HTMLElement).closest('.tile') && live.current.mode === 'select'
         for (const type of ['mousedown', 'touchstart']) host.addEventListener(type, (e) => { if (onTip(e)) e.stopPropagation() })
         host.addEventListener('pointerdown', (e: PointerEvent) => {
-          if (e.button !== 0 || live.current.mode !== 'select' || !(e.target as HTMLElement).closest('.geo-tag-arrow, .geo-pin')) return
+          if (e.button !== 0 || !onTip(e)) return
           e.stopPropagation()
           const map = g.map
           const start = map.mouseEventToContainerPoint(e)
