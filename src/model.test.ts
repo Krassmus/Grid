@@ -360,3 +360,25 @@ describe('Spaltenkonfiguration', () => {
     expect(readTables(a)[0].columns[0].config).toEqual({ bold: true })
   })
 })
+
+describe('Karten', () => {
+  it('Karte anlegen, Objekte zeichnen, Tab-Reihenfolge, Tabelle löschen entfernt Ebene', async () => {
+    const { addMap, readMaps, readTabs, setMapShape, deleteMapShape, updateMap, deleteMap, addTable, addColumn, deleteTable } = await import('./model')
+    const doc = new Y.Doc()
+    const t = addTable(doc, 'Orte')
+    const col = addColumn(doc, t, 'Position', 'geo')
+    const id = addMap(doc, 'Übersicht', [{ table: t, col }])
+    expect(readTabs(doc).map((x) => [x.kind, x.name])).toEqual([['table', 'Orte'], ['map', 'Übersicht']])
+    setMapShape(doc, id, 'a', { kind: 'point', lat: 52, lon: 9, label: 'Start', color: '#f00' })
+    setMapShape(doc, id, 'b', { kind: 'line', pts: [[52, 9], [53, 10]], label: '', color: '#0f0' })
+    setMapShape(doc, id, 'c', { kind: 'area', pts: [[1, 1], [2, 2]], label: '', color: '#00f' }) // zu wenige Punkte: ungültig
+    expect(readMaps(doc)[0].shapes.map((s) => s.id)).toEqual(['a', 'b'])
+    deleteMapShape(doc, id, 'a')
+    updateMap(doc, id, { name: 'Neu' })
+    expect(readMaps(doc)[0]).toMatchObject({ name: 'Neu', shapes: [{ id: 'b' }] })
+    deleteTable(doc, t)
+    expect(readMaps(doc)[0].layers).toEqual([])
+    deleteMap(doc, id)
+    expect(readTabs(doc)).toEqual([])
+  })
+})

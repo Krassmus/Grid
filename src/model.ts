@@ -67,6 +67,7 @@ export const uid = () => crypto.randomUUID().slice(0, 8)
 
 export const tablesOf = (doc: Y.Doc) => doc.getMap<Y.Map<any>>('tables')
 export const viewsOf = (doc: Y.Doc) => doc.getMap<Y.Map<any>>('views')
+export const mapsOf = (doc: Y.Doc) => doc.getMap<Y.Map<any>>('maps')
 export const tableOrderOf = (doc: Y.Doc) => doc.getArray<string>('tableOrder')
 
 /**
@@ -207,13 +208,82 @@ export function readViews(doc: Y.Doc): ViewInfo[] {
   return out
 }
 
-export interface TabInfo { kind: 'table' | 'view'; id: string; name: string }
+// ---------- Karten ----------
+
+/** Eigenes Objekt auf einer Karte: Punkt, Strecke oder Gebiet. Koordinaten als [lat, lon]. */
+export type MapShape =
+  | { kind: 'point'; lat: number; lon: number; label: string; color: string }
+  | { kind: 'line' | 'area'; pts: [number, number][]; label: string; color: string }
+/** Eine Geo-Spalte, deren Zeilen auf der Karte erscheinen. */
+export interface MapLayer { table: string; col: string }
+export interface MapInfo { id: string; name: string; layers: MapLayer[]; shapes: { id: string; shape: MapShape }[] }
+
+const validShape = (s: any): s is MapShape =>
+  !!s && typeof s === 'object' && typeof s.label === 'string' && typeof s.color === 'string' &&
+  (s.kind === 'point' ? Number.isFinite(s.lat) && Number.isFinite(s.lon)
+    : (s.kind === 'line' || s.kind === 'area') && Array.isArray(s.pts) && s.pts.length >= (s.kind === 'line' ? 2 : 3) &&
+      s.pts.every((p: any) => Array.isArray(p) && Number.isFinite(p[0]) && Number.isFinite(p[1])))
+
+export function readMaps(doc: Y.Doc): MapInfo[] {
+  const out: MapInfo[] = []
+  mapsOf(doc).forEach((m, id) => {
+    const layers = (m.get('layers') ?? []) as MapLayer[]
+    const shapes: MapInfo['shapes'] = []
+    ;(m.get('shapes') as Y.Map<MapShape> | undefined)?.forEach((shape, sid) => { if (validShape(shape)) shapes.push({ id: sid, shape }) })
+    shapes.sort((a, b) => a.id.localeCompare(b.id))
+    out.push({ id, name: (m.get('name') as string) ?? '', layers: Array.isArray(layers) ? layers.filter((l) => l && l.table && l.col) : [], shapes })
+  })
+  return out
+}
+
+export function addMap(doc: Y.Doc, name: string, layers: MapLayer[]): string {
+  const id = uid()
+  doc.transact(() => {
+    const m = new Y.Map<any>()
+    m.set('name', name)
+    m.set('layers', layers)
+    m.set('shapes', new Y.Map())
+    mapsOf(doc).set(id, m)
+    tableOrderOf(doc).push([id])
+  })
+  return id
+}
+
+export function updateMap(doc: Y.Doc, id: string, patch: { name?: string; layers?: MapLayer[] }) {
+  const m = mapsOf(doc).get(id)
+  if (!m) return
+  doc.transact(() => {
+    if (patch.name !== undefined) m.set('name', patch.name)
+    if (patch.layers !== undefined) m.set('layers', patch.layers)
+  })
+}
+
+export function deleteMap(doc: Y.Doc, id: string) {
+  doc.transact(() => {
+    mapsOf(doc).delete(id)
+    const order = tableOrderOf(doc)
+    const arr = order.toArray()
+    for (let i = arr.length - 1; i >= 0; i--) if (arr[i] === id) order.delete(i, 1)
+  })
+}
+
+/** Legt ein Objekt an oder ersetzt es (je Objekt ein eigener Schlüssel: gleichzeitiges Zeichnen geht nicht verloren). */
+export function setMapShape(doc: Y.Doc, mapId: string, shapeId: string, shape: MapShape) {
+  const shapes = mapsOf(doc).get(mapId)?.get('shapes') as Y.Map<MapShape> | undefined
+  shapes?.set(shapeId, shape)
+}
+export function deleteMapShape(doc: Y.Doc, mapId: string, shapeId: string) {
+  ;(mapsOf(doc).get(mapId)?.get('shapes') as Y.Map<MapShape> | undefined)?.delete(shapeId)
+}
+
+export interface TabInfo { kind: 'table' | 'view' | 'map'; id: string; name: string }
 
 /** Tabellen und abgeleitete Tabellen in der Reihenfolge der Kopfzeile. */
 export function readTabs(doc: Y.Doc): TabInfo[] {
   const tabs: TabInfo[] = [
     ...readTables(doc).map((t) => ({ kind: 'table' as const, id: t.id, name: t.name })),
     ...readViews(doc).map((v) => ({ kind: 'view' as const, id: v.id, name: v.name })),
+    ...readMaps(doc).map((m) => ({ kind: 'map' as const, id: m.id, name: m.name })),
   ]
   const rank = new Map<string, number>()
   for (const id of tableOrderOf(doc).toArray()) if (!rank.has(id)) rank.set(id, rank.size)
@@ -463,6 +533,7 @@ export function deleteTable(doc: Y.Doc, tableId: string) {
     purgeRefs(doc, (tt, _r, _c, x) => tt === tableId || rowIds.has(x))
     tablesOf(doc).delete(tableId)
     for (const v of readViews(doc)) if (v.def.source === tableId) deleteView(doc, v.id) // abgeleitete Tabellen ohne Quelle sind sinnlos
+    for (const m of readMaps(doc)) if (m.layers.some((l) => l.table === tableId)) updateMap(doc, m.id, { layers: m.layers.filter((l) => l.table !== tableId) })
     const order = tableOrderOf(doc)
     const arr = order.toArray()
     for (let i = arr.length - 1; i >= 0; i--) if (arr[i] === tableId) order.delete(i, 1)

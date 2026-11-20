@@ -376,3 +376,37 @@ textarea.cell { resize: none; line-height: 1.35; overflow: hidden; display: bloc
 .minimap .geo-tag .tile .avatar { width: 20px; height: 20px; font-size: 9px; border-radius: 6px; }
 .minimap .geo-tag .tile .avatar.symbol { font-size: 14px; width: 20px; }
 .minimap .geo-tag .tile.rich-avatar { padding: 3px 9px 3px 4px; gap: 6px; }
+
+/* Kartenseite */
+.mapview { position: relative; isolation: isolate; z-index: 0; height: calc(100vh - 96px); min-height: 360px; margin: 0 16px 16px; border: 1px solid #d5dce0; border-radius: 12px; overflow: hidden; }
+.mapview-map { position: absolute; inset: 0; }
+.mapview .geo-tag-host { cursor: pointer; }
+.map-tools { position: absolute; top: 12px; left: 56px; z-index: 1000; display: flex; gap: 6px; padding: 6px; border-radius: 10px; background: #fffe; box-shadow: 0 1px 6px #0003; }
+.map-tools button.on { background: #1c1c1e; color: #fff; }
+.map-hint { position: absolute; left: 50%; bottom: 28px; transform: translateX(-50%); z-index: 1000; padding: 6px 12px; border-radius: 8px; background: #1c1c1ee6; color: #fff; font-size: 13px; max-width: 90%; }
+.map-panel { position: absolute; top: 12px; right: 12px; z-index: 1000; width: 250px; display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 12px; background: #fff; box-shadow: 0 2px 12px #0004; }
+.map-panel input { font: inherit; padding: 7px 8px; border: 1px solid #d2d2d7; border-radius: 8px; }
+.map-panel .hint { margin: 0; font-size: 12px; }
+.map-panel-head { display: flex; justify-content: space-between; align-items: center; }
+.map-panel-head button { border: none; background: none; color: #667; padding: 0 4px; }
+.map-colors { display: flex; gap: 6px; flex-wrap: wrap; }
+.map-colors button { width: 24px; height: 24px; padding: 0; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1px #c9d0d4; }
+.map-colors button.on { box-shadow: 0 0 0 2px #1c1c1e; }
+.mapmark-wrap, .vtx-wrap { background: none; border: none; overflow: visible; }
+.mapmark { position: relative; }
+.mapmark .geo-pin span { background: var(--c); }
+.mapmark.sel .geo-pin span { box-shadow: 0 0 0 3px #0a84ff80, 0 1px 4px #0006; }
+.mapmark b { position: absolute; left: 14px; top: -22px; white-space: nowrap; padding: 1px 7px; border-radius: 6px; background: #fffe; font-size: 12px; font-weight: 600; box-shadow: 0 1px 3px #0003; }
+.vtx { display: block; width: 14px; height: 14px; border-radius: 50%; background: #fff; border: 2px solid #0a84ff; box-sizing: border-box; cursor: move; }
+.vtx.mid { width: 10px; height: 10px; margin: 2px; opacity: .6; }
+.map-label { background: #fffe; border: none; box-shadow: 0 1px 3px #0003; font-weight: 600; }
+.tabs button.map::before { content: '⌖ '; }
+.add-popup { position: absolute; left: 0; top: calc(100% + 4px); z-index: 20; min-width: 150px; display: flex; flex-direction: column; padding: 4px; border-radius: 10px; background: #fff; box-shadow: 0 2px 12px #0003; border: 1px solid #e1e7ea; }
+.add-popup button { border: none; background: none; text-align: left; padding: 7px 10px; border-radius: 6px; }
+.add-popup button:hover { background: #f1f4f5; }
+.mapdialog { width: min(460px, 94vw); }
+.mapdialog label { display: flex; flex-direction: column; gap: 4px; }
+.mapdialog input[type="text"], .mapdialog input:not([type]) { font: inherit; padding: 8px; border: 1px solid #d2d2d7; border-radius: 8px; }
+.map-layers { border: 1px solid #e1e7ea; border-radius: 10px; padding: 8px 12px; margin: 10px 0; }
+.map-layers .check { flex-direction: row; align-items: center; gap: 8px; padding: 3px 0; }
+.mapdialog label, .mapdialog legend { color: #1c1c1e; }

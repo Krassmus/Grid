@@ -4,8 +4,9 @@ import * as Y from 'yjs'
 import 'leaflet/dist/leaflet.css'
 import { setCell, type ColumnInfo } from './model'
 import { GEO } from './columnTypes'
-import { GEO_FORMATS, TILE_ATTRIBUTION, TILE_URL, decodeGeo, encodeGeo, formatGeo, parseGeo, tilesAround, type GeoFormat, type LatLon } from './geo'
+import { GEO_FORMATS, decodeGeo, encodeGeo, formatGeo, parseGeo, tilesAround, type GeoFormat, type LatLon } from './geo'
 import { Modal } from './Modal'
+import { addBaseMap } from './baseMap'
 import { useCell } from './useTables'
 import { TileContent, useReprs } from './ReprTile'
 import type { Repr } from './repr'
@@ -110,7 +111,8 @@ function GeoDialog(props: { title: string; initial: LatLon | null; format: GeoFo
       if (!alive || !mapEl.current) return
       const start = props.initial
       map = L.map(mapEl.current).setView(start ? [start.lat, start.lon] : [51.1657, 10.4515], start ? 15 : 5)
-      L.tileLayer(TILE_URL, { maxZoom: 19, attribution: TILE_ATTRIBUTION }).addTo(map)
+      await addBaseMap(L, map)
+      if (!alive) return
       const icon = reprRef.current
         ? L.divIcon({ className: 'geo-tag-wrap', html: '', iconSize: [0, 0], iconAnchor: [0, 0] })
         : L.divIcon({ className: 'geo-pin-wrap', html: '<i class="geo-pin"><span></span></i>', iconSize: [28, 28], iconAnchor: [14, 28] })

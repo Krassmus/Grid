@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type
 import * as Y from 'yjs'
 import { IndexeddbPersistence } from 'y-indexeddb'
 import {
-  addColumn, addLink, addView, buildFileIndex, buildLinkIndex, tablesOf, type CellValue, deleteView, updateView, addRow, addTable, deleteColumn, deleteRow, deleteTable, moveColumn, moveLink, moveTable, removeLink, renameColumn, isComputed, rowExists, setCell, setColumnWidth, summarize,
+  addColumn, addLink, addMap, addView, deleteMap, updateMap, buildFileIndex, buildLinkIndex, tablesOf, type CellValue, deleteView, updateView, addRow, addTable, deleteColumn, deleteRow, deleteTable, moveColumn, moveLink, moveTable, removeLink, renameColumn, isComputed, rowExists, setCell, setColumnWidth, summarize,
   type AggFn, type ColType, type ColumnInfo, type LinkIndex, type LinkSlot, type TableInfo,
 } from './model'
 import { useCell, useFileIndex, useLinkIndex, useRowVersion, useTabs } from './useTables'
@@ -19,6 +19,8 @@ import { FormulaSyntaxError, parseFormula, parseTemplate } from './formula'
 import { effectiveType } from './columnTypes'
 import { ViewDialog } from './ViewDialog'
 import { ViewGrid } from './ViewGrid'
+import { MapView } from './MapView'
+import { MapDialog } from './MapDialog'
 import { aggLabel, allowedAggs, defaultAgg } from './aggregate'
 import { sortedRowIds, type SortDir } from './sorting'
 import { formatDate, toInputValue } from './dateFormat'
@@ -371,26 +373,32 @@ export function ClientPane(props: {
   onToggle?: () => void
 }) {
   const { doc } = props
-  const { tables, views, tabs } = useTabs(doc)
+  const { tables, views, maps, tabs } = useTabs(doc)
   const index = useLinkIndex(doc)
   const fileIndex = useFileIndex(doc)
   const [active, setActive] = useState<string | null>(null)
   const tab = tabs.find((t) => t.id === active) ?? tabs[0]
   const table = tab?.kind === 'table' ? tables.find((t) => t.id === tab.id) : undefined
   const view = tab?.kind === 'view' ? views.find((v) => v.id === tab.id) : undefined
+  const mapTab = tab?.kind === 'map' ? maps.find((m) => m.id === tab.id) : undefined
   // Menü der gewählten Tabelle (Bearbeiten, Abgeleitete Tabelle, Löschen)
   const [menuOpen, setMenuOpen] = useState(false)
+  const [addOpen, setAddOpen] = useState(false) // Menü des „+“ (Tabelle oder Karte)
   useEffect(() => {
-    if (!menuOpen) return
-    const away = (e: MouseEvent) => { if (!(e.target as Element).closest('.tabgroup.menu-open')) setMenuOpen(false) }
-    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenuOpen(false) }
+    if (!menuOpen && !addOpen) return
+    const close = () => { setMenuOpen(false); setAddOpen(false) }
+    const away = (e: MouseEvent) => { if (!(e.target as Element).closest('.tabgroup.menu-open')) close() }
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') close() }
     document.addEventListener('mousedown', away)
     document.addEventListener('keydown', esc)
     return () => { document.removeEventListener('mousedown', away); document.removeEventListener('keydown', esc) }
-  }, [menuOpen])
+  }, [menuOpen, addOpen])
   type ViewDialogState = { mode: 'new'; sourceId: string } | { mode: 'edit'; id: string }
   const [viewDialog, setViewDialog] = useState<ViewDialogState | null>(null)
   const [deletingView, setDeletingView] = useState<string | null>(null)
+  const [mapDialog, setMapDialog] = useState<{ mode: 'new' } | { mode: 'edit'; id: string } | null>(null)
+  const [deletingMap, setDeletingMap] = useState<string | null>(null)
+  const [mapRecord, setMapRecord] = useState<{ tableId: string; rowId: string } | null>(null) // auf der Karte angeklickte Zeile
 
   const [synced, setSynced] = useState(false)
   useEffect(() => {
@@ -569,7 +577,7 @@ export function ClientPane(props: {
           const current = t.id === tab?.id
           return (
             <span key={t.id} className={`tabgroup ${hintClass('table', t.id)}${current && menuOpen ? ' menu-open' : ''}`}>
-              <button className={`${current ? 'active' : ''}${t.kind === 'view' ? ' view' : ''}`} aria-haspopup={current ? 'menu' : undefined} aria-expanded={current ? menuOpen : undefined}
+              <button className={`${current ? 'active' : ''}${t.kind === 'view' ? ' view' : ''}${t.kind === 'map' ? ' map' : ''}`} aria-haspopup={current ? 'menu' : undefined} aria-expanded={current ? menuOpen : undefined}
                 onClick={() => { if (current) setMenuOpen((o) => !o); else { setActive(t.id); setMenuOpen(false) } }}
                 title={current ? 'Menü öffnen – Ziehen zum Umsortieren' : 'Ziehen zum Umsortieren'}
                 {...reorderProps('table', t.id, t.name)}>{t.name}{current && <span className="tab-caret"> ▾</span>}</button>
@@ -577,26 +585,36 @@ export function ClientPane(props: {
                 <div className="tab-popup" role="menu">
                   <button type="button" role="menuitem" autoFocus onClick={() => {
                     setMenuOpen(false)
-                    if (t.kind === 'table') setEditing({ kind: 'table', id: t.id }); else setViewDialog({ mode: 'edit', id: t.id })
+                    if (t.kind === 'table') setEditing({ kind: 'table', id: t.id }); else if (t.kind === 'map') setMapDialog({ mode: 'edit', id: t.id }); else setViewDialog({ mode: 'edit', id: t.id })
                   }}>Bearbeiten …</button>
                   {t.kind === 'table' && (
                     <button type="button" role="menuitem" onClick={() => { setMenuOpen(false); setViewDialog({ mode: 'new', sourceId: t.id }) }}>Abgeleitete Tabelle …</button>
                   )}
                   <button type="button" role="menuitem" className="danger-item" onClick={() => {
                     setMenuOpen(false)
-                    if (t.kind === 'table') setDeletingItem({ kind: 'table', id: t.id }); else setDeletingView(t.id)
+                    if (t.kind === 'table') setDeletingItem({ kind: 'table', id: t.id }); else if (t.kind === 'map') setDeletingMap(t.id); else setDeletingView(t.id)
                   }}>Löschen …</button>
                 </div>
               )}
             </span>
           )
         })}
-        <button onClick={() => setDialog('table')}>+ Tabelle</button>
+        <span className={`tabgroup${addOpen ? ' menu-open' : ''}`}>
+          <button aria-haspopup="menu" aria-expanded={addOpen} title="Tabelle oder Karte hinzufügen" aria-label="Hinzufügen"
+            onClick={() => { setAddOpen((o) => !o); setMenuOpen(false) }}>+</button>
+          {addOpen && (
+            <div className="add-popup" role="menu">
+              <button type="button" role="menuitem" autoFocus onClick={() => { setAddOpen(false); setDialog('table') }}>Neue Tabelle …</button>
+              <button type="button" role="menuitem" onClick={() => { setAddOpen(false); setMapDialog({ mode: 'new' }) }}>Neue Karte …</button>
+            </div>
+          )}
+        </span>
       </nav>
 
       {!synced && <p className="hint">Lade lokale Daten …</p>}
       {synced && !tab && <p className="hint">Noch keine Tabelle. Lege eine an.</p>}
       {view && <ViewGrid key={view.id} doc={doc} view={view} />}
+      {mapTab && <MapView key={mapTab.id} doc={doc} map={mapTab} tables={tables} onOpenRecord={(tableId, rowId) => setMapRecord({ tableId, rowId })} />}
 
       {table && (
         <>
@@ -726,6 +744,32 @@ export function ClientPane(props: {
             }} />
         )
       })()}
+      {mapDialog && (() => {
+        const editing = mapDialog.mode === 'edit' ? maps.find((m) => m.id === mapDialog.id) : undefined
+        if (mapDialog.mode === 'edit' && !editing) return null
+        return (
+          <MapDialog tables={tables} initial={editing && { name: editing.name, layers: editing.layers }}
+            onClose={() => setMapDialog(null)}
+            onDelete={editing && (() => { setDeletingMap(editing.id); setMapDialog(null) })}
+            onSubmit={(name, layers) => {
+              if (editing) updateMap(doc, editing.id, { name, layers })
+              else setActive(addMap(doc, name, layers))
+              setMapDialog(null)
+            }} />
+        )
+      })()}
+      {deletingMap && (() => {
+        const m = maps.find((x) => x.id === deletingMap)
+        if (!m) return null
+        return (
+          <ConfirmDialog detail={`Karte „${m.name}“ mit ${m.shapes.length} ${m.shapes.length === 1 ? 'eigenem Objekt' : 'eigenen Objekten'}. Die Tabellen und ihre Daten bleiben unverändert.`}
+            onCancel={() => setDeletingMap(null)}
+            onConfirm={() => { deleteMap(doc, m.id); setActive(null); setDeletingMap(null) }} />
+        )
+      })()}
+      {mapRecord && tables.find((t) => t.id === mapRecord.tableId) && (
+        <EditRecordDialog doc={doc} tables={tables} table={tables.find((t) => t.id === mapRecord.tableId)!} rowId={mapRecord.rowId} onClose={() => setMapRecord(null)} />
+      )}
       {deletingView && (() => {
         const v = views.find((x) => x.id === deletingView)
         if (!v) return null
