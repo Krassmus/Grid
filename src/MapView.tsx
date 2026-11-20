@@ -2,8 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import * as Y from 'yjs'
 import 'leaflet/dist/leaflet.css'
-import { deleteMapShape, getCell, setMapShape, uid, type MapInfo, type MapShape, type TableInfo } from './model'
-import { decodeGeo } from './geo'
+import { deleteMapShape, getCell, setCell, setMapShape, uid, type MapInfo, type MapShape, type TableInfo } from './model'
+import { decodeGeo, encodeGeo } from './geo'
 import { addBaseMap } from './baseMap'
 import { newCtx } from './cells'
 import { reprMap, type Repr } from './repr'
@@ -137,12 +137,42 @@ export function MapView(props: { doc: Y.Doc; map: MapInfo; tables: TableInfo[]; 
         const p = decodeGeo(getCell(doc, t.id, rid, layer.col))
         if (!p) continue
         const marker = g.L.marker([p.lat, p.lon], { keyboard: false, icon: g.L.divIcon({ className: 'geo-tag-wrap', html: '', iconSize: [0, 0], iconAnchor: [0, 0] }) }).addTo(g.data)
-        marker.on('click', () => { if (live.current.mode === 'select') openRef.current(t.id, rid) })
+        let moved = false
+        marker.on('click', () => { if (moved) { moved = false; return } if (live.current.mode === 'select') openRef.current(t.id, rid) })
         const icon: HTMLElement | undefined = marker.getElement()
         if (!icon) continue
         const host = document.createElement('div')
         host.className = 'geo-tag-host'
         icon.appendChild(host)
+        // Verschieben: die Spitze (Pfeil bzw. Punkt) ziehen und loslassen; ein Klick auf die Kachel öffnet weiter das Formular
+        // Leaflet schwenkt die Karte bei mousedown/touchstart: dort darf die Spitze nicht durchgereicht werden
+        const onTip = (e: Event) => !!(e.target as HTMLElement).closest('.geo-tag-arrow, .geo-pin') && live.current.mode === 'select'
+        for (const type of ['mousedown', 'touchstart']) host.addEventListener(type, (e) => { if (onTip(e)) e.stopPropagation() })
+        host.addEventListener('pointerdown', (e: PointerEvent) => {
+          if (e.button !== 0 || live.current.mode !== 'select' || !(e.target as HTMLElement).closest('.geo-tag-arrow, .geo-pin')) return
+          e.stopPropagation()
+          const map = g.map
+          const start = map.mouseEventToContainerPoint(e)
+          const origin = map.latLngToContainerPoint(marker.getLatLng())
+          let target = marker.getLatLng()
+          moved = false
+          const move = (ev: PointerEvent) => {
+            const q = map.mouseEventToContainerPoint(ev)
+            if (!moved && Math.hypot(q.x - start.x, q.y - start.y) < 4) return
+            moved = true
+            host.classList.add('dragging')
+            target = map.containerPointToLatLng([origin.x + q.x - start.x, origin.y + q.y - start.y])
+            marker.setLatLng(target)
+          }
+          const up = () => {
+            window.removeEventListener('pointermove', move)
+            window.removeEventListener('pointerup', up)
+            host.classList.remove('dragging')
+            if (moved) setCell(doc, t.id, rid, layer.col, encodeGeo({ lat: target.lat, lon: ((target.lng + 540) % 360) - 180 }))
+          }
+          window.addEventListener('pointermove', move)
+          window.addEventListener('pointerup', up)
+        })
         next.push({ key: `${t.id}|${rid}|${layer.col}`, el: host, repr: reprs.get(t.id)?.get(rid) })
       }
     }

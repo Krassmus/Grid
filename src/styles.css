@@ -416,3 +416,8 @@ textarea.cell { resize: none; line-height: 1.35; overflow: hidden; display: bloc
 
 /* Kachel nur mit Avatar (Titel ausgeschaltet): keine Mindestbreite */
 .tile:not(:has(.tile-body)), .c .tile.rich-avatar:not(:has(.tile-body)) { min-width: 0; padding: 5px; }
+.mapview .geo-tag-arrow, .mapview .geo-pin { cursor: grab; }
+.mapview .geo-tag-arrow { position: relative; }
+.mapview .geo-tag-arrow::before { content: ''; position: absolute; left: -12px; right: -12px; top: -4px; bottom: -6px; }
+.mapview .geo-tag-host.dragging, .mapview .geo-tag-host.dragging * { cursor: grabbing; }
+.mapview .geo-tag-host.dragging .tile { opacity: .85; }
