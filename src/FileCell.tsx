@@ -148,7 +148,7 @@ export function FileCell(props: {
   }
 
   return (
-    <div className={`c filecell ${over ? 'over' : ''}`}
+    <div className={`c filecell ${cfg.accept === 'images' ? 'images' : ''} ${over ? 'over' : ''}`}
       onDragOver={(e) => {
         if (acceptsInternal()) { e.preventDefault(); e.dataTransfer.dropEffect = e.altKey ? 'copy' : 'move'; setOver(true) }
         else if (!draggingFile && e.dataTransfer.types.includes('Files')) { e.preventDefault(); setOver(true) }

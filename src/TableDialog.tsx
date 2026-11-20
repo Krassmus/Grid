@@ -3,7 +3,7 @@ import * as Y from 'yjs'
 import { renameTable, setColumnHidden, setTableRepr, type TableInfo } from './model'
 import { Modal } from './Modal'
 import { newCtx } from './cells'
-import { computeRepr, reprConfig, type AvatarMode } from './repr'
+import { NO_TITLE, computeRepr, reprConfig, type AvatarMode } from './repr'
 import { TileContent, tileClasses } from './ReprTile'
 
 const AVATAR_LABELS: [AvatarMode, string][] = [
@@ -62,6 +62,7 @@ export function TableDialog(props: {
             <span>Titel</span>
             <select value={cfg.title} onChange={(e) => set('title', e.target.value)}>
               <option value="">Standard (erste Textspalte)</option>
+              <option value={NO_TITLE}>Keiner (nur der Avatar)</option>
               {valueCols.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </label>

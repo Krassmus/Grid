@@ -18,14 +18,17 @@ export function Avatar({ avatar }: { avatar: ReprAvatar }) {
 }
 
 /** Inhalt einer Kachel: Avatar, Titel und Untertitel. */
-export function TileContent({ repr }: { repr: Pick<Repr, 'title' | 'subs' | 'avatar'> }) {
+export function TileContent({ repr }: { repr: Pick<Repr, 'title' | 'subs' | 'avatar' | 'hideTitle'> }) {
+  const bare = !!repr.hideTitle && repr.subs.length === 0 // nur Avatar
   return (
     <>
       {repr.avatar && <Avatar avatar={repr.avatar} />}
-      <div className="tile-body">
-        <div className="tile-title">{repr.title}</div>
-        {repr.subs.map((x, i) => <div key={i} className="tile-sub">{x}</div>)}
-      </div>
+      {!bare && (
+        <div className="tile-body">
+          {!repr.hideTitle && <div className="tile-title">{repr.title}</div>}
+          {repr.subs.map((x, i) => <div key={i} className="tile-sub">{x}</div>)}
+        </div>
+      )}
     </>
   )
 }

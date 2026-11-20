@@ -9,7 +9,7 @@ import { columnCells, fileIndex, newCtx, type CellCtx } from './cells'
 export type AvatarMode = 'default' | 'none' | 'initial' | 'image' | 'icon' | 'text'
 
 export interface ReprConfig {
-  /** Spalte für den Titel; '' = Standard (erste Textspalte). */
+  /** Spalte für den Titel; '' = Standard (erste Textspalte), `NO_TITLE` = keiner (nur der Avatar, sofern es einen gibt). */
   title: string
   /** Spalte für den Untertitel; '' = keiner. */
   sub: string
@@ -19,6 +19,9 @@ export interface ReprConfig {
   /** Festes Symbol oder Emoji. */
   icon: string
 }
+
+/** Wert von `title`, wenn kein Titel angezeigt werden soll. */
+export const NO_TITLE = '-'
 
 const DEFAULTS: ReprConfig = { title: '', sub: '', avatar: 'default', avatarCol: '', icon: '' }
 const AVATARS: AvatarMode[] = ['default', 'none', 'initial', 'image', 'icon', 'text']
@@ -47,6 +50,8 @@ export interface Repr {
   /** Avatar bzw. Untertitel auch in den Zellen zeigen (nur, wenn ausdrücklich eingestellt). */
   avatarInCells: boolean
   subInCells: boolean
+  /** Titel nicht anzeigen (nur Avatar). `title` bleibt als Text für Suche, Sortierung und Beschriftungen erhalten. */
+  hideTitle?: boolean
 }
 
 const titleCapable = (c: ColumnInfo) => c.type !== 'relation' && c.type !== 'file'
@@ -85,7 +90,8 @@ export function computeRepr(doc: Y.Doc, tables: TableInfo[], table: TableInfo, c
       }
       default: avatar = fallback
     }
-    out.set(rid, { title, subs: subList, avatar, avatarInCells, subInCells })
+    const hideTitle = cfg.title === NO_TITLE && !!avatar // ohne Avatar bliebe die Kachel leer: dann bleibt der Titel
+    out.set(rid, { title, subs: subList, avatar, avatarInCells: avatarInCells || hideTitle, subInCells, hideTitle })
   }
   return out
 }

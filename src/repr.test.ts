@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import * as Y from 'yjs'
 import { addColumn, addFile, addLink, addRow, addTable, readTables, setCell, setColumnHidden, setTableRepr } from './model'
 import { columnCells } from './cells'
-import { computeRepr, reprConfig } from './repr'
+import { NO_TITLE, computeRepr, reprConfig } from './repr'
 
 /** Personen mit Name, Titel, Emoji und Bild; Gruppen verknüpfen Personen. */
 function setup() {
@@ -27,6 +27,14 @@ function setup() {
 }
 
 describe('Darstellung eines Datensatzes', () => {
+  it('Titel „Keiner“: nur der Avatar, der Text bleibt für Suche und Sortierung erhalten', () => {
+    const s = setup()
+    setTableRepr(s.doc, s.personen, 'title', NO_TITLE); setTableRepr(s.doc, s.personen, 'avatar', 'icon'); setTableRepr(s.doc, s.personen, 'icon', '🚒')
+    expect(s.repr()).toMatchObject({ title: 'Meier', hideTitle: true, avatarInCells: true, avatar: { text: '🚒', symbol: true } })
+    // Ohne Avatar bliebe die Kachel leer: dann wird der Titel trotzdem gezeigt
+    setTableRepr(s.doc, s.personen, 'avatar', 'none')
+    expect(s.repr().hideTitle).toBe(false)
+  })
   it('Standard: erste Textspalte als Titel, Initialen, kein Untertitel, keine Anzeige in Zellen', () => {
     const s = setup()
     const r = s.repr()
