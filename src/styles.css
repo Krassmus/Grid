@@ -449,3 +449,9 @@ textarea.cell { resize: none; line-height: 1.35; overflow: hidden; display: bloc
 .grid-head .add-col { border: none; background: none; box-shadow: none; padding: 0 6px; font-size: 22px; font-weight: 400; line-height: 1; color: #667; cursor: pointer; }
 .grid-head .add-col:hover { color: #0a58ca; background: none; }
 .grid-head .add-col { position: relative; top: -3px; }
+.tabs .tabgroup:last-child > button { position: relative; top: -4px; }
+/* Kachel nur mit Avatar (kein Text): keine Fläche und kein Rahmen um das Bild, es sieht aus wie ein Bild in einer Bilderspalte */
+.tiles .tile:not(:has(.tile-body)) { padding: 0; background: none; border: none; box-shadow: none; border-radius: 10px; }
+.tiles .tile:not(:has(.tile-body)) .avatar { width: 52px; height: 52px; border-radius: 10px; border: 1px solid #e1e7ea; box-sizing: border-box; }
+.tiles .tile:not(:has(.tile-body)) .avatar.symbol { width: 52px; background: #fff; font-size: 30px; }
+.tiles .tile.clickable:not(:has(.tile-body)):hover .avatar { border-color: #0a84ff; }
