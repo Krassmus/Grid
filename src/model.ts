@@ -115,6 +115,16 @@ export function addColumn(
   return id
 }
 
+/** Legt eine Zeile mit den angegebenen Werten an (alles in einer Änderung, also auch in einem Schritt rückgängig zu machen). */
+export function createRecord(doc: Y.Doc, tableId: string, values: Record<string, CellValue>): string {
+  let id = ''
+  doc.transact(() => {
+    id = addRow(doc, tableId)
+    for (const [col, v] of Object.entries(values)) if (v !== null && v !== '') setCell(doc, tableId, id, col, v)
+  })
+  return id
+}
+
 export function addRow(doc: Y.Doc, tableId: string): string {
   const id = uid()
   doc.transact(() => {

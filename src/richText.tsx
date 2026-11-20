@@ -86,3 +86,21 @@ export function RichTextDialog(props: { doc: Y.Doc; tableId: string; rowId: stri
     </Modal>
   )
 }
+
+/** Formatierter Text als Formularfeld (Werkzeugleiste + Eingabefläche); `onChange` bekommt bereinigtes HTML. */
+export function RichField({ value, onChange }: { value: string; onChange: (html: string) => void }) {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => { if (ref.current) ref.current.innerHTML = sanitizeHtml(value) }, [])
+  return (
+    <div className="rich-field">
+      <div className="rich-tools">
+        {TOOLS.map((t) => (
+          <button key={t.cmd} type="button" title={t.title} style={t.style} tabIndex={-1}
+            onMouseDown={(e) => { e.preventDefault(); document.execCommand(t.cmd); onChange(sanitizeHtml(ref.current?.innerHTML ?? '')) }}>{t.label}</button>
+        ))}
+      </div>
+      <div ref={ref} className="rich-editor" contentEditable suppressContentEditableWarning
+        onInput={() => onChange(sanitizeHtml(ref.current?.innerHTML ?? ''))} />
+    </div>
+  )
+}

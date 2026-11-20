@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type
 import * as Y from 'yjs'
 import { IndexeddbPersistence } from 'y-indexeddb'
 import {
-  addColumn, addLink, addView, deleteView, updateView, addRow, addTable, deleteColumn, deleteRow, deleteTable, moveColumn, moveLink, moveTable, removeLink, renameColumn, isComputed, rowExists, setCell, setColumnWidth, summarize,
+  addColumn, addLink, addView, buildFileIndex, buildLinkIndex, tablesOf, type CellValue, deleteView, updateView, addRow, addTable, deleteColumn, deleteRow, deleteTable, moveColumn, moveLink, moveTable, removeLink, renameColumn, isComputed, rowExists, setCell, setColumnWidth, summarize,
   type AggFn, type ColType, type ColumnInfo, type LinkIndex, type LinkSlot, type TableInfo,
 } from './model'
 import { useCell, useFileIndex, useLinkIndex, useRowVersion, useTabs } from './useTables'
@@ -11,6 +11,7 @@ import { SelectCell } from './SelectCell'
 import { ColumnDialog } from './ColumnDialog'
 import { FooterCell } from './Footer'
 import { GeoCell } from './GeoCell'
+import { RecordForm, commitRecord, firstTextColumn, formColumns, updateRecord, type ExistingRecord } from './RecordForm'
 import { ReprContext, TileContent, tileClasses, useReprs } from './ReprTile'
 import { initials, reprMap, type Repr } from './repr'
 import { columnCells, newCtx, type Cell as CellData } from './cells'
@@ -78,12 +79,16 @@ function Tile(props: {
 
 function Picker(props: {
   doc: Y.Doc
+  tables: TableInfo[]
+  /** Neuen Datensatz anlegen erlauben (nicht in der Auswahl innerhalb eines Formulars: dort würde er auch bei Abbruch bleiben). */
+  allowCreate?: boolean
   target: TableInfo
   linked: string[]
   onPick: (rowId: string) => void
   onClose: () => void
 }) {
   const [q, setQ] = useState('')
+  const [creating, setCreating] = useState(false)
   const reprs = useReprs()
   const rows = props.target.rowIds
     .filter((id) => !props.linked.includes(id))
@@ -103,9 +108,74 @@ function Picker(props: {
           ))}
           {rows.length === 0 && <p className="hint">Keine passenden Datensätze.</p>}
         </div>
-        <div className="actions"><button type="button" onClick={props.onClose}>Fertig</button></div>
+        <div className="actions split">
+          {props.allowCreate !== false ? <button type="button" onClick={() => setCreating(true)}>+ Neuer Datensatz …</button> : <span />}
+          <button type="button" onClick={props.onClose}>Fertig</button>
+        </div>
+        {creating && (
+          <RecordForm table={props.target} title={`Neuer Datensatz in „${props.target.name}“`}
+            initial={q.trim() && firstTextColumn(props.target) ? { [firstTextColumn(props.target)!.id]: q.trim() } : undefined}
+            onClose={() => setCreating(false)}
+            relationField={(col, ids, update) => <RelationDraftField doc={props.doc} tables={props.tables} col={col} ids={ids} update={update} />}
+            onSubmit={async (values, extras) => {
+              // Anlegen (mit Dateien und Verknüpfungen) und Verknüpfen mit der Quelle in einem Schritt
+              await commitRecord(props.doc, props.target.id, values, extras, (id) => props.onPick(id))
+              setCreating(false)
+              props.onClose()
+            }} />
+        )}
       </div>
     </Modal>
+  )
+}
+
+/** Bestehenden Datensatz im Formular bearbeiten (Klick auf eine Kachel). Änderungen werden erst mit „Speichern“ übernommen. */
+function EditRecordDialog(props: { doc: Y.Doc; tables: TableInfo[]; table: TableInfo; rowId: string; onClose: () => void }) {
+  const { doc, tables, table, rowId } = props
+  const reprs = useReprs()
+  const title = reprs(table.id)?.get(rowId)?.title ?? summarize(doc, table, rowId).title
+  // Stand beim Öffnen: Werte, Dateien, Verknüpfungen
+  const [snap] = useState(() => {
+    const row: Y.Map<any> | undefined = tablesOf(doc).get(table.id)?.get('rows').get(rowId)
+    const values: Record<string, CellValue> = {}
+    for (const c of formColumns(table)) if (c.type !== 'relation' && c.type !== 'file') values[c.id] = (row?.get(c.id) as CellValue | undefined) ?? null
+    const links = buildLinkIndex(doc).forward, files = buildFileIndex(doc)
+    const existing: ExistingRecord = { files: {}, relations: {} }
+    for (const c of table.columns) {
+      if (c.type === 'relation') existing.relations[c.id] = [...(links.get(`${rowId}|${c.id}`) ?? [])]
+      if (c.type === 'file') existing.files[c.id] = [...(files.get(`${rowId}|${c.id}`) ?? [])]
+    }
+    return { values, existing }
+  })
+  return (
+    <RecordForm table={table} title={`„${title}“ bearbeiten`} submitLabel="Speichern" initial={snap.values} existing={snap.existing}
+      onClose={props.onClose}
+      relationField={(col, ids, update) => <RelationDraftField doc={doc} tables={tables} col={col} ids={ids} update={update} />}
+      onSubmit={async (values, extras) => {
+        await updateRecord(doc, table.id, rowId, values, snap.values, extras, snap.existing.relations)
+        props.onClose()
+      }} />
+  )
+}
+
+/** Relationsfeld im Formular: gewählte Zielzeilen als Kacheln, „+“ öffnet die Auswahl. Gespeichert wird erst beim Anlegen. */
+function RelationDraftField(props: { doc: Y.Doc; tables: TableInfo[]; col: ColumnInfo; ids: string[]; update: (f: (prev: string[]) => string[]) => void }) {
+  const { doc, tables, col, ids, update } = props
+  const target = tables.find((t) => t.id === col.target)
+  const [picking, setPicking] = useState(false)
+  const single = RELATION.config(col).single
+  return (
+    <div className="tiles rf-tiles">
+      {ids.map((id) => <Tile key={id} doc={doc} table={target} rowId={id} onRemove={() => update((p) => p.filter((x) => x !== id))} />)}
+      {!(single && ids.length >= 1) && (
+        <button type="button" className="add-tile" onClick={() => setPicking(true)} disabled={!target} title={target ? 'Datensatz verknüpfen' : 'Zieltabelle fehlt'}>+</button>
+      )}
+      {picking && target && (
+        <Picker doc={doc} tables={tables} target={target} linked={ids} allowCreate={false}
+          onPick={(id) => update((p) => (p.includes(id) ? p : [...p, id]))}
+          onClose={() => setPicking(false)} />
+      )}
+    </div>
   )
 }
 
@@ -122,6 +192,7 @@ function RelationCell(props: {
   const ids = index.forward.get(`${rowId}|${col.id}`) ?? []
   const anim = useAnimatedList(ids, (id) => id)
   const [picking, setPicking] = useState(false)
+  const [editingRow, setEditingRow] = useState<string | null>(null) // Datensatz im Formular öffnen
   const [over, setOver] = useState(false)
   const slot: LinkSlot = { tableId: table.id, rowId, colId: col.id }
 
@@ -152,6 +223,7 @@ function RelationCell(props: {
           <AnimItem key={e.key} phase={e.phase} onExited={() => anim.done(e.key)}>
             <Tile doc={doc} table={target} rowId={e.item}
               drag={{ slot, targetTable: col.target }}
+              onClick={() => setEditingRow(e.item)}
               onRemove={() => removeLink(doc, table.id, rowId, col.id, e.item)} />
           </AnimItem>
         ))}
@@ -159,9 +231,12 @@ function RelationCell(props: {
           title={target ? 'Datensatz verknüpfen' : 'Zieltabelle fehlt'}>+</button>}
       </div>
       {picking && target && (
-        <Picker doc={doc} target={target} linked={ids}
+        <Picker doc={doc} tables={tables} target={target} linked={ids}
           onPick={(id) => addLink(doc, table.id, rowId, col.id, id)}
           onClose={() => setPicking(false)} />
+      )}
+      {editingRow && target && rowExists(doc, target.id, editingRow) && (
+        <EditRecordDialog doc={doc} tables={tables} table={target} rowId={editingRow} onClose={() => setEditingRow(null)} />
       )}
     </div>
   )
@@ -170,6 +245,7 @@ function RelationCell(props: {
 /** Rückverweise: schreibgeschützte Spalte, berechnet aus Relationen anderer Tabellen. */
 function BacklinkCell(props: {
   doc: Y.Doc
+  tables: TableInfo[]
   source: TableInfo
   rowId: string
   col: ColumnInfo
@@ -178,16 +254,20 @@ function BacklinkCell(props: {
   const ids = (props.index.backward.get(`${props.rowId}|${props.col.id}`) ?? [])
     .filter((id) => rowExists(props.doc, props.source.id, id))
   const anim = useAnimatedList(ids, (id) => id)
+  const [editingRow, setEditingRow] = useState<string | null>(null)
   return (
     <div className="c rel backlink">
       <div className="tiles">
         {anim.entries.map((e) => (
           <AnimItem key={e.key} phase={e.phase} onExited={() => anim.done(e.key)}>
-            <Tile doc={props.doc} table={props.source} rowId={e.item} muted />
+            <Tile doc={props.doc} table={props.source} rowId={e.item} muted onClick={() => setEditingRow(e.item)} />
           </AnimItem>
         ))}
         {anim.entries.length === 0 && <span className="empty">–</span>}
       </div>
+      {editingRow && rowExists(props.doc, props.source.id, editingRow) && (
+        <EditRecordDialog doc={props.doc} tables={props.tables} table={props.source} rowId={editingRow} onClose={() => setEditingRow(null)} />
+      )}
     </div>
   )
 }
@@ -419,6 +499,8 @@ export function ClientPane(props: {
     const wanted = new Set<string>([table.id])
     for (const c of table.columns) if (c.type === 'relation' && c.target) wanted.add(c.target)
     for (const t of tables) if (t.columns.some((c) => c.type === 'relation' && c.target === table.id)) wanted.add(t.id)
+    // Formulare für neue Datensätze zeigen deren Relationen: auch die Ziele der Zieltabellen
+    for (const id of [...wanted]) for (const c of tables.find((t) => t.id === id)?.columns ?? []) if (c.type === 'relation' && c.target) wanted.add(c.target)
     for (const t of tables) if (wanted.has(t.id)) r.set(t.id, reprMap(doc, tables, t, ctx))
     return { cellData: m, reprs: r }
     // `index` (Verknüpfungen), `fileIndex` (Bilder) und `tables` (Werte, Struktur) decken alle Änderungen ab, die das Ergebnis beeinflussen
@@ -564,7 +646,7 @@ export function ClientPane(props: {
                         ? <SelectCell key={c.id} doc={doc} tableId={table.id} rowId={rid} col={c} />
                         : <Cell key={c.id} doc={doc} table={table.id} rowId={rid} col={c} lead={i === 0} />)}
                     {backlinks.map(({ source, col }) => (
-                      <BacklinkCell key={col.id} doc={doc} source={source} rowId={rid} col={col} index={index} />
+                      <BacklinkCell key={col.id} doc={doc} tables={tables} source={source} rowId={rid} col={col} index={index} />
                     ))}
                     <div className="c actions-c"><button className="del" title="Zeile löschen" onClick={() => setDeleting(rid)}>✕</button></div>
                   </div>
