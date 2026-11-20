@@ -266,8 +266,6 @@ textarea.cell { resize: none; line-height: 1.35; overflow: hidden; display: bloc
 
 /* Menü der gewählten Tabelle */
 .tabgroup { position: relative; }
-.tabs button.view { font-style: italic; border-style: dashed; }
-.tabs .active.view { border-style: solid; }
 .tab-caret { opacity: .8; font-size: 12px; }
 .tab-popup { position: absolute; top: calc(100% + 4px); left: 0; z-index: 20; min-width: 190px; display: grid; padding: 4px; background: #fff; border: 1px solid #d5dce0; border-radius: 10px; box-shadow: 0 8px 24px #0003; }
 .tab-popup button { border: none; background: none; text-align: left; padding: 8px 12px; border-radius: 7px; font-style: normal; color: #1f2a30; }
@@ -400,7 +398,6 @@ textarea.cell { resize: none; line-height: 1.35; overflow: hidden; display: bloc
 .vtx { display: block; width: 14px; height: 14px; border-radius: 50%; background: #fff; border: 2px solid #0a84ff; box-sizing: border-box; cursor: move; }
 .vtx.mid { width: 10px; height: 10px; margin: 2px; opacity: .6; }
 .map-label { background: #fffe; border: none; box-shadow: 0 1px 3px #0003; font-weight: 600; }
-.tabs button.map::before { content: ''; display: inline-block; width: 1em; height: 1em; margin-right: 6px; vertical-align: -0.12em; background: currentColor; -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.4' stroke-linecap='round'%3E%3Ccircle cx='8' cy='8' r='4.2'/%3E%3Cpath d='M8 1v4M8 11v4M1 8h4M11 8h4'/%3E%3C/svg%3E") center / contain no-repeat; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.4' stroke-linecap='round'%3E%3Ccircle cx='8' cy='8' r='4.2'/%3E%3Cpath d='M8 1v4M8 11v4M1 8h4M11 8h4'/%3E%3C/svg%3E") center / contain no-repeat; }
 .add-popup { position: absolute; left: 0; top: calc(100% + 4px); z-index: 20; min-width: 150px; display: flex; flex-direction: column; padding: 4px; border-radius: 10px; background: #fff; box-shadow: 0 2px 12px #0003; border: 1px solid #e1e7ea; }
 .add-popup button { border: none; background: none; text-align: left; padding: 7px 10px; border-radius: 6px; }
 .add-popup button:hover { background: #f1f4f5; }
@@ -429,3 +426,22 @@ textarea.cell { resize: none; line-height: 1.35; overflow: hidden; display: bloc
 .tile:has(> .tile-x) { position: relative; }
 .tile > .tile-x { position: absolute; top: -7px; right: -7px; width: 18px; height: 18px; border-radius: 50%; background: #fff; border: 1px solid #d5dce0; color: #667; font-size: 10px; line-height: 1; padding: 0; box-shadow: 0 1px 2px #0002; cursor: pointer; z-index: 1; }
 .tile > .tile-x:hover { color: #c0392b; border-color: #c0392b; }
+
+/* Reiterleiste: flache Reiter mit Symbol, Zeilenzahl und Unterstreichung des aktiven Reiters */
+.tabs { gap: 2px 26px; padding: 0 16px; margin: 0 0 14px; border-bottom: 1px solid #e3e7ea; align-items: flex-end; }
+.tabs .tabgroup > button { display: inline-flex; align-items: center; gap: 8px; border: none; border-bottom: 2px solid transparent; border-radius: 0; background: none; box-shadow: none; padding: 12px 2px 10px; margin-bottom: -1px; font-size: 15px; font-weight: 500; color: #1c1c1e; }
+.tabs .tabgroup > button:hover { color: #0a58ca; background: none; }
+.tabs .tabgroup > button.active, .tabs .active { background: none; color: #1456c8; border-bottom-color: #1456c8; font-weight: 600; }
+.sheet-icon { width: 19px; height: 19px; flex: none; display: inline-block; }
+.sheet-icon.emoji { display: inline-flex; align-items: center; justify-content: center; font-size: 16px; line-height: 1; width: 19px; }
+.tab-count { font-size: 12px; font-weight: 500; color: #5b6670; background: #e8edf3; border-radius: 10px; padding: 1px 7px; }
+.tabs .active .tab-count { color: #1456c8; background: #dbe7fb; }
+.tab-caret { font-size: 10px; margin-left: -2px; opacity: .7; }
+.tabs .tabgroup:last-child > button { font-size: 22px; font-weight: 400; padding: 8px 6px 6px; line-height: 1; }
+.icon-picker { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
+.icon-picker-label { font-size: 12px; color: #667; }
+.icon-grid { display: flex; flex-wrap: wrap; gap: 4px; }
+.icon-grid button, .icon-grid input { width: 34px; height: 34px; padding: 0; border: 1px solid #d5dce0; border-radius: 8px; background: #fff; display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; }
+.icon-grid button.on, .icon-grid input.on { border-color: #1456c8; background: #eaf1fd; color: #1456c8; box-shadow: 0 0 0 1px #1456c8; }
+.icon-grid input { text-align: center; font-size: 16px; }
+.icon-grid .sheet-icon { width: 20px; height: 20px; }

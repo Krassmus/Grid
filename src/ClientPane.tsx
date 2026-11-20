@@ -9,6 +9,8 @@ import { useCell, useFileIndex, useLinkIndex, useRowVersion, useTabs } from './u
 import { FileCell } from './FileCell'
 import { SelectCell } from './SelectCell'
 import { ColumnDialog } from './ColumnDialog'
+import { SheetIcon } from './icons'
+import { computeView } from './viewEngine'
 import { FooterCell } from './Footer'
 import { GeoCell } from './GeoCell'
 import { RecordForm, commitRecord, firstTextColumn, formColumns, updateRecord, type ExistingRecord } from './RecordForm'
@@ -413,6 +415,11 @@ export function ClientPane(props: {
   const fileIndex = useFileIndex(doc)
   const [active, setActive] = useState<string | null>(null)
   const tab = tabs.find((t) => t.id === active) ?? tabs[0]
+  // Zeilenzahl je Reiter: Tabellen kennt das Modell, abgeleitete Tabellen werden berechnet
+  const shownTabs = useMemo(() => tabs.map((t) => {
+    const v = t.kind === 'view' ? views.find((x) => x.id === t.id) : undefined
+    return v ? { ...t, count: computeView(doc, v.def).rows.length } : t
+  }), [tabs, views, doc, tables])
   const table = tab?.kind === 'table' ? tables.find((t) => t.id === tab.id) : undefined
   const view = tab?.kind === 'view' ? views.find((v) => v.id === tab.id) : undefined
   const mapTab = tab?.kind === 'map' ? maps.find((m) => m.id === tab.id) : undefined
@@ -608,14 +615,18 @@ export function ClientPane(props: {
       {/* Alles bis zur Tabelle scrollt gemeinsam; der Tabellenkopf bleibt oben stehen, die Leiste „+ Zeile“ unten. */}
       <div className="gridscroll">
       <nav className="tabs">
-        {tabs.map((t) => {
+        {shownTabs.map((t) => {
           const current = t.id === tab?.id
           return (
             <span key={t.id} className={`tabgroup ${hintClass('table', t.id)}${current && menuOpen ? ' menu-open' : ''}`}>
-              <button className={`${current ? 'active' : ''}${t.kind === 'view' ? ' view' : ''}${t.kind === 'map' ? ' map' : ''}`} aria-haspopup={current ? 'menu' : undefined} aria-expanded={current ? menuOpen : undefined}
+              <button className={current ? 'active' : ''} aria-haspopup={current ? 'menu' : undefined} aria-expanded={current ? menuOpen : undefined}
                 onClick={() => { if (current) setMenuOpen((o) => !o); else { setActive(t.id); setMenuOpen(false) } }}
                 title={current ? 'Menü öffnen – Ziehen zum Umsortieren' : 'Ziehen zum Umsortieren'}
-                {...reorderProps('table', t.id, t.name)}>{t.name}{current && <span className="tab-caret"> ▾</span>}</button>
+                {...reorderProps('table', t.id, t.name)}>
+                <SheetIcon icon={t.icon} kind={t.kind} />
+                <span className="tab-name">{t.name}</span>
+                {t.count !== undefined && <span className="tab-count">{t.count}</span>}
+                {current && <span className="tab-caret">▾</span>}</button>
               {current && menuOpen && (
                 <div className="tab-popup" role="menu">
                   <button type="button" role="menuitem" autoFocus onClick={() => {
@@ -770,11 +781,11 @@ export function ClientPane(props: {
         const source = tables.find((t) => t.id === (editing ? editing.def.source : viewDialog.mode === 'new' ? viewDialog.sourceId : ''))
         if (!source) return null
         return (
-          <ViewDialog doc={doc} source={source} tables={tables} initial={editing && { name: editing.name, def: editing.def }}
+          <ViewDialog doc={doc} source={source} tables={tables} initial={editing && { name: editing.name, def: editing.def, icon: editing.icon }}
             onClose={() => setViewDialog(null)}
-            onSubmit={(name, def) => {
-              if (editing) updateView(doc, editing.id, { name, def })
-              else setActive(addView(doc, name, def))
+            onSubmit={(name, def, icon) => {
+              if (editing) updateView(doc, editing.id, { name, def, icon })
+              else setActive(addView(doc, name, def, icon))
               setViewDialog(null)
             }} />
         )
@@ -783,12 +794,12 @@ export function ClientPane(props: {
         const editing = mapDialog.mode === 'edit' ? maps.find((m) => m.id === mapDialog.id) : undefined
         if (mapDialog.mode === 'edit' && !editing) return null
         return (
-          <MapDialog tables={tables} initial={editing && { name: editing.name, layers: editing.layers }}
+          <MapDialog tables={tables} initial={editing && { name: editing.name, layers: editing.layers, icon: editing.icon }}
             onClose={() => setMapDialog(null)}
             onDelete={editing && (() => { setDeletingMap(editing.id); setMapDialog(null) })}
-            onSubmit={(name, layers) => {
-              if (editing) updateMap(doc, editing.id, { name, layers })
-              else setActive(addMap(doc, name, layers))
+            onSubmit={(name, layers, icon) => {
+              if (editing) updateMap(doc, editing.id, { name, layers, icon })
+              else setActive(addMap(doc, name, layers, icon))
               setMapDialog(null)
             }} />
         )

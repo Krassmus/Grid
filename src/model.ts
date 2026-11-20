@@ -44,6 +44,8 @@ export interface TableInfo {
   rowIds: string[]
   /** Darstellung eines Datensatzes in anderen Tabellen (siehe repr.ts); je Einstellung ein Schlüssel `repr.<name>`. */
   repr: Record<string, unknown>
+  /** Symbol im Reiter (siehe icons.tsx); leer = Standard. */
+  icon?: string
 }
 
 // ---------- Abgeleitete Tabellen (Views) ----------
@@ -60,7 +62,7 @@ export interface ViewDef {
   group: { mode: 'none' | 'column' | 'all'; col?: string }
   aggs: Record<string, ViewAgg>
 }
-export interface ViewInfo { id: string; name: string; def: ViewDef }
+export interface ViewInfo { id: string; name: string; def: ViewDef; icon?: string }
 
 export const emptyViewDef = (source: string): ViewDef => ({ source, match: 'all', filters: [], group: { mode: 'none' }, aggs: {} })
 
@@ -184,7 +186,7 @@ export function readTables(doc: Y.Doc): TableInfo[] {
     const rowIds = [...new Set<string>(t.get('rowOrder').toArray())].filter((rid) => rows.has(rid))
     const repr: Record<string, unknown> = {}
     t.forEach((v, k) => { if (k.startsWith(REPR)) repr[k.slice(REPR.length)] = v })
-    out.push({ id, name: t.get('name'), columns, rowIds, repr })
+    out.push({ id, name: t.get('name'), columns, rowIds, repr, icon: (t.get('icon') as string | undefined) || undefined })
   })
   // Reihenfolge laut tableOrder (dedupliziert); unbekannte Tabellen (Altdaten, parallel angelegt) danach nach ID.
   const rank = new Map<string, number>()
@@ -204,7 +206,7 @@ export function readViews(doc: Y.Doc): ViewInfo[] {
       group: raw.group && ['none', 'column', 'all'].includes(raw.group.mode) ? raw.group : { mode: 'none' },
       aggs: raw.aggs && typeof raw.aggs === 'object' ? raw.aggs : {},
     }
-    out.push({ id, name: (v.get('name') as string) ?? '', def })
+    out.push({ id, name: (v.get('name') as string) ?? '', def, icon: (v.get('icon') as string | undefined) || undefined })
   })
   return out
 }
@@ -217,7 +219,7 @@ export type MapShape =
   | { kind: 'line' | 'area'; pts: [number, number][]; label: string; color: string }
 /** Eine Geo-Spalte, deren Zeilen auf der Karte erscheinen. */
 export interface MapLayer { table: string; col: string }
-export interface MapInfo { id: string; name: string; layers: MapLayer[]; shapes: { id: string; shape: MapShape }[] }
+export interface MapInfo { id: string; name: string; layers: MapLayer[]; shapes: { id: string; shape: MapShape }[]; icon?: string }
 
 const validShape = (s: any): s is MapShape =>
   !!s && typeof s === 'object' && typeof s.label === 'string' && typeof s.color === 'string' &&
@@ -232,17 +234,18 @@ export function readMaps(doc: Y.Doc): MapInfo[] {
     const shapes: MapInfo['shapes'] = []
     ;(m.get('shapes') as Y.Map<MapShape> | undefined)?.forEach((shape, sid) => { if (validShape(shape)) shapes.push({ id: sid, shape }) })
     shapes.sort((a, b) => a.id.localeCompare(b.id))
-    out.push({ id, name: (m.get('name') as string) ?? '', layers: Array.isArray(layers) ? layers.filter((l) => l && l.table && l.col) : [], shapes })
+    out.push({ id, name: (m.get('name') as string) ?? '', layers: Array.isArray(layers) ? layers.filter((l) => l && l.table && l.col) : [], shapes, icon: (m.get('icon') as string | undefined) || undefined })
   })
   return out
 }
 
-export function addMap(doc: Y.Doc, name: string, layers: MapLayer[]): string {
+export function addMap(doc: Y.Doc, name: string, layers: MapLayer[], icon = ''): string {
   const id = uid()
   doc.transact(() => {
     const m = new Y.Map<any>()
     m.set('name', name)
     m.set('layers', layers)
+    if (icon) m.set('icon', icon)
     m.set('shapes', new Y.Map())
     mapsOf(doc).set(id, m)
     tableOrderOf(doc).push([id])
@@ -250,12 +253,13 @@ export function addMap(doc: Y.Doc, name: string, layers: MapLayer[]): string {
   return id
 }
 
-export function updateMap(doc: Y.Doc, id: string, patch: { name?: string; layers?: MapLayer[] }) {
+export function updateMap(doc: Y.Doc, id: string, patch: { name?: string; layers?: MapLayer[]; icon?: string }) {
   const m = mapsOf(doc).get(id)
   if (!m) return
   doc.transact(() => {
     if (patch.name !== undefined) m.set('name', patch.name)
     if (patch.layers !== undefined) m.set('layers', patch.layers)
+    if (patch.icon !== undefined) setOrDelete(m, 'icon', patch.icon)
   })
 }
 
@@ -277,26 +281,28 @@ export function deleteMapShape(doc: Y.Doc, mapId: string, shapeId: string) {
   ;(mapsOf(doc).get(mapId)?.get('shapes') as Y.Map<MapShape> | undefined)?.delete(shapeId)
 }
 
-export interface TabInfo { kind: 'table' | 'view' | 'map'; id: string; name: string }
+/** Eintrag der Kopfzeile; `count` = Zeilenzahl (bei Tabellen hier, bei abgeleiteten Tabellen setzt es die Oberfläche). */
+export interface TabInfo { kind: 'table' | 'view' | 'map'; id: string; name: string; icon: string; count?: number }
 
 /** Tabellen und abgeleitete Tabellen in der Reihenfolge der Kopfzeile. */
 export function readTabs(doc: Y.Doc): TabInfo[] {
   const tabs: TabInfo[] = [
-    ...readTables(doc).map((t) => ({ kind: 'table' as const, id: t.id, name: t.name })),
-    ...readViews(doc).map((v) => ({ kind: 'view' as const, id: v.id, name: v.name })),
-    ...readMaps(doc).map((m) => ({ kind: 'map' as const, id: m.id, name: m.name })),
+    ...readTables(doc).map((t) => ({ kind: 'table' as const, id: t.id, name: t.name, icon: t.icon ?? '', count: t.rowIds.length })),
+    ...readViews(doc).map((v) => ({ kind: 'view' as const, id: v.id, name: v.name, icon: v.icon ?? '' })),
+    ...readMaps(doc).map((m) => ({ kind: 'map' as const, id: m.id, name: m.name, icon: m.icon ?? '' })),
   ]
   const rank = new Map<string, number>()
   for (const id of tableOrderOf(doc).toArray()) if (!rank.has(id)) rank.set(id, rank.size)
   return tabs.sort((a, b) => (rank.get(a.id) ?? Infinity) - (rank.get(b.id) ?? Infinity) || a.id.localeCompare(b.id))
 }
 
-export function addView(doc: Y.Doc, name: string, def: ViewDef): string {
+export function addView(doc: Y.Doc, name: string, def: ViewDef, icon = ''): string {
   const id = uid()
   doc.transact(() => {
     const v = new Y.Map<any>()
     v.set('name', name)
     v.set('def', def)
+    if (icon) v.set('icon', icon)
     viewsOf(doc).set(id, v)
     tableOrderOf(doc).push([id])
   })
@@ -304,12 +310,13 @@ export function addView(doc: Y.Doc, name: string, def: ViewDef): string {
 }
 
 /** Ersetzt Name und/oder Definition (die Definition als Ganzes: bei gleichzeitigen Änderungen gewinnt eine). */
-export function updateView(doc: Y.Doc, id: string, patch: { name?: string; def?: ViewDef }) {
+export function updateView(doc: Y.Doc, id: string, patch: { name?: string; def?: ViewDef; icon?: string }) {
   const v = viewsOf(doc).get(id)
   if (!v) return
   doc.transact(() => {
     if (patch.name !== undefined) v.set('name', patch.name)
     if (patch.def !== undefined) v.set('def', patch.def)
+    if (patch.icon !== undefined) setOrDelete(v, 'icon', patch.icon)
   })
 }
 
@@ -500,6 +507,14 @@ export function deleteOption(doc: Y.Doc, tableId: string, colId: string, optionI
 }
 
 // ---------- Umbenennen und Löschen ----------
+
+const setOrDelete = (m: Y.Map<any>, key: string, value: string) => { if (value) m.set(key, value); else m.delete(key) }
+
+/** Setzt das Symbol eines Reiters (Tabelle); leer = Standard. */
+export function setTableIcon(doc: Y.Doc, tableId: string, icon: string) {
+  const t = tablesOf(doc).get(tableId)
+  if (t) setOrDelete(t, 'icon', icon)
+}
 
 export function renameTable(doc: Y.Doc, tableId: string, name: string) {
   tablesOf(doc).get(tableId)?.set('name', name)

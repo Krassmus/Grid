@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import * as Y from 'yjs'
 import { emptyViewDef, type ColumnInfo, type FilterOp, type TableInfo, type ViewDef, type ViewFilter } from './model'
+import { IconPicker } from './icons'
 import { Modal } from './Modal'
 import { effectiveType } from './columnTypes'
 import { OPS_BY_TYPE, aggLabel, aggOf, allowedAggs, computeView, opLabel, opNeedsValue } from './viewEngine'
@@ -11,12 +12,13 @@ export function ViewDialog(props: {
   source: TableInfo
   tables: TableInfo[]
   /** Zum Bearbeiten: bisheriger Name und Definition. */
-  initial?: { name: string; def: ViewDef }
-  onSubmit: (name: string, def: ViewDef) => void
+  initial?: { name: string; def: ViewDef; icon?: string }
+  onSubmit: (name: string, def: ViewDef, icon: string) => void
   onClose: () => void
 }) {
   const { doc, source, tables } = props
   const typeOf = (c: ColumnInfo) => effectiveType(c, tables)
+  const [icon, setIcon] = useState(props.initial?.icon ?? '')
   const [name, setName] = useState(props.initial?.name ?? `${source.name} – abgeleitet`)
   const [def, setDef] = useState<ViewDef>(props.initial?.def ?? emptyViewDef(source.id))
   const cols = source.columns
@@ -43,7 +45,7 @@ export function ViewDialog(props: {
     })
 
   const valid = name.trim() !== '' && (def.group.mode !== 'column' || !!groupCol)
-  const submit = () => { if (valid) props.onSubmit(name.trim(), def) }
+  const submit = () => { if (valid) props.onSubmit(name.trim(), def, icon) }
 
   const valueInput = (f: ViewFilter, i: number, c: ColumnInfo) => {
     if (!opNeedsValue(f.op)) return <span />
@@ -72,6 +74,7 @@ export function ViewDialog(props: {
           <span>Name</span>
           <input autoFocus value={name} onFocus={(e) => e.target.select()} onChange={(e) => setName(e.target.value)} />
         </label>
+        <IconPicker value={icon} kind="view" onChange={setIcon} />
 
         <section className="vd-section">
           <h4>Bedingungen</h4>

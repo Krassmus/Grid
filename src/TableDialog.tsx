@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import * as Y from 'yjs'
-import { renameTable, setColumnHidden, setTableRepr, type TableInfo } from './model'
+import { renameTable, setColumnHidden, setTableIcon, setTableRepr, type TableInfo } from './model'
+import { IconPicker } from './icons'
 import { Modal } from './Modal'
 import { newCtx } from './cells'
 import { NO_TITLE, computeRepr, reprConfig, type AvatarMode } from './repr'
@@ -54,6 +55,7 @@ export function TableDialog(props: {
           <span>Name</span>
           <input autoFocus value={name} onFocus={(e) => e.target.select()} onChange={(e) => setName(e.target.value)} />
         </label>
+        <IconPicker value={table.icon ?? ''} kind="table" onChange={(i) => setTableIcon(doc, table.id, i)} />
 
         <section className="vd-section">
           <h4>Darstellung eines Datensatzes</h4>

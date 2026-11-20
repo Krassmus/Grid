@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import * as Y from 'yjs'
 import { FakeHub } from './sync'
 import { sha256Hex } from './blobStore'
-import { moveColumn, moveTable, deleteColumn, deleteTable, renameColumn, renameTable, addOption, deleteOption, updateOption, moveFile, moveLink, addFile, buildFileIndex, removeFile, addLink, reorderLink, addColumn, addRow, buildLinkIndex, removeLink, summarize, addTable, deleteRow, getCell, readTables, setCell, setColumnWidth, setColumnConfig } from './model'
+import { moveColumn, moveTable, deleteColumn, deleteTable, renameColumn, renameTable, addOption, deleteOption, updateOption, moveFile, moveLink, addFile, buildFileIndex, removeFile, addLink, reorderLink, addMap, updateMap, setTableIcon, readTabs, addColumn, addRow, buildLinkIndex, removeLink, summarize, addTable, deleteRow, getCell, readTables, setCell, setColumnWidth, setColumnConfig } from './model'
 
 function setup() {
   const a = new Y.Doc(), b = new Y.Doc()
@@ -79,6 +79,21 @@ describe('Offline-Merge', () => {
     setCell(b, t, r, name, 'Zombie')
     hub.setOnline('b', true)
     expect(readTables(a)[0].rowIds).toEqual(readTables(b)[0].rowIds)
+  })
+})
+
+describe('Reiter', () => {
+  it('Symbol je Blatt wird gespeichert, geändert und gelöscht; Tabellen liefern ihre Zeilenzahl', () => {
+    const s = setup()
+    addRow(s.a, s.t)
+    const map = addMap(s.a, 'Lage', [], 'pin')
+    expect(readTabs(s.a).find((x) => x.id === map)!.icon).toBe('pin')
+    setTableIcon(s.a, s.t, 'truck')
+    expect(readTabs(s.a).find((x) => x.id === s.t)).toMatchObject({ icon: 'truck', count: readTables(s.a)[0].rowIds.length })
+    updateMap(s.a, map, { icon: '' })
+    expect(readTabs(s.a).find((x) => x.id === map)!.icon).toBe('')
+    setTableIcon(s.a, s.t, '')
+    expect(readTabs(s.a).find((x) => x.id === s.t)!.icon).toBe('')
   })
 })
 
