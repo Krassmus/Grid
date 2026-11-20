@@ -50,6 +50,8 @@ function Tile(props: {
   muted?: boolean
   /** Wenn gesetzt, ist die Kachel in eine andere Relationszelle derselben Zieltabelle ziehbar. */
   drag?: { slot: LinkSlot; targetTable?: string }
+  /** 'avatar': nur der Avatar (falls vorhanden); 'full': immer mit Titel (z. B. in der Auswahl). Sonst gilt die Darstellung der Tabelle. */
+  display?: 'avatar' | 'full'
 }) {
   const { doc, table, rowId } = props
   const [isDragging, setIsDragging] = useState(false)
@@ -58,9 +60,13 @@ function Tile(props: {
   const reprs = useReprs()
   const fromRepr = exists ? reprs(table!.id)?.get(rowId) : undefined
   const fallback = exists && !fromRepr ? summarize(doc, table!, rowId) : null // z. B. Tabelle ohne vorberechnete Darstellung
-  const s = fromRepr ?? (fallback ? { title: fallback.title, subs: [], avatar: { text: initials(fallback.title) }, avatarInCells: false, subInCells: false } : null)
+  const base = fromRepr ?? (fallback ? { title: fallback.title, subs: [], avatar: { text: initials(fallback.title) }, avatarInCells: false, subInCells: false } : null)
+  const s = !base || !props.display ? base
+    : props.display === 'full' ? { ...base, hideTitle: false }
+    : base.avatar ? { ...base, hideTitle: true, subs: [], avatarInCells: true } : base
   return (
     <div className={`tile ${tileClasses(s)} ${exists ? '' : 'deleted'} ${props.onClick ? 'clickable' : ''} ${props.muted ? 'muted' : ''} ${isDragging ? 'dragging' : ''}`}
+      title={s && exists ? [s.title, ...s.subs].join('\n') : undefined} // Text der Darstellung als Tooltip (wichtig bei „nur Avatar“)
       onClick={props.onClick}
       draggable={!!props.drag}
       onDragStart={props.drag ? (e) => {
@@ -106,7 +112,7 @@ function Picker(props: {
         <input autoFocus placeholder="Suchen …" value={q} onChange={(e) => setQ(e.target.value)} />
         <div className="picker-list">
           {rows.map((id) => (
-            <Tile key={id} doc={props.doc} table={props.target} rowId={id} onClick={() => props.onPick(id)} />
+            <Tile key={id} doc={props.doc} table={props.target} rowId={id} display="full" onClick={() => props.onPick(id)} />
           ))}
           {rows.length === 0 && <p className="hint">Keine passenden Datensätze.</p>}
         </div>
@@ -168,7 +174,7 @@ function RelationDraftField(props: { doc: Y.Doc; tables: TableInfo[]; col: Colum
   const single = RELATION.config(col).single
   return (
     <div className="tiles rf-tiles">
-      {ids.map((id) => <Tile key={id} doc={doc} table={target} rowId={id} onRemove={() => update((p) => p.filter((x) => x !== id))} />)}
+      {ids.map((id) => <Tile key={id} doc={doc} table={target} rowId={id} display={RELATION.config(col).display === 'avatar' ? 'avatar' : undefined} onRemove={() => update((p) => p.filter((x) => x !== id))} />)}
       {!(single && ids.length >= 1) && (
         <button type="button" className="add-tile" onClick={() => setPicking(true)} disabled={!target} title={target ? 'Datensatz verknüpfen' : 'Zieltabelle fehlt'}>+</button>
       )}
@@ -198,32 +204,61 @@ function RelationCell(props: {
   const [over, setOver] = useState(false)
   const slot: LinkSlot = { tableId: table.id, rowId, colId: col.id }
 
-  // Ablageziel: Kacheln derselben Zieltabelle, die nicht schon aus dieser Zelle stammen.
-  const accepts = () =>
-    !!dragging && !!col.target && dragging.targetTable === col.target &&
-    !(dragging.slot.rowId === rowId && dragging.slot.colId === col.id)
+  // Ablageziel: Kacheln derselben Zieltabelle (auch aus dieser Zelle: dann wird umsortiert)
+  const accepts = () => !!dragging && !!col.target && dragging.targetTable === col.target
+  const sameSlot = () => !!dragging && dragging.slot.tableId === table.id && dragging.slot.rowId === rowId && dragging.slot.colId === col.id
+  const tilesEl = useRef<HTMLDivElement>(null)
+  const [ins, setIns] = useState<{ left: number; top: number; height: number } | null>(null)
+  /** Einfügestelle unter dem Mauszeiger: Index unter den angezeigten Kacheln und die Zeile, vor der eingefügt wird (null = ans Ende). */
+  const dropSpot = (x: number, y: number) => {
+    const box = tilesEl.current
+    if (!box) return null
+    const items = Array.from(box.children).filter((el) => !el.classList.contains('add-tile') && !el.classList.contains('drop-line')) as HTMLElement[]
+    const rects = items.map((el) => el.getBoundingClientRect())
+    let i = rects.length
+    for (let k = 0; k < rects.length; k++) {
+      const r = rects[k]
+      if (y < r.top || (y <= r.bottom && x < r.left + r.width / 2)) { i = k; break }
+    }
+    const dragged = dragging?.targetRow
+    const entries = anim.entries
+    let before: string | null = null
+    for (let k = i; k < entries.length; k++) if (entries[k].phase !== 'exit' && !(sameSlot() && entries[k].item === dragged)) { before = entries[k].item; break }
+    const c = box.getBoundingClientRect()
+    let line = null
+    if (rects.length) {
+      const r = rects[Math.min(i, rects.length - 1)]
+      line = { left: (i < rects.length ? r.left - 4 : r.right + 4) - c.left, top: r.top - c.top, height: r.height }
+    }
+    return { before, line }
+  }
 
   return (
     <div className={`c rel ${over ? 'drop-over' : ''}`}
       onDragOver={(e) => {
         if (!accepts()) return
         e.preventDefault()
-        e.dataTransfer.dropEffect = e.altKey ? 'copy' : 'move'
-        setOver(true)
+        e.dataTransfer.dropEffect = sameSlot() ? 'move' : e.altKey ? 'copy' : 'move'
+        if (!sameSlot()) setOver(true)
+        setIns(dropSpot(e.clientX, e.clientY)?.line ?? null)
       }}
-      onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setOver(false) }}
+      onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) { setOver(false); setIns(null) } }}
       onDrop={(e) => {
         setOver(false)
+        setIns(null)
         if (!accepts()) return
         e.preventDefault()
         const d = dragging!
         dragging = null
-        moveLink(doc, d.slot, slot, d.targetRow, e.altKey) // Alt/Option = kopieren statt verschieben
+        const spot = dropSpot(e.clientX, e.clientY)
+        moveLink(doc, d.slot, slot, d.targetRow, e.altKey, spot ? spot.before : undefined) // Alt/Option = kopieren statt verschieben
       }}>
-      <div className="tiles">
+      <div className="tiles" ref={tilesEl}>
+        {ins && <i className="drop-line" style={ins} />}
         {anim.entries.map((e) => (
           <AnimItem key={e.key} phase={e.phase} onExited={() => anim.done(e.key)}>
             <Tile doc={doc} table={target} rowId={e.item}
+              display={RELATION.config(col).display === 'avatar' ? 'avatar' : undefined}
               drag={{ slot, targetTable: col.target }}
               onClick={() => setEditingRow(e.item)}
               onRemove={() => removeLink(doc, table.id, rowId, col.id, e.item)} />
@@ -849,7 +884,6 @@ function Dialog(props: {
         onSubmit={(e) => { e.preventDefault(); submit() }}
         onKeyDown={(e) => e.key === 'Escape' && props.onClose()}>
         <h3>{props.title}</h3>
-        <input autoFocus placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
         {props.withType && (
           <select value={type} onChange={(e) => setType(e.target.value as ColType)}>
             <option value="text">Text</option>
@@ -865,6 +899,7 @@ function Dialog(props: {
             <option value="rollup" disabled={!props.table || relations.length === 0}>Rollup (Summe u. a. über verknüpfte Zeilen)</option>
           </select>
         )}
+        <input autoFocus placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
         {props.withType && type === 'relation' && (
           <select value={target} onChange={(e) => setTarget(e.target.value)}>
             {props.tables.map((t) => <option key={t.id} value={t.id}>auf Tabelle „{t.name}“</option>)}

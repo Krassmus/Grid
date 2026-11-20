@@ -41,11 +41,11 @@ export function ColumnDialog(props: {
         onSubmit={(e) => { e.preventDefault(); close() }}
         onKeyDown={(e) => e.key === 'Escape' && !options && close()}>
         <h3>Spalte konfigurieren</h3>
+        <p className="cfg-static">Typ: <strong>{type.label}</strong></p>
         <label className="cfg-field">
           <span>Name</span>
           <input autoFocus value={name} onFocus={(e) => e.target.select()} onChange={(e) => setName(e.target.value)} />
         </label>
-        <p className="cfg-static">Typ: <strong>{type.label}</strong> <small>(lässt sich nicht ändern)</small></p>
         {type.renderConfig({ doc, table, tables, column, config, set, editOptions: () => setOptions(true) })}
         <label className="cfg-check">
           <input type="checkbox" checked={!!column.hidden} onChange={(e) => setColumnHidden(doc, table.id, column.id, e.target.checked)} />

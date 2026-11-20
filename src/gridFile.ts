@@ -40,10 +40,10 @@ export function projectionOf(doc: Y.Doc) {
       })
     }
   }
-  const links: [string, string, string, string][] = []
-  linksOf(doc).forEach((_, key) => {
+  const links: [string, string, string, string, number][] = []
+  linksOf(doc).forEach((v, key) => {
     const [t, r, c, x] = key.split('|')
-    links.push([t, r, c, x])
+    links.push([t, r, c, x, typeof v === 'number' ? v : 0])
   })
   const files: [string, string, string, string, string, number, string][] = []
   filesOf(doc).forEach((m, key) => {

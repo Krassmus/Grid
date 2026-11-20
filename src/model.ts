@@ -15,7 +15,8 @@ import * as Y from 'yjs'
  *   Auswahlspalten: cols[colId].options = Y.Map<optionId, { name, color, pos }>;
  *     der Zellwert in rows[rowId][colId] ist die optionId (LWW).
  *
- *   links: Y.Map<"tableId|rowId|colId|targetRowId", true>   (Relationen als Menge)
+ *   links: Y.Map<"tableId|rowId|colId|targetRowId", number | true>   (Relationen als Menge; der Wert ist die Position in der Zelle,
+ *                                                                    `true` = alt, zählt als 0)
  *     Jede Verknüpfung ist ein eigener Schlüssel: gleichzeitiges Hinzufügen
  *     verschiedener Ziele in derselben Zelle geht beim Merge nicht verloren.
  *     Die Rückrichtung wird nicht gespeichert, sondern aus dem Index berechnet.
@@ -323,11 +324,20 @@ export function deleteView(doc: Y.Doc, id: string) {
 
 // ---------- Relationen ----------
 
-export const linksOf = (doc: Y.Doc) => doc.getMap<boolean>('links')
+export const linksOf = (doc: Y.Doc) => doc.getMap<number | true>('links')
 const linkKey = (t: string, r: string, c: string, x: string) => `${t}|${r}|${c}|${x}`
+const linkPos = (v: unknown) => (typeof v === 'number' ? v : 0)
+
+let lastPos = 0
+/** Position für eine neue Verknüpfung: Zeitstempel, also am Ende der Zelle (streng steigend, auch bei vielen Aufrufen je Millisekunde). */
+function nextLinkPos() {
+  lastPos = Math.max(Date.now(), lastPos + 1)
+  return lastPos
+}
 
 export function addLink(doc: Y.Doc, tableId: string, rowId: string, colId: string, targetRowId: string) {
-  linksOf(doc).set(linkKey(tableId, rowId, colId, targetRowId), true)
+  const links = linksOf(doc), key = linkKey(tableId, rowId, colId, targetRowId)
+  if (!links.has(key)) links.set(key, nextLinkPos()) // schon vorhandene behalten ihre Stelle
 }
 
 export function removeLink(doc: Y.Doc, tableId: string, rowId: string, colId: string, targetRowId: string) {
@@ -338,11 +348,47 @@ export interface LinkSlot { tableId: string; rowId: string; colId: string }
 export type CellSlot = LinkSlot
 
 /** Verschiebt eine Verknüpfung in eine andere Zelle (oder kopiert sie). Atomar: ein Undo-/Sync-Schritt. */
-export function moveLink(doc: Y.Doc, from: LinkSlot, to: LinkSlot, targetRowId: string, copy = false) {
-  if (from.tableId === to.tableId && from.rowId === to.rowId && from.colId === to.colId) return
+export function moveLink(doc: Y.Doc, from: LinkSlot, to: LinkSlot, targetRowId: string, copy = false, beforeRowId?: string | null) {
+  const same = from.tableId === to.tableId && from.rowId === to.rowId && from.colId === to.colId
+  if (same && beforeRowId === undefined) return
   doc.transact(() => {
-    if (!copy) removeLink(doc, from.tableId, from.rowId, from.colId, targetRowId)
-    addLink(doc, to.tableId, to.rowId, to.colId, targetRowId)
+    if (!same) {
+      if (!copy) removeLink(doc, from.tableId, from.rowId, from.colId, targetRowId)
+      addLink(doc, to.tableId, to.rowId, to.colId, targetRowId)
+    }
+    if (beforeRowId !== undefined) reorderLink(doc, to, targetRowId, beforeRowId)
+  })
+}
+
+/** Zielzeilen einer Zelle in ihrer Reihenfolge, mit Positionen. */
+function slotLinks(doc: Y.Doc, slot: LinkSlot): { id: string; pos: number }[] {
+  const prefix = `${slot.tableId}|${slot.rowId}|${slot.colId}|`
+  const out: { id: string; pos: number }[] = []
+  linksOf(doc).forEach((v, key) => { if (key.startsWith(prefix)) out.push({ id: key.slice(prefix.length), pos: linkPos(v) }) })
+  return out.sort((a, b) => a.pos - b.pos || (a.id < b.id ? -1 : 1))
+}
+
+/**
+ * Ordnet eine Verknüpfung in ihrer Zelle um: vor `beforeRowId` (null = ans Ende).
+ * Nur der Wert der verschobenen Verknüpfung ändert sich (Position zwischen den Nachbarn), damit gleichzeitiges Umordnen mischbar bleibt;
+ * sind die Nachbarpositionen zu eng oder gleich, werden alle Verknüpfungen der Zelle neu nummeriert.
+ */
+export function reorderLink(doc: Y.Doc, slot: LinkSlot, targetRowId: string, beforeRowId: string | null) {
+  doc.transact(() => {
+    const list = slotLinks(doc, slot).filter((l) => l.id !== targetRowId)
+    if (!slotLinks(doc, slot).some((l) => l.id === targetRowId)) return
+    let i = beforeRowId === null ? list.length : list.findIndex((l) => l.id === beforeRowId)
+    if (i < 0) i = list.length
+    const prev = list[i - 1], next = list[i]
+    const links = linksOf(doc), key = (id: string) => linkKey(slot.tableId, slot.rowId, slot.colId, id)
+    let pos: number | null = null
+    if (prev && next) { if (next.pos - prev.pos > 1e-3) pos = (prev.pos + next.pos) / 2 }
+    else if (prev) pos = prev.pos + 1
+    else if (next) pos = next.pos - 1
+    else pos = nextLinkPos()
+    if (pos !== null && (!prev || pos > prev.pos) && (!next || pos < next.pos)) { links.set(key(targetRowId), pos); return }
+    const order = [...list.slice(0, i).map((l) => l.id), targetRowId, ...list.slice(i).map((l) => l.id)]
+    order.forEach((id, n) => links.set(key(id), (n + 1) * 1024))
   })
 }
 
@@ -360,12 +406,15 @@ export function buildLinkIndex(doc: Y.Doc): LinkIndex {
     const a = m.get(k)
     if (a) a.push(v); else m.set(k, [v])
   }
-  linksOf(doc).forEach((_, key) => {
+  const pos = new Map<string, number>() // "rowId|colId|targetRowId" -> Position
+  linksOf(doc).forEach((v, key) => {
     const [, r, c, x] = key.split('|')
     push(forward, `${r}|${c}`, x)
     push(backward, `${x}|${c}`, r)
+    pos.set(`${r}|${c}|${x}`, linkPos(v))
   })
-  for (const m of [forward, backward]) for (const a of m.values()) a.sort()
+  for (const [k, a] of forward) a.sort((x, y) => pos.get(`${k}|${x}`)! - pos.get(`${k}|${y}`)! || (x < y ? -1 : 1))
+  for (const a of backward.values()) a.sort()
   return { forward, backward }
 }
 
@@ -435,7 +484,7 @@ export function addOption(doc: Y.Doc, tableId: string, colId: string, name: stri
   const id = uid()
   const opts = optionsMap(doc, tableId, colId)
   const used = opts ? opts.size : 0
-  opts?.set(id, { name, color: color ?? OPTION_COLORS[used % OPTION_COLORS.length], pos: nextPos() })
+  opts?.set(id, { name, color: color ?? OPTION_COLORS[used % OPTION_COLORS.length], pos: nextLinkPos() })
   return id
 }
 

@@ -50,8 +50,8 @@ struct Projection {
     tables: Vec<TableP>,
     /// (Tabelle, Zeile, Spalte, Wert)
     cells: Vec<(String, String, String, Value)>,
-    /// (Tabelle, Zeile, Spalte, Zielzeile)
-    links: Vec<(String, String, String, String)>,
+    /// (Tabelle, Zeile, Spalte, Zielzeile, Position in der Zelle)
+    links: Vec<(String, String, String, String, f64)>,
     /// (Tabelle, Zeile, Spalte, Hash, Name, Größe, MIME)
     files: Vec<(String, String, String, String, String, i64, String)>,
 }
@@ -107,7 +107,8 @@ CREATE TABLE rows    (table_id TEXT NOT NULL, id TEXT NOT NULL, pos INTEGER NOT 
 CREATE TABLE cells   (table_id TEXT NOT NULL, row_id TEXT NOT NULL, column_id TEXT NOT NULL, value,
                       PRIMARY KEY (table_id, row_id, column_id));
 CREATE TABLE links   (table_id TEXT NOT NULL, row_id TEXT NOT NULL, column_id TEXT NOT NULL,
-                      target_row_id TEXT NOT NULL, PRIMARY KEY (table_id, row_id, column_id, target_row_id));
+                      target_row_id TEXT NOT NULL, pos REAL NOT NULL DEFAULT 0,
+                      PRIMARY KEY (table_id, row_id, column_id, target_row_id));
 CREATE TABLE files   (table_id TEXT NOT NULL, row_id TEXT NOT NULL, column_id TEXT NOT NULL, hash TEXT NOT NULL,
                       name TEXT NOT NULL, size INTEGER NOT NULL, mime TEXT NOT NULL,
                       PRIMARY KEY (table_id, row_id, column_id, hash));
@@ -139,8 +140,8 @@ fn build_sqlite(p: &Projection, ydoc: &[u8]) -> Result<Vec<u8>, String> {
         for (t, r, c, v) in &p.cells {
             tx.execute("INSERT OR REPLACE INTO cells VALUES (?1, ?2, ?3, ?4)", params![t, r, c, sql_value(v)]).map_err(err("cells"))?;
         }
-        for (t, r, c, x) in &p.links {
-            tx.execute("INSERT OR IGNORE INTO links VALUES (?1, ?2, ?3, ?4)", params![t, r, c, x]).map_err(err("links"))?;
+        for (t, r, c, x, pos) in &p.links {
+            tx.execute("INSERT OR IGNORE INTO links VALUES (?1, ?2, ?3, ?4, ?5)", params![t, r, c, x, pos]).map_err(err("links"))?;
         }
         for (t, r, c, h, n, s, m) in &p.files {
             tx.execute("INSERT OR REPLACE INTO files VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)", params![t, r, c, h, n, s, m]).map_err(err("files"))?;
@@ -273,7 +274,7 @@ mod tests {
                           "options": [{ "id": "o1", "name": "Offen", "color": "sand" }] }
                     ], "rows": ["r1"] }],
                     "cells": [["t1", "r1", "c1", "Anna"], ["t1", "r1", "c2", 3.5]],
-                    "links": [["t1", "r1", "c3", "r9"]],
+                    "links": [["t1", "r1", "c3", "r9", 1.0]],
                     "files": [["t1", "r1", "c4", "abc", "foto.png", 3, "image/png"]]
                 }
             }),

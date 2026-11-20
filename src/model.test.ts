@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import * as Y from 'yjs'
 import { FakeHub } from './sync'
 import { sha256Hex } from './blobStore'
-import { moveColumn, moveTable, deleteColumn, deleteTable, renameColumn, renameTable, addOption, deleteOption, updateOption, moveFile, moveLink, addFile, buildFileIndex, removeFile, addLink, addColumn, addRow, buildLinkIndex, removeLink, summarize, addTable, deleteRow, getCell, readTables, setCell, setColumnWidth, setColumnConfig } from './model'
+import { moveColumn, moveTable, deleteColumn, deleteTable, renameColumn, renameTable, addOption, deleteOption, updateOption, moveFile, moveLink, addFile, buildFileIndex, removeFile, addLink, reorderLink, addColumn, addRow, buildLinkIndex, removeLink, summarize, addTable, deleteRow, getCell, readTables, setCell, setColumnWidth, setColumnConfig } from './model'
 
 function setup() {
   const a = new Y.Doc(), b = new Y.Doc()
@@ -100,7 +100,38 @@ describe('Relationen', () => {
     addLink(a, t, p, link, f1)
     addLink(b, t, p, link, f2)
     hub.setOnline('a', true); hub.setOnline('b', true)
-    for (const d of [a, b]) expect(buildLinkIndex(d).forward.get(`${p}|${link}`)).toEqual([f1, f2].sort())
+    for (const d of [a, b]) expect(buildLinkIndex(d).forward.get(`${p}|${link}`)).toEqual([f1, f2])
+  })
+
+  it('Verknüpfungen behalten die Reihenfolge des Hinzufügens und lassen sich umordnen', () => {
+    const { a, b, t, t2, link, f1, f2, p } = rel()
+    const f3 = addRow(a, t2)
+    const slot = { tableId: t, rowId: p, colId: link }
+    const order = (d: Y.Doc) => buildLinkIndex(d).forward.get(`${p}|${link}`)
+    for (const id of [f2, f1, f3]) addLink(a, t, p, link, id)
+    expect(order(a)).toEqual([f2, f1, f3])
+    reorderLink(a, slot, f3, f2) // ganz nach vorn
+    expect(order(a)).toEqual([f3, f2, f1])
+    reorderLink(a, slot, f3, null) // ans Ende
+    expect(order(a)).toEqual([f2, f1, f3])
+    reorderLink(a, slot, f1, f2) // vor f2
+    expect(order(a)).toEqual([f1, f2, f3])
+    for (let i = 0; i < 60; i++) reorderLink(a, slot, i % 2 ? f1 : f3, f2) // enge Positionen führen zum Neunummerieren
+    expect(order(a)!.length).toBe(3)
+    expect(new Set(order(a))).toEqual(new Set([f1, f2, f3]))
+    expect(order(b)).toEqual(order(a))
+    addLink(a, t, p, link, f1) // erneutes Hinzufügen ändert nichts
+    expect(order(a)).toEqual(order(b))
+  })
+
+  it('verschobene Verknüpfung landet an der gewünschten Stelle der Zielzelle', () => {
+    const { a, t, link, f1, f2, p } = rel()
+    const q = addRow(a, t)
+    addLink(a, t, p, link, f1)
+    addLink(a, t, q, link, f2)
+    moveLink(a, { tableId: t, rowId: q, colId: link }, { tableId: t, rowId: p, colId: link }, f2, false, f1)
+    expect(buildLinkIndex(a).forward.get(`${p}|${link}`)).toEqual([f2, f1])
+    expect(buildLinkIndex(a).forward.get(`${q}|${link}`)).toBeUndefined()
   })
 
   it('entfernt Links und liefert Rückverweise', () => {

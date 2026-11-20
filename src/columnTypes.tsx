@@ -104,11 +104,11 @@ class NumberColumn extends ColumnType<NumberConfig> {
   }
 }
 
-export interface RelationConfig { single: boolean; backlink: boolean }
+export interface RelationConfig { single: boolean; backlink: boolean; display: 'default' | 'avatar' }
 class RelationColumn extends ColumnType<RelationConfig> {
   readonly type = 'relation'
   readonly label = 'Relation'
-  readonly defaults: RelationConfig = { single: false, backlink: true }
+  readonly defaults: RelationConfig = { single: false, backlink: true, display: 'default' }
   renderConfig({ config, set, column, tables }: ConfigContext<RelationConfig>) {
     return (
       <>
@@ -117,6 +117,13 @@ class RelationColumn extends ColumnType<RelationConfig> {
           Höchstens eine Verknüpfung pro Zeile
         </Check>
         <Check checked={config.backlink} onChange={(backlink) => set({ backlink })}>Rückverweis in der Zieltabelle anzeigen</Check>
+        <Field label="Darstellung der verknüpften Datensätze">
+          <select value={config.display ?? 'default'} onChange={(e) => set({ display: e.target.value as 'default' | 'avatar' })}>
+            <option value="default">Wie in der Zieltabelle festgelegt</option>
+            <option value="avatar">Nur der Avatar (sofern vorhanden)</option>
+          </select>
+          <small className="hint">In der Auswahl zum Verknüpfen stehen immer auch die Namen.</small>
+        </Field>
       </>
     )
   }

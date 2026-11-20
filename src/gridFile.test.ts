@@ -37,7 +37,7 @@ describe('Paket und Abbildung', () => {
     expect(p.tables[0].columns.find((c) => c.id === s.status)!.options.map((o) => o.name)).toEqual(['Offen'])
     expect(p.cells).toContainEqual([s.t, s.r1, s.name, 'Kaffee'])
     expect(p.cells).toContainEqual([s.t, s.r1, s.wert, 3.5])
-    expect(p.links).toEqual([[s.t, s.r1, s.bezug, s.r2]])
+    expect(p.links).toEqual([[s.t, s.r1, s.bezug, s.r2, expect.any(Number)]])
     expect(p.files).toEqual([[s.t, s.r1, s.beleg, 'h1', 'beleg.pdf', 3, 'application/pdf']])
   })
 
