@@ -687,7 +687,7 @@ export function ClientPane(props: {
                     ← {source.name}<small>{col.name}</small>
                   </div>
                 ))}
-                <div className="h"><button className="add-col" onClick={() => setDialog('column')}>+ Spalte</button></div>
+                <div className="h"><button className="add-col" onClick={() => setDialog('column')} title="Spalte hinzufügen" aria-label="Spalte hinzufügen">+</button></div>
               </div>
               {rowIds.map((rid) => (
                 <div key={rid} className="row-outer" data-row={rid}>

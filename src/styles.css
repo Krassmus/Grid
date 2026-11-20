@@ -445,3 +445,7 @@ textarea.cell { resize: none; line-height: 1.35; overflow: hidden; display: bloc
 .icon-grid button.on, .icon-grid input.on { border-color: #1456c8; background: #eaf1fd; color: #1456c8; box-shadow: 0 0 0 1px #1456c8; }
 .icon-grid input { text-align: center; font-size: 16px; }
 .icon-grid .sheet-icon { width: 20px; height: 20px; }
+/* „+“ zum Hinzufügen einer Spalte: schlicht in der Kopfzeile, ohne Knopfrahmen */
+.grid-head .add-col { border: none; background: none; box-shadow: none; padding: 0 6px; font-size: 22px; font-weight: 400; line-height: 1; color: #667; cursor: pointer; }
+.grid-head .add-col:hover { color: #0a58ca; background: none; }
+.grid-head .add-col { position: relative; top: -3px; }
