@@ -110,3 +110,9 @@ export async function claimDocument(server: string, doc: string, localLog?: Admi
   const genesis = buildEntry(me, emptyState(), doc, 'genesis', { id: me.id, pub: me.publicKey }, 'admin', getAccountName())
   if (!(await post(server, doc, genesis))) throw new Error('Das Dokument konnte nicht angelegt werden')
 }
+
+/** Umzug auf einen anderen Server ankündigen (Eintrag im Admin-Protokoll, damit alle Mitglieder es sehen und prüfen können). */
+export async function announceMove(server: string, doc: string, newServer: string, newKey: string) {
+  const me = await getIdentity()
+  await append(server, doc, (state) => buildEntry(me, state, doc, 'move', { id: me.id, pub: newKey }, 'admin', newServer))
+}

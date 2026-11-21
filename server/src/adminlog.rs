@@ -17,7 +17,8 @@ pub struct Entry {
     pub seq: u64,
     /// Hash des vorigen Eintrags (leer beim ersten)
     pub prev: String,
-    /// `genesis`, `set` (Mitglied hinzufügen oder Rolle/Namen ändern) oder `remove`
+    /// `genesis`, `set` (Mitglied hinzufügen oder Rolle/Namen ändern), `remove` oder `move`
+    /// (Umzug ankündigen: `name` = neue Server-Adresse, `subjectPub` = Schlüssel des neuen Servers, `subject` = `actor`)
     #[serde(rename = "type")]
     pub kind: String,
     /// Konto, das den Eintrag unterschreibt
@@ -60,6 +61,8 @@ pub struct Member {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct State {
     pub members: BTreeMap<String, Member>,
+    /// Zuletzt angekündigter Umzug: (Server-Adresse, Server-Schlüssel)
+    pub moved: Option<(String, String)>,
     /// Anzahl der Einträge und Hash des letzten
     pub len: u64,
     pub head: String,
@@ -88,10 +91,14 @@ impl State {
                 next.members.insert(e.subject.clone(), Member { pubkey: e.subject_pub.clone(), role: "admin".into(), name: e.name.clone() });
                 e.subject_pub.clone()
             }
-            "set" | "remove" => {
+            "set" | "remove" | "move" => {
                 let actor = self.members.get(&e.actor).ok_or("Nur Mitglieder dürfen das")?;
                 if actor.role != "admin" { return Err("Nur Admins dürfen das"); }
-                if e.kind == "set" {
+                if e.kind == "move" {
+                    if e.subject != e.actor { return Err("Umzug: subject muss der Unterzeichner sein"); }
+                    if !(e.name.starts_with("https://") || e.name.starts_with("http://")) { return Err("Umzug: Server-Adresse ungültig"); }
+                    next.moved = Some((e.name.clone(), e.subject_pub.clone()));
+                } else if e.kind == "set" {
                     if let Some(old) = self.members.get(&e.subject) {
                         if old.pubkey != e.subject_pub { return Err("Schlüssel passt nicht zum Mitglied"); }
                     }
@@ -196,6 +203,29 @@ mod tests {
         swap.subject_pub = person(9).pubhex();
         swap.sig = hex(&a.key.sign(swap.signing_text().as_bytes()).to_bytes());
         assert_eq!(s2.apply(DOC, &swap), Err("Schlüssel passt nicht zum Mitglied"));
+    }
+
+    #[test]
+    fn move_entries_announce_a_new_server_without_changing_members() {
+        let (a, b) = (person(1), person(2));
+        let s0 = State::default();
+        let s1 = s0.apply(DOC, &entry(&s0, &a, "genesis", &a, "admin", "Anna")).unwrap();
+        let s2 = s1.apply(DOC, &entry(&s1, &a, "set", &b, "member", "Ben")).unwrap();
+        let mut mv = entry(&s2, &a, "move", &a, "admin", "https://neu.example/grid");
+        mv.subject_pub = person(9).pubhex(); // Schlüssel des neuen Servers
+        mv.sig = hex(&a.key.sign(mv.signing_text().as_bytes()).to_bytes());
+        let s3 = s2.apply(DOC, &mv).unwrap();
+        assert_eq!(s3.moved, Some(("https://neu.example/grid".into(), person(9).pubhex())));
+        assert_eq!(s3.members, s2.members);
+        // Mitglieder dürfen keinen Umzug ankündigen, und die Adresse muss eine Web-Adresse sein
+        let mut by_member = entry(&s3, &b, "move", &b, "member", "https://evil.example");
+        by_member.subject_pub = person(9).pubhex();
+        by_member.sig = hex(&b.key.sign(by_member.signing_text().as_bytes()).to_bytes());
+        assert_eq!(s3.apply(DOC, &by_member), Err("Nur Admins dürfen das"));
+        let mut bad = entry(&s3, &a, "move", &a, "admin", "ftp://x");
+        bad.subject_pub = person(9).pubhex();
+        bad.sig = hex(&a.key.sign(bad.signing_text().as_bytes()).to_bytes());
+        assert_eq!(s3.apply(DOC, &bad), Err("Umzug: Server-Adresse ungültig"));
     }
 
     /// Dieselben Werte prüft src/adminLog.test.ts: beide Seiten müssen dieselbe Signatur und denselben Hash erzeugen.

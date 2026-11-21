@@ -1,8 +1,8 @@
 import * as Y from 'yjs'
 import { appendGrid, writeGrid, type GridMeta } from './gridFile'
 import { Materializer } from './tableSync'
-import { SyncConnection, normalizeServer, onServerKey, pinServer, pinnedKey, type SyncState } from './syncClient'
-import { acceptRequest, claimDocument, ensureGenesis, fetchMembers, rejectRequest, removeMember, setRole, type JoinRequest, type MembersInfo } from './members'
+import { SyncConnection, fetchServerInfo, normalizeServer, onServerKey, pinServer, pinnedKey, type SyncState } from './syncClient'
+import { acceptRequest, announceMove, claimDocument, ensureGenesis, fetchMembers, rejectRequest, removeMember, setRole, type JoinRequest, type MembersInfo } from './members'
 import { fingerprint, getIdentity } from './identity'
 import { makeInvite } from './invite'
 import type { Role } from './adminLog'
@@ -78,6 +78,8 @@ export class FileSession {
       () => claimDocument(sync.server, this.meta.docId, this.meta.adminLog))
   }
 
+  resync() { this.conn?.resync() }
+
   private setMembers(m: MembersInfo | null) { this.members = m; this.onMembers?.(m) }
 
   /** Mitglieder neu laden; legt dabei (als Ersteller) das Admin-Protokoll an, falls es noch fehlt. */
@@ -122,6 +124,26 @@ export class FileSession {
     this.meta.sync = key ? { server: url, key } : { server: url }
     this.schedule()
     if (this.attached) this.openConn()
+  }
+
+  /**
+   * Das Dokument auf einen anderen Server umziehen: Umzug im Admin-Protokoll ankündigen (damit die Mitglieder ihn sehen),
+   * dann verbinden; der neue Server übernimmt dabei das Protokoll mit allen Mitgliedern.
+   */
+  async moveTo(newServer: string) {
+    const url = normalizeServer(newServer)
+    const info = await fetchServerInfo(url).catch(() => { throw new Error('Der neue Server ist nicht erreichbar') })
+    if (this.meta.sync && this.members?.role === 'admin') {
+      try { await this.change((s, d) => announceMove(s, d, url, info.pub)) } catch { /* alter Server nicht erreichbar: trotzdem umziehen */ }
+    }
+    this.connect(url, info.pub)
+  }
+
+  /** Umzug, den ein Admin angekündigt hat und dem dieses Gerät noch nicht gefolgt ist. */
+  get movedTo(): { server: string; key: string } | null {
+    const m = this.members?.state?.moved
+    const cur = this.meta.sync?.server
+    return m && cur && normalizeServer(m.server) !== cur ? m : null
   }
 
   /** Dem Schlüssel, den der Server jetzt zeigt, vertrauen (nach einer Warnung, z. B. weil der Server neu installiert wurde). */

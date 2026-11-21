@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Modal } from './Modal'
 import { exportAccount, fingerprint, getIdentity, importAccount, onIdentityChanged, type Identity } from './identity'
 import { AuthError, fetchAccountInfo, fetchServerInfo, listCloudDocs, normalizeServer, type AccountInfo, type CloudDoc, type ServerInfo, type SyncState } from './syncClient'
 import { MembersDialog, type MembersControl } from './MembersDialog'
+import { openExternal } from './externalLink'
 
 const LAST = 'grid-sync-last-server'
 const lastServer = () => { try { return localStorage.getItem(LAST) ?? '' } catch { return '' } }
@@ -16,6 +17,13 @@ export interface SyncControl extends MembersControl {
   disconnect: () => void
   /** Dem Schlüssel vertrauen, den der Server jetzt zeigt (nach einer Warnung) */
   trustServer: () => void
+  /** Dokument auf einen anderen Server umziehen (kündigt es den Mitgliedern an) */
+  moveTo: (server: string) => Promise<void>
+  /** Ein Admin hat einen Umzug angekündigt, dem dieses Gerät noch nicht gefolgt ist */
+  moved: { server: string; key: string } | null
+  followMove: () => void
+  /** Zustand mit dem Server neu abgleichen */
+  resync: () => void
 }
 
 export const syncLabel = (c: SyncControl) => {
@@ -64,13 +72,22 @@ function ServerLine(props: { server: string; onSwitch: () => void }) {
   )
 }
 
-/** Abo und Speicher des Kontos (nur auf Servern mit Abo-Pflicht). */
-function PlanLine(props: { server: string; refresh: unknown }) {
+/** Abo und Speicher des Kontos (nur auf Servern mit Abo-Pflicht). Wartet nach dem Kauf auf die Bestätigung des Zahlungsanbieters. */
+function PlanLine(props: { server: string; refresh: unknown; onActive: () => void }) {
   const [info, setInfo] = useState<AccountInfo | null>(null)
+  const wasActive = useRef<boolean | null>(null)
   useEffect(() => {
     let alive = true
-    fetchAccountInfo(props.server).then((i) => alive && setInfo(i)).catch(() => alive && setInfo(null))
-    return () => { alive = false }
+    const load = () => fetchAccountInfo(props.server).then((i) => {
+      if (!alive) return
+      if (wasActive.current === false && i.active) props.onActive() // Abo ist gerade aktiv geworden: aufgelaufene Änderungen hochladen
+      wasActive.current = i.active
+      setInfo(i)
+    }).catch(() => alive && setInfo(null))
+    void load()
+    // Ohne Abo gelegentlich nachsehen: der Kauf läuft im Browser, die Bestätigung kommt vom Zahlungsanbieter
+    const timer = setInterval(() => { if (wasActive.current === false) void load() }, 10_000)
+    return () => { alive = false; clearInterval(timer) }
   }, [props.server, props.refresh])
   if (!info?.billing) return null
   const until = info.paidUntil ? new Date(info.paidUntil * 1000).toLocaleDateString('de-DE') : null
@@ -79,7 +96,10 @@ function PlanLine(props: { server: string; refresh: unknown }) {
       {info.active
         ? <p><strong>Abo aktiv</strong>{until && <> bis {until}</>} · {fmtSize(info.used)} von {fmtSize(info.quota)} belegt</p>
         : <p><strong>Kein Abo</strong> – Dokumente, die dir gehören, sind nur lesbar.</p>}
-      {info.manageUrl && <p className="hint">Abo verwalten: <code>{info.manageUrl}</code></p>}
+      <p className="plan-actions">
+        {!info.active && info.checkoutUrl && <button type="button" className="primary" onClick={() => void openExternal(info.checkoutUrl!)}>Abo abschließen …</button>}
+        {info.manageUrl && <button type="button" className="linklike" onClick={() => void openExternal(info.manageUrl!)}>Abo verwalten …</button>}
+      </p>
     </div>
   )
 }
@@ -115,6 +135,7 @@ export function SyncDialog(props: { control: SyncControl; onClose: () => void })
   const [membersOpen, setMembersOpen] = useState(false)
   const [switching, setSwitching] = useState(false)
   const [target, setTarget] = useState('')
+  const [moveError, setMoveError] = useState<string | null>(null)
   const requests = c.members?.requests.length ?? 0
   const connected = !!c.server
   const submit = () => {
@@ -135,14 +156,26 @@ export function SyncDialog(props: { control: SyncControl; onClose: () => void })
           <>
             <p className={`sync-status ${c.state?.readonly ? 'readonly' : c.state?.status ?? 'connecting'}`}><span className="dot" />{syncLabel(c)}</p>
             <ServerLine server={c.server!} onSwitch={() => { setSwitching(true); setTarget('') }} />
+            {c.moved && (
+              <div className="switch-box moved">
+                <p><strong>Dieses Dokument ist umgezogen</strong><br /><span className="sync-server">{c.moved.server}</span></p>
+                <p className="hint">Ein Admin hat den Umzug angekündigt (im Mitgliederprotokoll unterschrieben). Du brauchst auf dem neuen Server ein freigegebenes Konto.</p>
+                <div className="actions"><button type="button" className="primary" onClick={() => c.followMove()}>Zum neuen Server wechseln</button></div>
+              </div>
+            )}
             {switching && (
               <div className="switch-box">
                 <Field label="Neuer Server" value={target} onChange={setTarget} placeholder="https://firma.example/grid" autoFocus />
                 <p className="hint">Das Dokument wird mit allen Mitgliedern und Rollen auf den neuen Server kopiert. Mitglieder müssen dort ein Konto haben und sich selbst mit dem neuen Server verbinden. Der alte Server behält seine Kopie.</p>
                 <div className="actions">
                   <button type="button" onClick={() => setSwitching(false)}>Abbrechen</button>
-                  <button type="button" className="primary" disabled={!normalizeServer(target)} onClick={() => { const u = normalizeServer(target); rememberServer(u); c.connect(u); setSwitching(false) }}>Umziehen</button>
+                  <button type="button" className="primary" disabled={!normalizeServer(target)} onClick={() => {
+                    const u = normalizeServer(target)
+                    setMoveError(null)
+                    c.moveTo(u).then(() => { rememberServer(u); setSwitching(false) }, (e: Error) => setMoveError(e.message))
+                  }}>Umziehen</button>
                 </div>
+                {moveError && <p className="sync-error" role="alert">{moveError}</p>}
               </div>
             )}
             {c.state?.status === 'denied' && c.state.kind === 'untrusted'
@@ -160,7 +193,7 @@ export function SyncDialog(props: { control: SyncControl; onClose: () => void })
               : <p className="hint">Änderungen werden laufend abgeglichen. Ohne Verbindung arbeitest du lokal weiter; beim nächsten Verbinden werden beide Seiten zusammengeführt.</p>}
             {c.state?.readonly && <p className="sync-error" role="status">{c.state.readonly.reason} Änderungen bleiben hier gespeichert und werden hochgeladen, sobald es wieder geht.</p>}
             <AccountLine me={me} onManage={() => setAccount(true)} />
-            {c.server && c.state?.status === 'online' && <PlanLine server={c.server} refresh={c.state.readonly?.code ?? ''} />}
+            {c.server && c.state?.status === 'online' && <PlanLine server={c.server} refresh={c.state.readonly?.code ?? ''} onActive={() => c.resync()} />}
             {c.state?.status === 'online' && (
               <p className="sync-account">
                 <span>Mitglieder{c.members?.state ? ` (${c.members.state.members.size})` : ''}</span>

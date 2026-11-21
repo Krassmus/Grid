@@ -517,3 +517,77 @@ async fn document_can_move_to_another_server_with_its_members() {
     // Zweimal geht nicht
     assert_eq!(import(ta, serde_json::json!({ "entries": entries })).await, 409);
 }
+
+// ---------- Stripe-Webhook ----------
+
+fn stripe_header(secret: &str, t: i64, payload: &str) -> String {
+    use hmac::{Hmac, Mac};
+    let mut m = Hmac::<sha2::Sha256>::new_from_slice(secret.as_bytes()).unwrap();
+    m.update(format!("{t}.{payload}").as_bytes());
+    let sig: String = m.finalize().into_bytes().iter().map(|b| format!("{b:02x}")).collect();
+    format!("t={t},v1={sig}")
+}
+
+async fn stripe_post(addr: &str, header: &str, payload: &str) -> u16 {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut s = tokio::net::TcpStream::connect(addr).await.unwrap();
+    let req = format!("POST /billing/stripe HTTP/1.1\r\nHost: {addr}\r\nStripe-Signature: {header}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}", payload.len());
+    s.write_all(req.as_bytes()).await.unwrap();
+    let mut out = Vec::new();
+    s.read_to_end(&mut out).await.unwrap();
+    String::from_utf8_lossy(&out).split(' ').nth(1).unwrap().parse().unwrap()
+}
+
+async fn me_json(addr: &str, tok: &str) -> serde_json::Value {
+    serde_json::from_str(&http("GET", addr, "/me", Some(tok), b"").await.1).unwrap()
+}
+
+#[tokio::test]
+async fn stripe_events_set_and_end_the_plan() {
+    let secret = "whsec_test_geheimnis";
+    let dir = tmp("stripe");
+    let addr = serve_with(&dir, grid_server::Config {
+        open_registration: true, billing: true, stripe_webhook_secret: Some(secret.into()),
+        checkout_url: Some("https://buy.stripe.com/test_abc".into()), stripe_quota: Some(2_000_000_000), ..Default::default()
+    }).await;
+    let a = acct(1);
+    let ta = token(&addr, &a).await;
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+    let send = |payload: String| { let addr = addr.clone(); async move { stripe_post(&addr, &stripe_header(secret, now, &payload), &payload).await } };
+
+    // Der Zahlungslink trägt die Konto-Kennung
+    let me = me_json(&addr, &ta).await;
+    assert_eq!(me["checkoutUrl"], format!("https://buy.stripe.com/test_abc?client_reference_id={}", a.id).as_str());
+    assert_eq!(me["active"], false);
+
+    // Ohne gültige Signatur, mit falschem Geheimnis oder veraltetem Zeitstempel: abgelehnt
+    let done = serde_json::json!({ "type": "checkout.session.completed", "data": { "object": { "client_reference_id": a.id, "customer": "cus_1" } } }).to_string();
+    assert_eq!(stripe_post(&addr, "t=1,v1=00", &done).await, 400);
+    assert_eq!(stripe_post(&addr, &stripe_header("falsch", now, &done), &done).await, 400);
+    assert_eq!(stripe_post(&addr, &stripe_header(secret, now - 3600, &done), &done).await, 400);
+    assert_eq!(me_json(&addr, &ta).await["active"], false, "abgelehnte Ereignisse ändern nichts");
+
+    // Bezahlt: Abo gilt vorläufig, dann nennt die Rechnung den Zeitraum
+    assert_eq!(send(done).await, 200);
+    let me = me_json(&addr, &ta).await;
+    assert_eq!((me["active"].as_bool(), me["quota"].as_i64()), (Some(true), Some(2_000_000_000)));
+    let end = now + 30 * 86_400;
+    let invoice = serde_json::json!({ "type": "invoice.paid", "data": { "object": { "customer": "cus_1", "lines": { "data": [{ "period": { "end": end } }] } } } }).to_string();
+    assert_eq!(send(invoice).await, 200);
+    assert_eq!(me_json(&addr, &ta).await["paidUntil"].as_i64(), Some(end + 3 * 86_400));
+
+    // Unbekannter Kunde und fremde Ereignisse: angenommen, aber ohne Wirkung
+    let stranger = serde_json::json!({ "type": "customer.subscription.deleted", "data": { "object": { "customer": "cus_unbekannt" } } }).to_string();
+    assert_eq!(send(stranger).await, 200);
+    assert_eq!(send(serde_json::json!({ "type": "ping", "data": { "object": {} } }).to_string()).await, 200);
+    assert_eq!(me_json(&addr, &ta).await["active"], true);
+
+    // Gekündigt: wieder kostenlos
+    let gone = serde_json::json!({ "type": "customer.subscription.deleted", "data": { "object": { "customer": "cus_1" } } }).to_string();
+    assert_eq!(send(gone).await, 200);
+    assert_eq!(me_json(&addr, &ta).await["active"], false);
+
+    // Ohne Geheimnis in der Einstellung gibt es den Webhook nicht
+    let addr2 = serve_with(&tmp("stripe-off"), grid_server::Config { open_registration: true, ..Default::default() }).await;
+    assert_eq!(stripe_post(&addr2, "t=1,v1=00", "{}").await, 404);
+}

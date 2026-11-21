@@ -458,7 +458,8 @@ function SyncButton(props: { control: SyncControl; onClick: () => void }) {
   const { control } = props
   const status = control.server ? (control.state?.status === 'online' && control.state.readonly ? 'readonly' : control.state?.status ?? 'connecting') : 'none'
   const requests = control.members?.requests.length ?? 0
-  const title = requests > 0 ? `${syncLabel(control)} – ${requests} Beitrittsanfrage${requests === 1 ? '' : 'n'}` : syncLabel(control)
+  const note = requests > 0 ? ` – ${requests} Beitrittsanfrage${requests === 1 ? '' : 'n'}` : control.moved ? ' – Dokument ist auf einen anderen Server umgezogen' : ''
+  const title = `${syncLabel(control)}${note}`
   return (
     <button type="button" className={`sync-btn ${status}${requests > 0 ? ' requests' : ''}`} onClick={props.onClick} title={title} aria-label={`Cloud: ${title}`}>
       <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -466,6 +467,7 @@ function SyncButton(props: { control: SyncControl; onClick: () => void }) {
       </svg>
       {status !== 'none' && <i className="dot" />}
       {requests > 0 && <b className="req-badge">{requests}</b>}
+      {requests === 0 && control.moved && <b className="req-badge moved">↪</b>}
     </button>
   )
 }

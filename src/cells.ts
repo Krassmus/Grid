@@ -166,6 +166,36 @@ function valueOf(col: ColumnInfo, c: Cell | undefined): Val {
   }
 }
 
+// ---------- Datum in Formeln ----------
+// Datumswerte sind Text im Format JJJJ-MM-TT (mit Uhrzeit JJJJ-MM-TTTHH:MM). Gerechnet wird mit ganzen Kalendertagen,
+// ohne Zeitzonen- und Sommerzeitprobleme; „heute“ ist der Kalendertag auf diesem Gerät.
+
+const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}))?$/
+const DAY_MS = 86_400_000
+const utcDay = (y: number, m: number, d: number) => { const t = new Date(0); t.setUTCFullYear(y, m - 1, d); return t.getTime() / DAY_MS }
+const todayNumber = () => { const n = new Date(); return utcDay(n.getFullYear(), n.getMonth() + 1, n.getDate()) }
+const pad = (n: number) => String(n).padStart(2, '0')
+
+/** Tage seit 1970 für einen Datumswert; `null` bei leer, Fehler bei Text, der kein Datum ist. */
+function dayNumber(v: Val): number | null | FErr {
+  if (v instanceof FErr) return v
+  if (v === null || v === '') return null
+  const m = typeof v === 'string' ? ISO_DATE.exec(v.trim()) : null
+  const bad = () => new FErr('#WERT!', `„${textOf(v)}“ ist kein Datum (erwartet JJJJ-MM-TT)`)
+  if (!m) return bad()
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])]
+  const n = utcDay(y, mo, d)
+  const back = new Date(n * DAY_MS)
+  return back.getUTCFullYear() === y && back.getUTCMonth() === mo - 1 && back.getUTCDate() === d ? n : bad()
+}
+
+/** Datum als Text; nur Jahre 1000 bis 9999 sind darstellbar. */
+function isoDay(n: number): string | FErr {
+  const t = new Date(n * DAY_MS)
+  const y = t.getUTCFullYear()
+  return y < 1000 || y > 9999 ? new FErr('#WERT!', 'Das Datum liegt außerhalb der Jahre 1000 bis 9999') : `${y}-${pad(t.getUTCMonth() + 1)}-${pad(t.getUTCDate())}`
+}
+
 function compareVals(a: Val, b: Val, op: string): Val {
   if (a instanceof FErr) return a
   if (b instanceof FErr) return b
@@ -312,6 +342,60 @@ function formulaCells(doc: Y.Doc, tables: TableInfo[], table: TableInfo, col: Co
       }
       case 'NOT': { need(1); const a = scalar(n.args[0]); return (rid) => { const v = a(rid); return v instanceof FErr ? v : !truthy(v) } }
       case 'ISEMPTY': { need(1); const a = scalar(n.args[0]); return (rid) => { const v = a(rid); return v instanceof FErr ? v : v === null || v === '' } }
+      // ----- Datum -----
+      case 'TODAY': { need(0); return () => isoDay(todayNumber()) }
+      case 'NOW': { need(0); return () => { const t = new Date(); const d = isoDay(utcDay(t.getFullYear(), t.getMonth() + 1, t.getDate())); return d instanceof FErr ? d : `${d}T${pad(t.getHours())}:${pad(t.getMinutes())}` } }
+      case 'DAYSINCE': case 'DAYSUNTIL': {
+        need(1)
+        const a = scalar(n.args[0])
+        return (rid) => { const d = dayNumber(a(rid)); return d === null || d instanceof FErr ? d : n.fn === 'DAYSINCE' ? todayNumber() - d : d - todayNumber() }
+      }
+      case 'DAYS': { // TAGE(von; bis)
+        need(2)
+        const a = scalar(n.args[0]), b = scalar(n.args[1])
+        return (rid) => { const x = dayNumber(a(rid)); if (x instanceof FErr) return x; const y = dayNumber(b(rid)); if (y instanceof FErr) return y; return x === null || y === null ? null : y - x }
+      }
+      case 'YEAR': case 'MONTH': case 'DAY': case 'WEEKDAY': {
+        need(1)
+        const a = scalar(n.args[0])
+        return (rid) => {
+          const d = dayNumber(a(rid)); if (d === null || d instanceof FErr) return d
+          const t = new Date(d * DAY_MS)
+          return n.fn === 'YEAR' ? t.getUTCFullYear() : n.fn === 'MONTH' ? t.getUTCMonth() + 1 : n.fn === 'DAY' ? t.getUTCDate() : ((t.getUTCDay() + 6) % 7) + 1 // Montag = 1
+        }
+      }
+      case 'ADDDAYS': {
+        need(2)
+        const a = scalar(n.args[0]), k = scalar(n.args[1])
+        return (rid) => {
+          const v = a(rid), d = dayNumber(v); if (d === null || d instanceof FErr) return d
+          const x = numOf(k(rid)); if (x instanceof FErr) return x
+          const out = isoDay(d + Math.round(x))
+          const time = typeof v === 'string' ? ISO_DATE.exec(v.trim())?.[4] : undefined
+          return out instanceof FErr || time === undefined ? out : `${out}T${time}:${ISO_DATE.exec((v as string).trim())![5]}`
+        }
+      }
+      case 'AGE': { // ALTER(Geburtsdatum; [bis]) in vollen Jahren
+        need(1, 2)
+        const a = scalar(n.args[0]), b = n.args[1] ? scalar(n.args[1]) : null
+        return (rid) => {
+          const from = dayNumber(a(rid)); if (from === null || from instanceof FErr) return from
+          const to = b ? dayNumber(b(rid)) : todayNumber(); if (to === null || to instanceof FErr) return to
+          const f = new Date(from * DAY_MS), t = new Date(to * DAY_MS)
+          const years = t.getUTCFullYear() - f.getUTCFullYear()
+          return t.getUTCMonth() * 100 + t.getUTCDate() < f.getUTCMonth() * 100 + f.getUTCDate() ? years - 1 : years
+        }
+      }
+      case 'DATE': { // DATUM(Jahr; Monat; Tag), Überlauf läuft in den nächsten Monat/ins nächste Jahr
+        need(3)
+        const g = n.args.map(scalar)
+        return (rid) => {
+          const p: number[] = []
+          for (const x of g) { const v = numOf(x(rid)); if (v instanceof FErr) return v; p.push(Math.trunc(v)) }
+          const t = new Date(0); t.setUTCFullYear(p[0], p[1] - 1, p[2])
+          return isoDay(t.getTime() / DAY_MS)
+        }
+      }
       case 'ABS': { need(1); const a = scalar(n.args[0]); return (rid) => { const v = numOf(a(rid)); return v instanceof FErr ? v : Math.abs(v) } }
       case 'ROUND': {
         need(1, 2)

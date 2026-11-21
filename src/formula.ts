@@ -27,8 +27,14 @@ const ALIASES: Record<string, string> = {
   COUNT: 'COUNT', ANZAHL: 'COUNT', JOIN: 'JOIN', TEXTVERBINDEN: 'JOIN',
   IF: 'IF', WENN: 'IF', AND: 'AND', UND: 'AND', OR: 'OR', ODER: 'OR', NOT: 'NOT', NICHT: 'NOT',
   ROUND: 'ROUND', RUNDEN: 'ROUND', ABS: 'ABS', ISEMPTY: 'ISEMPTY', ISTLEER: 'ISEMPTY',
+  // Datum
+  TODAY: 'TODAY', HEUTE: 'TODAY', NOW: 'NOW', JETZT: 'NOW',
+  DAYSINCE: 'DAYSINCE', TAGE_SEIT: 'DAYSINCE', DAYSUNTIL: 'DAYSUNTIL', TAGE_BIS: 'DAYSUNTIL', DAYS: 'DAYS', TAGE: 'DAYS',
+  YEAR: 'YEAR', JAHR: 'YEAR', MONTH: 'MONTH', MONAT: 'MONTH', DAY: 'DAY', TAG: 'DAY', WEEKDAY: 'WEEKDAY', WOCHENTAG: 'WEEKDAY',
+  ADDDAYS: 'ADDDAYS', TAGE_ADDIEREN: 'ADDDAYS', AGE: 'AGE', ALTER: 'AGE', DATE: 'DATE', DATUM: 'DATE',
 }
-export const FUNCTIONS = ['SUMME', 'MITTELWERT', 'MIN', 'MAX', 'ANZAHL', 'TEXTVERBINDEN', 'WENN', 'UND', 'ODER', 'NICHT', 'RUNDEN', 'ABS', 'ISTLEER']
+export const FUNCTIONS = ['SUMME', 'MITTELWERT', 'MIN', 'MAX', 'ANZAHL', 'TEXTVERBINDEN', 'WENN', 'UND', 'ODER', 'NICHT', 'RUNDEN', 'ABS', 'ISTLEER',
+  'HEUTE', 'JETZT', 'TAGE_SEIT', 'TAGE_BIS', 'TAGE', 'JAHR', 'MONAT', 'TAG', 'WOCHENTAG', 'TAGE_ADDIEREN', 'ALTER', 'DATUM']
 export const canonicalFn = (name: string): string | undefined => ALIASES[name.toUpperCase()]
 export const AGGREGATES = new Set(['SUM', 'AVG', 'MIN', 'MAX', 'COUNT', 'JOIN'])
 
@@ -170,8 +176,8 @@ export function inferType(n: Node, typeOfRef: (parts: string[]) => ColType | und
           return a === b ? a : 'text'
         }
         case 'AND': case 'OR': case 'NOT': case 'ISEMPTY': return 'checkbox'
-        case 'JOIN': return 'text'
-        default: return 'number' // SUM, AVG, MIN, MAX, COUNT, ROUND, ABS
+        case 'JOIN': case 'TODAY': case 'NOW': case 'ADDDAYS': case 'DATE': return 'text' // Datumswerte als Text (JJJJ-MM-TT)
+        default: return 'number' // SUM, AVG, MIN, MAX, COUNT, ROUND, ABS, DAYSINCE, DAYSUNTIL, DAYS, YEAR, MONTH, DAY, WEEKDAY, AGE
       }
   }
 }

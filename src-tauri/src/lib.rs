@@ -174,6 +174,7 @@ fn set_theme(app: tauri::AppHandle, state: tauri::State<'_, MenuState>, choice: 
 pub fn run() {
   tauri::Builder::default()
     .plugin(tauri_plugin_dialog::init())
+    .plugin(tauri_plugin_opener::init())
     .manage(PendingOpen::default())
     .manage(MenuState { recent: Mutex::new(Vec::new()), theme: Mutex::new("system".to_string()) })
     .invoke_handler(tauri::generate_handler![grid_save, grid_open, take_pending_open, set_recent_menu, set_theme, identity_load, identity_store])

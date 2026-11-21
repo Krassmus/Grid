@@ -560,3 +560,19 @@ body.tile-dragging.tile-copy, body.tile-dragging.tile-copy * { cursor: copy !imp
 .sync-server-block .sync-server { margin: 0 0 2px; }
 .sync-server-block .sync-account { margin: 2px 0 8px; }
 .switch-box { margin: 8px 0; padding: 10px 12px; border: 1px solid var(--c-d5dce0); border-radius: 10px; background: var(--c-f4f7f8); }
+.sync-btn .req-badge.moved { background: #0a84ff; }
+.switch-box.moved p { margin: 4px 0; }
+.plan-actions { display: flex; gap: 14px; align-items: center; margin: 6px 0 0; }
+.formula-ref { font-size: 12px; line-height: 1.5; border: 1px solid var(--c-d5dce0); border-radius: 8px; padding: 6px 10px; margin: 2px 0 6px; }
+.formula-ref summary { cursor: pointer; font-weight: 500; color: var(--c-3b4a52); }
+.formula-ref h5 { margin: 10px 0 3px; font-size: 12px; color: var(--c-3b4a52); }
+.formula-ref ul { margin: 0; padding-left: 18px; }
+.formula-ref li { margin: 2px 0; }
+.formula-ref dl { display: grid; grid-template-columns: max-content 1fr; gap: 3px 12px; margin: 0; }
+.formula-ref dt { white-space: nowrap; }
+.formula-ref dd { margin: 0; color: var(--c-666677); }
+.formula-ref code { background: var(--c-eef1f3); padding: 1px 4px; border-radius: 4px; font-size: 11.5px; }
+.formula-ref .hint { margin: 8px 0 2px; }
+/* Dialoge mit langer Hilfe (Formeln) bleiben auf kleinen Fenstern bedienbar */
+.dialog:has(.formula-ref) { box-sizing: border-box; max-height: calc(100vh - 40px); overflow-y: auto; overscroll-behavior: contain; width: min(440px, 92vw); }
+.formula-ref .ref-note { margin: 2px 0 6px; color: var(--c-666677); }

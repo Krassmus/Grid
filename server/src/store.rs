@@ -31,6 +31,7 @@ impl Store {
              CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value BLOB NOT NULL);
              CREATE TABLE IF NOT EXISTS accounts (id TEXT PRIMARY KEY, pub TEXT NOT NULL, status TEXT NOT NULL, created INTEGER NOT NULL);
              CREATE TABLE IF NOT EXISTS members (doc TEXT NOT NULL, account TEXT NOT NULL, role TEXT NOT NULL, PRIMARY KEY (doc, account));
+             CREATE TABLE IF NOT EXISTS stripe_customers (customer TEXT PRIMARY KEY, account TEXT NOT NULL);
              CREATE TABLE IF NOT EXISTS admin_log (doc TEXT NOT NULL, seq INTEGER NOT NULL, entry TEXT NOT NULL, PRIMARY KEY (doc, seq));
              CREATE TABLE IF NOT EXISTS join_requests (doc TEXT NOT NULL, account TEXT NOT NULL, pub TEXT NOT NULL, name TEXT NOT NULL, time INTEGER NOT NULL, PRIMARY KEY (doc, account));",
         )?;
@@ -175,6 +176,17 @@ impl Store {
     pub fn set_plan(&self, id: &str, plan: &str, paid_until: Option<i64>, quota: i64) -> rusqlite::Result<()> {
         self.conn().execute("UPDATE accounts SET plan = ?2, paid_until = ?3, quota = ?4 WHERE id = ?1", params![id, plan, paid_until, quota])?;
         Ok(())
+    }
+
+    // ---------- Zahlungsanbieter (Stripe) ----------
+
+    pub fn link_stripe_customer(&self, customer: &str, account: &str) -> rusqlite::Result<()> {
+        self.conn().execute("INSERT OR REPLACE INTO stripe_customers (customer, account) VALUES (?1, ?2)", params![customer, account])?;
+        Ok(())
+    }
+
+    pub fn stripe_account(&self, customer: &str) -> rusqlite::Result<Option<String>> {
+        self.conn().query_row("SELECT account FROM stripe_customers WHERE customer = ?1", [customer], |r| r.get(0)).optional()
     }
 
     pub fn remove_account(&self, id: &str) -> rusqlite::Result<()> {

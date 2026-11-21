@@ -62,6 +62,12 @@ pub struct Config {
     pub manage_url: Option<String>,
     /// Name des Servers, den Grid anzeigt (z. B. „Firmenserver“).
     pub name: Option<String>,
+    /// Signaturgeheimnis des Stripe-Webhooks (`whsec_…`); ohne ist `POST /billing/stripe` abgeschaltet.
+    pub stripe_webhook_secret: Option<String>,
+    /// Adresse des Stripe-Zahlungslinks (Payment Link); Grid hängt `client_reference_id=<Konto>` an.
+    pub checkout_url: Option<String>,
+    /// Speicher in Bytes für ein über Stripe bezahltes Abo
+    pub stripe_quota: Option<i64>,
 }
 
 pub struct AppState {
@@ -106,6 +112,7 @@ pub fn app_with(data: &std::path::Path, cfg: Config) -> rusqlite::Result<Router>
         .route("/challenge", get(challenge))
         .route("/login", post(login))
         .route("/me", get(me))
+        .route("/billing/stripe", post(stripe_webhook))
         .route("/admin/accounts", get(admin_accounts))
         .route("/admin/accounts/{id}/plan", axum::routing::put(admin_plan))
         .route("/docs", get(list_docs))
@@ -290,6 +297,50 @@ impl AppState {
     }
 }
 
+/// Stripe meldet Zahlungen. Die Signatur (`Stripe-Signature: t=…,v1=…`, HMAC-SHA256 über `<t>.<Inhalt>`) wird geprüft.
+/// Zuordnung: Beim Bezahlen über den Zahlungslink steht die Konto-Kennung in `client_reference_id`; spätere
+/// Rechnungen und Kündigungen kommen mit der Stripe-Kundennummer.
+async fn stripe_webhook(State(s): State<Shared>, h: HeaderMap, body: Bytes) -> Response {
+    let Some(secret) = &s.cfg.stripe_webhook_secret else { return StatusCode::NOT_FOUND.into_response() };
+    let Ok(text) = std::str::from_utf8(&body) else { return StatusCode::BAD_REQUEST.into_response() };
+    let header = h.get("stripe-signature").and_then(|v| v.to_str().ok()).unwrap_or("");
+    let t: i64 = header.split(',').find_map(|p| p.trim().strip_prefix("t=")).and_then(|v| v.parse().ok()).unwrap_or(0);
+    let signed = format!("{t}.{text}");
+    let valid = (auth::now() - t).abs() <= 300
+        && header.split(',').filter_map(|p| p.trim().strip_prefix("v1=")).any(|sig| auth::check_text(secret.as_bytes(), &signed, sig));
+    if !valid { return (StatusCode::BAD_REQUEST, "Signatur ungültig").into_response(); }
+    let Ok(event) = serde_json::from_str::<serde_json::Value>(text) else { return StatusCode::BAD_REQUEST.into_response() };
+    let obj = &event["data"]["object"];
+    let quota = s.cfg.stripe_quota.unwrap_or(5_000_000_000);
+    let str_of = |v: &serde_json::Value| v.as_str().map(String::from);
+    match event["type"].as_str().unwrap_or("") {
+        "checkout.session.completed" => {
+            if let (Some(account), Some(customer)) = (str_of(&obj["client_reference_id"]), str_of(&obj["customer"])) {
+                if matches!(s.store.account(&account), Ok(Some(_))) {
+                    let _ = s.store.link_stripe_customer(&customer, &account);
+                    // vorläufig, bis die Rechnung (`invoice.paid`) den genauen Zeitraum nennt
+                    let until = store::now() + 7 * 86_400;
+                    let keep = s.store.account(&account).ok().flatten().filter(|a| a.paid_now()).and_then(|a| a.paid_until);
+                    let _ = s.store.set_plan(&account, "paid", Some(keep.map_or(until, |k| k.max(until))), quota);
+                }
+            }
+        }
+        "invoice.paid" => {
+            let customer = str_of(&obj["customer"]).unwrap_or_default();
+            if let Ok(Some(account)) = s.store.stripe_account(&customer) {
+                let end = obj["lines"]["data"][0]["period"]["end"].as_i64().or_else(|| obj["period_end"].as_i64());
+                if let Some(end) = end { let _ = s.store.set_plan(&account, "paid", Some(end + 3 * 86_400), quota); } // drei Tage Nachfrist
+            }
+        }
+        "customer.subscription.deleted" => {
+            let customer = str_of(&obj["customer"]).unwrap_or_default();
+            if let Ok(Some(account)) = s.store.stripe_account(&customer) { let _ = s.store.set_plan(&account, "free", None, 0); }
+        }
+        _ => {}
+    }
+    Json(serde_json::json!({ "received": true })).into_response()
+}
+
 /// Abo und Speicher des angemeldeten Kontos.
 async fn me(State(s): State<Shared>, h: HeaderMap) -> Response {
     let Some(id) = current(&s, &h) else { return StatusCode::UNAUTHORIZED.into_response() };
@@ -297,6 +348,7 @@ async fn me(State(s): State<Shared>, h: HeaderMap) -> Response {
     Json(serde_json::json!({
         "id": a.id, "plan": a.plan, "active": a.paid_now(), "paidUntil": a.paid_until, "quota": a.quota,
         "used": s.store.owned_bytes(&a.id).unwrap_or(0), "billing": s.cfg.billing, "manageUrl": s.cfg.manage_url,
+        "checkoutUrl": s.cfg.checkout_url.as_ref().map(|u| format!("{u}{}client_reference_id={}", if u.contains('?') { "&" } else { "?" }, a.id)),
     })).into_response()
 }
 

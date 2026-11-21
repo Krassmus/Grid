@@ -53,4 +53,17 @@ describe('Admin-Protokoll', () => {
     // Schlüssel eines Mitglieds lässt sich nicht austauschen
     expect(() => applyEntry(s2, DOC, buildEntry(a, s2, DOC, 'set', { id: b.id, pub: person(9).publicKey }, 'member', 'Ben', T))).toThrow('Schlüssel passt nicht')
   })
+
+  it('kündigt einen Umzug an, ohne Mitglieder zu ändern', () => {
+    const [a, b] = [person(1), person(2)]
+    const s0 = emptyState()
+    const s1 = applyEntry(s0, DOC, buildEntry(a, s0, DOC, 'genesis', sub(a), 'admin', 'Anna', T))
+    const s2 = applyEntry(s1, DOC, buildEntry(a, s1, DOC, 'set', sub(b), 'member', 'Ben', T))
+    const key = person(9).publicKey
+    const s3 = applyEntry(s2, DOC, buildEntry(a, s2, DOC, 'move', { id: a.id, pub: key }, 'admin', 'https://neu.example/grid', T))
+    expect(s3.moved).toEqual({ server: 'https://neu.example/grid', key })
+    expect(s3.members).toEqual(s2.members)
+    expect(() => applyEntry(s3, DOC, buildEntry(b, s3, DOC, 'move', { id: b.id, pub: key }, 'member', 'https://evil.example', T))).toThrow('Nur Admins')
+    expect(() => applyEntry(s3, DOC, buildEntry(a, s3, DOC, 'move', { id: a.id, pub: key }, 'admin', 'ftp://x', T))).toThrow('Server-Adresse')
+  })
 })

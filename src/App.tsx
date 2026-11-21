@@ -182,6 +182,10 @@ function Single() {
     connect: (server) => { session.connect(server); bump((n) => n + 1) },
     disconnect: () => { session.disconnect(); bump((n) => n + 1) },
     trustServer: () => { session.trustServer(); bump((n) => n + 1) },
+    resync: () => session.resync(),
+    moveTo: async (server) => { await session.moveTo(server); bump((n) => n + 1) },
+    moved: session.movedTo,
+    followMove: () => { const m = session.movedTo; if (m) { session.connect(m.server, m.key); bump((n) => n + 1) } },
   }
   return (
     <>

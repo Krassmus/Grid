@@ -33,7 +33,7 @@ fn mac(secret: &[u8], text: &str) -> HmacSha {
 
 fn sign_text(secret: &[u8], text: &str) -> String { hex(&mac(secret, text).finalize().into_bytes()) }
 
-fn check_text(secret: &[u8], text: &str, tag: &str) -> bool {
+pub fn check_text(secret: &[u8], text: &str, tag: &str) -> bool {
     unhex(tag).is_some_and(|t| mac(secret, text).verify_slice(&t).is_ok())
 }
 

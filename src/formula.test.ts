@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as Y from 'yjs'
 import { addColumn, addLink, addRow, addTable, readTables, setCell } from './model'
 import { columnCells } from './cells'
@@ -144,5 +144,81 @@ describe('Text mit Platzhaltern', () => {
     const col = addColumn(s.doc, s.gebiete, 'T', 'template', undefined, [], { tpl: '{{[Σ Helfer]}} Helfer' })
     expect(effectiveType(s.gt().columns.find((c) => c.id === col)!, s.tables())).toBe('text')
     expect(sortedRowIds(s.doc, s.gebiete, col, 'desc')[0]).toBe(s.e[0]) // „17 Helfer“ nach natürlicher Sortierung zuletzt = absteigend zuerst
+  })
+})
+
+describe('Datumsfunktionen', () => {
+  afterEach(() => vi.useRealTimers())
+  /** Heute ist Samstag, der 21.11.2026, 14:30. Die drei Zeilen haben im Datum 11.11., 21.11. (heute) und 25.11. */
+  function withDates() {
+    vi.useFakeTimers({ now: new Date(2026, 10, 21, 14, 30) })
+    const t = setup()
+    const date = addColumn(t.doc, t.gebiete, 'Datum', 'date')
+    ;['2026-11-11', '2026-11-21', '2026-11-25'].forEach((d, i) => setCell(t.doc, t.gebiete, t.e[i], date, d))
+    return t
+  }
+
+  it('DAYSINCE / TAGE_SEIT: Tage seit einem Datum bis heute (negativ, wenn es in der Zukunft liegt)', () => {
+    const t = withDates()
+    expect(t.val('DAYSINCE([Datum])')).toEqual(['10', '0', '-4'])
+    expect(t.val('TAGE_SEIT([Datum])')).toEqual(['10', '0', '-4'])
+    expect(t.val('DAYSUNTIL([Datum])')).toEqual(['-10', '0', '4'])
+    expect(t.val('TAGE_BIS([Datum])')).toEqual(['-10', '0', '4'])
+  })
+
+  it('lässt leere Datumsfelder leer und meldet Text, der kein Datum ist', () => {
+    const t = withDates()
+    setCell(t.doc, t.gebiete, t.e[1], t.gt().columns.find((c) => c.name === 'Datum')!.id, '')
+    expect(t.val('DAYSINCE([Datum])')).toEqual(['10', '', '-4'])
+    expect(t.val('DAYSINCE("gestern")')).toEqual(['#WERT!', '#WERT!', '#WERT!'])
+    expect(t.val('DAYSINCE("2026-02-30")')).toEqual(['#WERT!', '#WERT!', '#WERT!'])
+    expect(t.val('DAYSINCE()')[0]).toBe('#SYNTAX')
+  })
+
+  it('rechnet mit ganzen Tagen, auch über Schaltjahr und Uhrzeit', () => {
+    const t = withDates()
+    expect(t.val('TAGE("2024-02-28"; "2024-03-01")')[0]).toBe('2') // Schaltjahr
+    expect(t.val('TAGE("2026-01-01"; "2027-01-01")')[0]).toBe('365')
+    expect(t.val('DAYSINCE("2026-11-11T23:59")')[0]).toBe('10') // Uhrzeit zählt nicht
+    expect(t.val('TAGE([Datum]; "2026-12-01")')).toEqual(['20', '10', '6'])
+  })
+
+  it('liefert Jahr, Monat, Tag und Wochentag (Montag = 1)', () => {
+    const t = withDates()
+    expect(t.val('JAHR([Datum])')).toEqual(['2026', '2026', '2026'])
+    expect(t.val('MONAT([Datum])')[0]).toBe('11')
+    expect(t.val('TAG([Datum])')).toEqual(['11', '21', '25'])
+    expect(t.val('WOCHENTAG([Datum])')).toEqual(['3', '6', '3']) // Mi, Sa, Mi
+    expect(t.val('WEEKDAY("2026-11-22")')[0]).toBe('7') // Sonntag
+  })
+
+  it('addiert Tage, baut Datumswerte und kennt heute und jetzt', () => {
+    const t = withDates()
+    expect(t.val('TAGE_ADDIEREN([Datum]; 10)')).toEqual(['2026-11-21', '2026-12-01', '2026-12-05'])
+    expect(t.val('ADDDAYS("2026-11-30T09:15"; 1)')[0]).toBe('2026-12-01T09:15')
+    expect(t.val('ADDDAYS("2026-03-01"; -1)')[0]).toBe('2026-02-28')
+    expect(t.val('DATUM(2026; 13; 1)')[0]).toBe('2027-01-01')
+    expect(t.val('DATE(2026; 2; 31)')[0]).toBe('2026-03-03')
+    expect(t.val('HEUTE()')[0]).toBe('2026-11-21')
+    expect(t.val('JETZT()')[0]).toBe('2026-11-21T14:30')
+    expect(t.val('TAGE_SEIT(TAGE_ADDIEREN(HEUTE(); -7))')[0]).toBe('7')
+  })
+
+  it('berechnet das Alter in vollen Jahren', () => {
+    const t = withDates()
+    expect(t.val('ALTER("2000-11-21")')[0]).toBe('26') // heute Geburtstag
+    expect(t.val('ALTER("2000-11-22")')[0]).toBe('25') // morgen
+    expect(t.val('AGE("2000-02-29"; "2001-02-28")')[0]).toBe('0')
+    expect(t.val('AGE("2000-02-29"; "2001-03-01")')[0]).toBe('1')
+  })
+
+  it('hat die passenden Typen: Zahl bzw. Text (Datum als JJJJ-MM-TT), WENN und Vergleiche funktionieren', () => {
+    const t = withDates()
+    const num = t.formula('DAYSINCE([Datum])', 'Alter in Tagen')
+    const txt = t.formula('HEUTE()', 'Stand')
+    expect(effectiveType(t.gt().columns.find((c) => c.id === num)!, t.tables())).toBe('number')
+    expect(effectiveType(t.gt().columns.find((c) => c.id === txt)!, t.tables())).toBe('text')
+    expect(t.val('WENN(TAGE_SEIT([Datum]) > 5; "alt"; "neu")')).toEqual(['alt', 'neu', 'neu'])
+    expect(t.val('[Datum] < HEUTE()')).toEqual(['Wahr', 'Falsch', 'Falsch'])
   })
 })

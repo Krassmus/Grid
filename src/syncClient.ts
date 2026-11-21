@@ -128,7 +128,12 @@ export async function authedFetch(server: string, path: string, init: RequestIni
 }
 
 /** Abo und Speicher des Kontos auf einem Server. */
-export interface AccountInfo { id: string; plan: 'free' | 'paid'; active: boolean; paidUntil: number | null; quota: number; used: number; billing: boolean; manageUrl: string | null }
+export interface AccountInfo {
+  id: string; plan: 'free' | 'paid'; active: boolean; paidUntil: number | null; quota: number; used: number; billing: boolean
+  manageUrl: string | null
+  /** Zahlungslink mit der Konto-Kennung (Stripe), falls der Server einen kennt */
+  checkoutUrl: string | null
+}
 
 export async function fetchAccountInfo(server: string): Promise<AccountInfo> {
   const r = await authedFetch(server, '/me')
@@ -157,7 +162,7 @@ export class SyncConnection {
   private expired = 0
   private claims = 0
   private readonly: { code: string; reason: string } | null = null
-  private resync: ReturnType<typeof setTimeout> | undefined
+  private resyncTimer: ReturnType<typeof setTimeout> | undefined
 
   constructor(
     private doc: Y.Doc,
@@ -172,6 +177,11 @@ export class SyncConnection {
     filesOf(doc).observe(this.onFilesChanged)
     this.offIdentity = onIdentityChanged(() => this.restart())
     void this.open()
+  }
+
+  /** Zustand mit dem Server neu abgleichen (z. B. weil ein Abo gerade aktiv geworden ist). */
+  resync() {
+    if (this.online) this.ws?.send(frame(STEP1, Y.encodeStateVector(this.doc)))
   }
 
   /** Anderes Konto in Gebrauch: neu verbinden. */
@@ -241,8 +251,8 @@ export class SyncConnection {
           this.readonly = { code: m.code, reason: m.reason }
           this.onState({ status: 'online', readonly: this.readonly })
           // später noch einmal abgleichen: vielleicht ist das Abo inzwischen da, dann geht der aufgelaufene Stand hoch
-          clearTimeout(this.resync)
-          this.resync = setTimeout(() => { if (this.online) ws.send(frame(STEP1, Y.encodeStateVector(this.doc))) }, 60_000)
+          clearTimeout(this.resyncTimer)
+          this.resyncTimer = setTimeout(() => { if (this.online) ws.send(frame(STEP1, Y.encodeStateVector(this.doc))) }, 60_000)
         } else if (m.t === 'writable') {
           if (this.readonly) { this.readonly = null; this.onState({ status: 'online' }) }
         } else if (m.t === 'members') {
@@ -316,7 +326,7 @@ export class SyncConnection {
     this.online = false
     clearTimeout(this.retry)
     clearTimeout(this.blobTimer)
-    clearTimeout(this.resync)
+    clearTimeout(this.resyncTimer)
     this.doc.off('update', this.onLocal)
     filesOf(this.doc).unobserve(this.onFilesChanged)
     const ws = this.ws

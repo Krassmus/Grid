@@ -45,6 +45,15 @@ grid-server accounts list --data /var/lib/grid        # zeigt auch das Abo
 
 Weitere Umgebungsvariablen: `GRID_NAME` (Anzeigename), `GRID_BILLING=1` (wie `--billing`), `GRID_ADMIN_KEY` (mindestens 16 Zeichen; schaltet die HTTP-Verwaltung `/admin/…` für einen Webshop ein), `GRID_MANAGE_URL` (Adresse, die Grid als „Abo verwalten“ anzeigt). Hintergrund und Pläne für Zahlung: `docs/SYNC.md`, Abschnitt 4.
 
+### Zahlung mit Stripe
+
+1. In Stripe ein Produkt mit wiederkehrendem Preis anlegen und einen **Payment Link** erstellen. Die Adresse als `GRID_CHECKOUT_URL` eintragen (Grid hängt `client_reference_id=<Konto>` an).
+2. Unter „Entwickler → Webhooks“ einen Endpunkt `https://townwork.eu/grid/billing/stripe` anlegen, mit den Ereignissen `checkout.session.completed`, `invoice.paid` und `customer.subscription.deleted`. Das Signaturgeheimnis (`whsec_…`) als `GRID_STRIPE_WEBHOOK_SECRET` eintragen.
+3. Im Stripe-Kundenportal (Einstellungen → Billing → Customer portal) einen Anmeldelink aktivieren und als `GRID_MANAGE_URL` eintragen.
+4. Optional `GRID_STRIPE_QUOTA` (z. B. `10GB`); Standard ist 5 GB.
+
+In der systemd-Datei jeweils eine Zeile `Environment=…`. Zum Ausprobieren gibt es bei Stripe den Testmodus mit Testkarten.
+
 ## Hinter Apache (townwork.eu)
 
 Der Server lauscht nur lokal; Apache nimmt HTTPS entgegen und leitet unter `/grid/` weiter (WebSocket eingeschlossen).
