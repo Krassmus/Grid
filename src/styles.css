@@ -59,7 +59,7 @@ button.primary:disabled { opacity: .4; cursor: default; }
 .grid-head, .row-inner { display: grid; grid-template-columns: var(--cols); }
 /* Kopfzeile bleibt beim Scrollen oben (sticky relativ zum Fenster) */
 .grid-head { position: sticky; top: 0; z-index: 2; background: var(--c-f9faf8); border-bottom: 1px solid var(--c-e1e7ea); border-radius: 15px 15px 0 0; }
-.h { position: relative; padding: 14px 16px 9px; font-size: 13px; font-weight: 500; letter-spacing: .12em; text-transform: uppercase; color: var(--c-7b8890); white-space: nowrap; }
+.h { position: relative; padding: 14px 5px 9px; font-size: 13px; font-weight: 500; letter-spacing: .12em; text-transform: uppercase; color: var(--c-7b8890); white-space: nowrap; }
 .h small { margin-left: 8px; text-transform: none; letter-spacing: 0; font-size: 11px; opacity: .7; }
 .back-th { color: var(--c-9aa5ab); }
 .add-col { text-transform: none; letter-spacing: 0; padding: 4px 8px; font-size: 12px; white-space: nowrap; }
@@ -69,8 +69,8 @@ button.primary:disabled { opacity: .4; cursor: default; }
 .row-outer:last-child .row-inner { border-radius: 0 0 15px 15px; }
 .row-inner { min-height: 64px; align-items: center; }
 .row-inner:hover { background: var(--c-fbfcfc); }
-.c { display: flex; align-items: center; gap: 8px; padding: 10px 16px; min-width: 0; }
-.cell { width: 100%; box-sizing: border-box; font: inherit; font-size: 16px; border: 1px solid transparent; background: transparent; padding: 6px 8px; margin: 0 -8px; border-radius: 8px; color: var(--c-1f2a30); }
+.c { display: flex; align-items: center; gap: 8px; padding: 10px 5px; min-width: 0; }
+.cell { width: 100%; box-sizing: border-box; font: inherit; font-size: 16px; border: 1px solid transparent; background: transparent; padding: 6px 5px; margin: 0 -5px; border-radius: 8px; color: var(--c-1f2a30); }
 .cell:focus { outline: none; border-color: #0a84ff; background: var(--c-ffffff); }
 .actions-c { justify-content: center; padding: 0; }
 .row-inner .del { opacity: 0; }
@@ -194,7 +194,7 @@ button.danger-outline { color: var(--c-d92d20); border-color: var(--c-f0c4c0); b
 .anim-inner > .tile, .anim-inner > .filechip { max-width: 100%; min-width: 0; }
 .c > .tiles { flex: 1 1 0; min-width: 0; max-width: 100%; }
 
-.col-resize { position: absolute; top: 0; bottom: 0; right: -5px; width: 10px; cursor: col-resize; z-index: 3; }
+.col-resize { position: absolute; top: 0; bottom: 0; right: -3px; width: 12px; cursor: col-resize; z-index: 3; } /* kurz vor der Schrift der nächsten Spalte (die beginnt 5px hinter der Kante) */
 .col-resize::after { content: ''; position: absolute; top: 25%; bottom: 25%; left: 4px; width: 2px; border-radius: 1px; background: #0a84ff; opacity: 0; }
 .col-resize:hover::after, body.resizing .col-resize::after { opacity: .6; }
 body.resizing { cursor: col-resize; user-select: none; }
@@ -278,7 +278,7 @@ textarea.cell { resize: none; line-height: 1.35; overflow: hidden; display: bloc
 .grid-foot { background: var(--c-f9faf8); border-top: 1px solid var(--c-e1e7ea); border-radius: 0 0 15px 15px; }
 .grid-foot .row-inner { align-items: center; }
 .foot-cell { position: relative; padding-top: 0; padding-bottom: 0; }
-.foot-btn { all: unset; box-sizing: border-box; cursor: pointer; flex: 1 1 0; min-width: 0; padding: 9px 8px; margin: 0 -8px; font-size: 13px; color: var(--c-4b5a62); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-radius: 6px; }
+.foot-btn { all: unset; box-sizing: border-box; cursor: pointer; flex: 1 1 0; min-width: 0; padding: 9px 5px; margin: 0 -5px; font-size: 13px; color: var(--c-4b5a62); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-radius: 6px; }
 .foot-btn { display: flex; align-items: baseline; gap: 6px; }
 .foot-btn small { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--c-8a969c); text-transform: uppercase; letter-spacing: .06em; font-size: 11px; }
 .foot-btn strong { flex: none; }
@@ -592,7 +592,8 @@ main.single { padding-top: env(safe-area-inset-top); padding-left: env(safe-area
   .tabs button, .addrow-bar button, .dialog button, .doclist button { min-height: 40px; }
   .tile-x { padding: 8px 10px; }
   .row-inner .del, .h-menu, .h-sort { padding: 8px 12px; }
-  .tile.draggable { touch-action: none; } /* Kacheln lassen sich ziehen, ohne dass die Seite mitscrollt */
+  /* Kacheln: gedrückt halten zum Ziehen; dabei soll weder Text markiert noch das iOS-Menü gezeigt werden */
+  .tile.draggable { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
   /* iOS zoomt in Felder mit kleinerer Schrift hinein */
   input, select, textarea { font-size: 16px !important; }
 }
@@ -617,3 +618,19 @@ main.single { padding-top: env(safe-area-inset-top); padding-left: env(safe-area
 .seg { display: inline-flex; border: 1px solid var(--c-d5dce0); border-radius: 10px; overflow: hidden; }
 .doclist .seg button { border: none; border-radius: 0; padding: 6px 14px; background: none; }
 .doclist .seg button.on { background: var(--c-e9edef); font-weight: 600; }
+
+/* Sortierpfeil als Zeichnung */
+.h-sort { display: inline-flex; align-items: center; vertical-align: middle; }
+.h-sort svg { display: block; }
+
+/* Touch: Spalte antippen → Sortierpfeil, Anfasser für die Breite und kleines Menü erscheinen */
+.col-resize { touch-action: none; }
+.h.col-selected { background: var(--c-e9edef); border-radius: 8px 8px 0 0; }
+.h.col-selected .h-sort { opacity: 1; padding: 6px 9px; margin-left: 2px; border-radius: 8px; color: var(--c-3b4a52); }
+.h.col-selected .h-sort.on { color: var(--c-0a84ff); }
+/* Anfasser: breite Tippfläche am rechten Rand der Spalte, in der Mitte ein sichtbarer Griff */
+.h.col-selected .col-resize { width: 24px; right: -4px; }
+.h.col-selected .col-resize::after { opacity: 1; left: 10px; width: 5px; top: 18%; bottom: 18%; border-radius: 3px; }
+.col-menu { position: absolute; top: calc(100% + 6px); left: 6px; z-index: 30; min-width: 150px; padding: 4px; background: var(--c-ffffff); border: 1px solid var(--c-d5dce0); border-radius: 12px; box-shadow: 0 8px 28px #0003; text-transform: none; letter-spacing: 0; font-weight: 400; }
+.col-menu button { color: var(--c-1f2a30); display: block; width: 100%; text-align: left; border: none; background: none; padding: 10px 14px; border-radius: 8px; font: inherit; font-size: 16px; cursor: pointer; min-height: 44px; }
+.col-menu button:active, .col-menu button:hover { background: var(--c-e9edef); }

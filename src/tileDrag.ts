@@ -24,6 +24,10 @@ export function registerDropTarget(el: Element, t: DropTarget): () => void {
 
 const MOVE_THRESHOLD = 5
 const EDGE = 48
+/** Touch: so lange muss der Finger auf der Kachel liegen bleiben, bis sie sich ziehen lässt (kürzer = Tippen/Scrollen). */
+const HOLD_MS = 350
+/** Touch: bewegt sich der Finger vorher weiter als das, will er scrollen und nicht ziehen. */
+const TOUCH_SLOP = 10
 
 function targetAt(x: number, y: number, p: DragPayload): { el: Element; t: DropTarget } | null {
   for (let n = document.elementFromPoint(x, y); n; n = n.parentElement) {
@@ -41,9 +45,14 @@ const scrollParent = (el: Element | null): HTMLElement | null => {
   return null
 }
 
-/** Beginnt, auf einen Mausdruck hin eine Kachel zu ziehen (erst nach ein paar Pixeln Bewegung; ein Klick bleibt ein Klick). */
+/**
+ * Beginnt, auf einen Mausdruck hin eine Kachel zu ziehen (erst nach ein paar Pixeln Bewegung; ein Klick bleibt ein Klick).
+ * Mit dem Finger: Kachel gedrückt halten, bis sie „abhebt“, dann ziehen; wer gleich wegwischt, scrollt nur. Ein zweiter Finger
+ * auf dem Bildschirm wirkt wie die Umschalttaste (Kopieren).
+ */
 export function beginTileDrag(down: PointerEvent, tile: HTMLElement, payload: DragPayload) {
-  if (down.button !== 0 || down.pointerType === 'touch') return
+  if (down.button !== 0) return
+  const touch = down.pointerType === 'touch'
   if ((down.target as HTMLElement).closest('.tile-x')) return
   const rect = tile.getBoundingClientRect()
   const grab = { x: down.clientX - rect.left, y: down.clientY - rect.top }
@@ -52,6 +61,9 @@ export function beginTileDrag(down: PointerEvent, tile: HTMLElement, payload: Dr
   let pos = { x: down.clientX, y: down.clientY }
   let copy = false
   let frame = 0
+  let holdTimer = 0
+  let origin = { x: down.clientX, y: down.clientY } // wo das Ziehen begann
+  let travelled = false // Touch: hat sich der Finger seit dem Abheben bewegt?
 
   const setHover = (next: { el: Element; t: DropTarget } | null) => {
     if (hover && hover.el !== next?.el) hover.t.leave()
@@ -76,6 +88,7 @@ export function beginTileDrag(down: PointerEvent, tile: HTMLElement, payload: Dr
     if (dy) { sc.scrollTop += dy; refresh(); frame = requestAnimationFrame(autoScroll) }
   }
   const start = () => {
+    origin = { ...pos }
     ghost = tile.cloneNode(true) as HTMLElement
     ghost.classList.add('tile-ghost')
     ghost.style.width = `${rect.width}px`
@@ -86,6 +99,9 @@ export function beginTileDrag(down: PointerEvent, tile: HTMLElement, payload: Dr
     window.getSelection()?.removeAllRanges()
   }
   const end = () => {
+    clearTimeout(holdTimer)
+    window.removeEventListener('touchmove', block)
+    window.removeEventListener('pointerdown', second)
     window.removeEventListener('pointermove', move)
     window.removeEventListener('pointerup', up)
     window.removeEventListener('pointercancel', cancel)
@@ -105,28 +121,42 @@ export function beginTileDrag(down: PointerEvent, tile: HTMLElement, payload: Dr
     ghost = null
   }
   const move = (e: PointerEvent) => {
+    if (e.pointerId !== down.pointerId) return
     pos = { x: e.clientX, y: e.clientY }
-    copy = e.shiftKey || e.altKey
+    if (!touch) copy = e.shiftKey || e.altKey
     if (!ghost) {
-      if (Math.hypot(pos.x - down.clientX, pos.y - down.clientY) < MOVE_THRESHOLD) return
+      const dist = Math.hypot(pos.x - down.clientX, pos.y - down.clientY)
+      if (touch) { if (dist > TOUCH_SLOP) end(); return } // Finger wandert vor dem Abheben: Scrollen, kein Ziehen
+      if (dist < MOVE_THRESHOLD) return
       start()
     }
+    if (touch && Math.hypot(pos.x - origin.x, pos.y - origin.y) > MOVE_THRESHOLD) travelled = true
     refresh()
     if (!frame) frame = requestAnimationFrame(autoScroll)
   }
   const up = (e: PointerEvent) => {
+    if (e.pointerId !== down.pointerId) return
     pos = { x: e.clientX, y: e.clientY }
-    copy = e.shiftKey || e.altKey // maßgeblich ist der Zustand beim Loslassen
-    const found = ghost ? targetAt(pos.x, pos.y, payload) : null
-    const wasDragging = !!ghost
-    if (wasDragging) found?.t.drop(pos.x, pos.y, copy, payload)
+    if (!touch) copy = e.shiftKey || e.altKey // maßgeblich ist der Zustand beim Loslassen
+    // Touch: wer die Kachel nur hochgehoben und wieder losgelassen hat, lässt sie, wo sie ist
+    const found = ghost && (!touch || travelled) ? targetAt(pos.x, pos.y, payload) : null
+    if (ghost) found?.t.drop(pos.x, pos.y, copy, payload)
     hover = null // schon abgeschlossen: kein leave() mehr
     end()
   }
-  const cancel = () => end()
+  const cancel = (e?: PointerEvent) => { if (!e || e.pointerId === down.pointerId) end() }
+  /** Touch: Solange gezogen wird, darf die Seite nicht mitscrollen. */
+  const block = (e: TouchEvent) => { if (ghost && e.cancelable) e.preventDefault() }
+  /** Touch: ein zweiter Finger schaltet auf Kopieren. */
+  const second = (e: PointerEvent) => { if (ghost && e.pointerId !== down.pointerId) { copy = true; refresh() } }
   const key = (e: KeyboardEvent) => {
     if (e.type === 'keydown' && e.key === 'Escape') { cancel(); return }
     if (e.key === 'Shift' || e.key === 'Alt') { copy = e.shiftKey || e.altKey; refresh() }
+  }
+  if (touch) {
+    window.addEventListener('touchmove', block, { passive: false })
+    window.addEventListener('pointerdown', second)
+    holdTimer = window.setTimeout(() => { pos = { x: down.clientX, y: down.clientY }; start(); refresh() }, HOLD_MS)
   }
   window.addEventListener('pointermove', move)
   window.addEventListener('pointerup', up)

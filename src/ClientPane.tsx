@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode, type MouseEvent as ReactMouseEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import * as Y from 'yjs'
 import { IndexeddbPersistence } from 'y-indexeddb'
 import {
@@ -32,6 +32,7 @@ import { sortedRowIds, type SortDir } from './sorting'
 import { CHECKBOX, DATE, FILE, ROLLUP, NUMBER, RELATION, TEXT } from './columnTypes'
 import { RichPreview, RichTextDialog } from './richText'
 import { SyncDialog, syncLabel, type SyncControl } from './SyncDialog'
+import { isMobileUI } from './platform'
 import { AnimItem, useAnimatedList } from './animatedList'
 import { ConfirmDialog, Modal } from './Modal'
 import { TableDialog } from './TableDialog'
@@ -453,6 +454,17 @@ function TextInput({ doc, table, rowId, col, value }: { doc: Y.Doc; table: strin
   )
 }
 
+/** Pfeile für die Sortierung (als Zeichnung, damit iOS keine bunten Emoji daraus macht). */
+function SortIcon({ dir }: { dir: SortDir | null }) {
+  return (
+    <svg viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {dir === 'asc' && <path d="M7 12V2.5M3.2 6L7 2.2 10.8 6" />}
+      {dir === 'desc' && <path d="M7 2v9.5M3.2 8L7 11.8 10.8 8" />}
+      {dir === null && <path d="M4 5.2L7 2.2l3 3M4 8.8l3 3 3-3" />}
+    </svg>
+  )
+}
+
 /** Wolke unten rechts: zeigt den Stand der Synchronisation, ein Klick öffnet die Einstellungen. */
 function SyncButton(props: { control: SyncControl; onClick: () => void }) {
   const { control } = props
@@ -636,25 +648,50 @@ export function ClientPane(props: {
   const reprOf = useCallback((id: string) => reprs.get(id), [reprs])
 
   const [liveWidth, setLiveWidth] = useState<{ id: string; w: number } | null>(null)
-  const startResize = (e: ReactMouseEvent, colId: string) => {
+  const startResize = (e: ReactMouseEvent | ReactPointerEvent, colId: string) => {
     e.preventDefault()
     e.stopPropagation()
     const th = (e.currentTarget as HTMLElement).parentElement!
     const startX = e.clientX
     const startW = th.getBoundingClientRect().width
+    const pointerId = 'pointerId' in e ? e.pointerId : null // Touch und Stift laufen über Pointer-Ereignisse, die Maus wie bisher über Mausereignisse
     let w = startW
-    const move = (ev: MouseEvent) => { w = Math.min(800, Math.max(80, Math.round(startW + ev.clientX - startX))); setLiveWidth({ id: colId, w }) }
-    const up = () => {
-      document.removeEventListener('mousemove', move)
-      document.removeEventListener('mouseup', up)
+    const move = (ev: MouseEvent | PointerEvent) => {
+      if (pointerId !== null && (ev as PointerEvent).pointerId !== pointerId) return
+      w = Math.min(800, Math.max(80, Math.round(startW + ev.clientX - startX))); setLiveWidth({ id: colId, w })
+    }
+    const up = (ev?: Event) => {
+      if (pointerId !== null && ev && (ev as PointerEvent).pointerId !== pointerId) return
+      const [m, u] = pointerId !== null ? (['pointermove', 'pointerup'] as const) : (['mousemove', 'mouseup'] as const)
+      document.removeEventListener(m, move as EventListener)
+      document.removeEventListener(u, up)
+      document.removeEventListener('pointercancel', up)
       document.body.classList.remove('resizing')
       if (w !== startW) setColumnWidth(doc, table!.id, colId, w)
       setLiveWidth(null)
     }
     document.body.classList.add('resizing')
-    document.addEventListener('mousemove', move)
-    document.addEventListener('mouseup', up)
+    if (pointerId !== null) {
+      document.addEventListener('pointermove', move as EventListener)
+      document.addEventListener('pointerup', up)
+      document.addEventListener('pointercancel', up)
+    } else {
+      document.addEventListener('mousemove', move as EventListener)
+      document.addEventListener('mouseup', up)
+    }
   }
+
+  // Touch: Tippen auf den Spaltennamen wählt die Spalte aus (Sortierpfeil, Anfasser für die Breite, kleines Menü)
+  const [selectedCol, setSelectedCol] = useState<string | null>(null)
+  useEffect(() => { setSelectedCol(null) }, [table?.id])
+  useEffect(() => {
+    if (!selectedCol) return
+    const away = (e: PointerEvent) => { if (!(e.target as Element).closest('.h.col-selected')) setSelectedCol(null) }
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') setSelectedCol(null) }
+    document.addEventListener('pointerdown', away)
+    document.addEventListener('keydown', esc)
+    return () => { document.removeEventListener('pointerdown', away); document.removeEventListener('keydown', esc) }
+  }, [selectedCol])
 
   const shownColumns = table ? table.columns.filter((c) => !c.hidden) : [] // ausgeblendete Spalten bleiben für Formeln und Darstellung nutzbar
 
@@ -790,16 +827,26 @@ export function ClientPane(props: {
             <div className="grid" style={{ ['--cols' as any]: template }}>
               <div className="grid-head">
                 {shownColumns.map((c) => (
-                  <div key={c.id} className={`h reorderable ${hintClass('column', c.id)}`} {...reorderProps('column', c.id, c.name)}>
+                  <div key={c.id} className={`h reorderable ${hintClass('column', c.id)}${isMobileUI && selectedCol === c.id ? ' col-selected' : ''}`} {...reorderProps('column', c.id, c.name)}>
                     <button type="button" className="h-name" title="Spalte konfigurieren"
-                      onClick={() => setEditing({ kind: 'column', id: c.id })}>{c.name}</button>
-                    <button type="button" draggable={false} className={`h-sort${sort?.colId === c.id ? ' on' : ''}`}
-                      title={sort?.colId === c.id ? (sort.dir === 'asc' ? 'Aufsteigend sortiert – klicken für absteigend' : 'Absteigend sortiert – klicken für die ursprüngliche Reihenfolge') : 'Nach dieser Spalte sortieren'}
-                      aria-label={`Nach ${c.name} sortieren`}
-                      onClick={() => cycleSort(c.id)}>{sort?.colId === c.id ? (sort.dir === 'asc' ? '↑' : '↓') : '↕'}</button>
-                    <span className="col-resize" title="Ziehen: Breite ändern, Doppelklick: zurücksetzen"
+                      aria-expanded={isMobileUI ? selectedCol === c.id : undefined}
+                      onClick={() => { if (isMobileUI) setSelectedCol((cur) => (cur === c.id ? null : c.id)); else setEditing({ kind: 'column', id: c.id }) }}>{c.name}</button>
+                    {(!isMobileUI || selectedCol === c.id) && (
+                      <button type="button" draggable={false} className={`h-sort${sort?.colId === c.id ? ' on' : ''}`}
+                        title={sort?.colId === c.id ? (sort.dir === 'asc' ? 'Aufsteigend sortiert – klicken für absteigend' : 'Absteigend sortiert – klicken für die ursprüngliche Reihenfolge') : 'Nach dieser Spalte sortieren'}
+                        aria-label={`Nach ${c.name} sortieren`}
+                        onClick={() => cycleSort(c.id)}><SortIcon dir={sort?.colId === c.id ? sort.dir : null} /></button>
+                    )}
+                    <span className="col-resize" title="Ziehen: Breite ändern, Doppelklick: zurücksetzen" draggable={false}
                       onMouseDown={(e) => startResize(e, c.id)}
+                      onPointerDown={(e) => { if (e.pointerType !== 'mouse') startResize(e, c.id) }}
+                      onDragStart={(e) => { e.preventDefault(); e.stopPropagation() }}
                       onDoubleClick={() => setColumnWidth(doc, table.id, c.id, undefined)} />
+                    {isMobileUI && selectedCol === c.id && (
+                      <div className="col-menu" role="menu">
+                        <button type="button" role="menuitem" onClick={() => { setSelectedCol(null); setEditing({ kind: 'column', id: c.id }) }}>Bearbeiten</button>
+                      </div>
+                    )}
                   </div>
                 ))}
                 {backlinks.map(({ source, col }) => (
