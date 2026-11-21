@@ -637,6 +637,25 @@ export function ClientPane(props: {
   // Wie die Sortierung wird sie während der Eingabe in der Tabelle nicht neu ausgewertet, damit Zeilen nicht unter dem Cursor verschwinden.
   const [searches, setSearches] = useState<Record<string, string>>({})
   const query = (table && searches[table.id]?.trim().toLowerCase()) || ''
+  // Tippen ohne Fokus (kein Feld, kein Dialog) landet in der Suche
+  const searchRef = useRef<HTMLInputElement>(null)
+  const tableId = table?.id
+  useEffect(() => {
+    if (!tableId) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.isComposing || e.key.length !== 1 || e.key === ' ' || e.metaKey || e.ctrlKey || e.altKey) return
+      const active = document.activeElement
+      if (active && active !== document.body && active !== document.documentElement) return // etwas anderes hat den Fokus
+      if (document.querySelector('.dialog, .datepop, .backdrop')) return // Dialog offen
+      const input = searchRef.current
+      if (!input) return
+      e.preventDefault()
+      setSearches((all) => ({ ...all, [tableId]: (all[tableId] ?? '') + e.key }))
+      input.focus()
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [tableId])
   const matching = useMemo(() => {
     if (!table || !query) return null
     const ctx = newCtx()
@@ -811,9 +830,9 @@ export function ClientPane(props: {
         <div className="addrow-bar">
           <button className="add-row" onClick={() => { setSearches((s) => ({ ...s, [table.id]: '' })); setFocusRow(addRow(doc, table.id)) }}>+ Zeile</button>
           <span className="rowsearch">
-            <input type="search" placeholder="Suchen …" aria-label="Tabelle durchsuchen" value={searches[table.id] ?? ''}
+            <input ref={searchRef} type="search" placeholder="Suchen …" aria-label="Tabelle durchsuchen" value={searches[table.id] ?? ''}
               onChange={(e) => setSearches((s) => ({ ...s, [table.id]: e.target.value }))}
-              onKeyDown={(e) => { if (e.key === 'Escape') setSearches((s) => ({ ...s, [table.id]: '' })) }} />
+              onKeyDown={(e) => { if (e.key === 'Escape') { setSearches((s) => ({ ...s, [table.id]: '' })); e.currentTarget.blur() } }} />
             {matching && <small>{visibleIds.length} von {table.rowIds.length}</small>}
           </span>
         </div>
