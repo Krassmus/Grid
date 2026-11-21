@@ -102,7 +102,7 @@ button.primary:disabled { opacity: .4; cursor: default; }
 .filechip:hover { border-color: #0a84ff; }
 .filechip:hover .tile-x { opacity: 1; }
 .filechip.missing { border-style: dashed; }
-.thumb { flex: none; width: 36px; height: 36px; border-radius: 7px; object-fit: cover; background: var(--c-fafbfc); }
+.thumb { flex: none; width: 36px; height: 36px; border-radius: 7px; object-fit: cover; background: var(--img-bg); }
 .ext { flex: none; width: 36px; height: 36px; border-radius: 7px; background: var(--c-e3eaee); color: var(--c-5b6a72); font-size: 10px; font-weight: 700; letter-spacing: .04em; display: grid; place-items: center; }
 .file-body { min-width: 0; }
 .file-name { font-size: 14px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -305,7 +305,7 @@ textarea.cell { resize: none; line-height: 1.35; overflow: hidden; display: bloc
 .c .tile:not(.rich-avatar) .avatar { display: none; }
 .c .tile:not(.rich-sub) .tile-sub { display: none; }
 .c .tile.rich-avatar, .c .tile.rich-sub { padding: 5px 12px 5px 6px; }
-.avatar.image { object-fit: cover; background: var(--c-fafbfc); padding: 0; }
+.avatar.image { object-fit: cover; background: var(--img-bg); padding: 0; }
 .avatar.symbol { background: transparent; font-size: 20px; font-weight: 400; width: 28px; }
 
 .tabledialog { width: min(520px, 94vw); max-height: 90vh; overflow: auto; }
@@ -359,7 +359,9 @@ textarea.cell { resize: none; line-height: 1.35; overflow: hidden; display: bloc
 .rf-files { display: grid; gap: 6px; padding: 8px; border: 1px dashed var(--c-d5dce0); border-radius: 10px; }
 .rf-files.over { border-color: #0a84ff; background: var(--c-f3f8ff); }
 .rf-file { display: grid; grid-template-columns: 32px 1fr auto auto; align-items: center; gap: 8px; font-size: 14px; }
-.rf-file img, .rf-ext { width: 32px; height: 32px; border-radius: 6px; object-fit: cover; background: var(--c-fafbfc); display: grid; place-items: center; font-size: 9px; font-weight: 600; color: var(--c-667781); }
+.rf-file img, .rf-ext { width: 32px; height: 32px; border-radius: 6px; object-fit: cover;  display: grid; place-items: center; font-size: 9px; font-weight: 600; color: var(--c-667781); }
+.rf-file img { background: var(--img-bg); }
+.rf-ext { background: var(--c-fafbfc); }
 .rf-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rf-file .tile-x { opacity: 1; }
 .rf-add { justify-self: start; }
