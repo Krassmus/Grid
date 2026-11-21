@@ -12,6 +12,9 @@ import { JoinDialog } from './MembersDialog'
 import type { MembersInfo } from './members'
 import type { Invite } from './invite'
 import { type CloudDoc, type SyncState } from './syncClient'
+import { DocumentList } from './DocumentList'
+import { isMobileUI } from './platform'
+import { uniqueName } from './documents'
 import { forgetRecent, noteRecent, readRecent, writeRecent } from './recentFiles'
 
 /** Normalfall: ein Dokument, ein Client. Mit ?sim in der URL: zwei simulierte Clients zum Testen von Merges. */
@@ -39,6 +42,7 @@ function Single() {
   const [cloudOpen, setCloudOpen] = useState(false)
   const [joinOpen, setJoinOpen] = useState(false)
   const [members, setMembers] = useState<MembersInfo | null>(null)
+  const [listVersion, setListVersion] = useState(0)
 
   const unsaved = () => new FileSession(++counter.current, new Y.Doc(), null, newMeta(), new Set(), setError)
   const fromFile = (path: string, o: OpenedGrid) => new FileSession(++counter.current, o.doc, path, o.meta, o.known, setError, o.legacy)
@@ -52,13 +56,38 @@ function Single() {
     }
   }
 
+  // ----- iPad/iPhone: Dokumente liegen im App-Ordner, es gibt eine Liste statt Menü -----
+  const docsPath = async (name: string) => {
+    const dir = await invoke<string>('docs_dir')
+    const taken = (await invoke<{ name: string }[]>('list_documents')).map((f) => f.name)
+    return `${dir}/${uniqueName(name, taken)}.grid`
+  }
+  const goHome = async () => {
+    await current.current?.flush()
+    setSession(null)
+    setListVersion((n) => n + 1)
+  }
+  const createHere = async (name: string) => {
+    if (!isTauri) { setSession(unsaved()); return } // Browser (Entwicklung): Dokument ohne Datei
+    try {
+      const p = await docsPath(name)
+      const doc = new Y.Doc(), meta = newMeta()
+      const known = await writeGrid(p, doc, meta, new Set())
+      adopt(new FileSession(++counter.current, doc, p, meta, known, setError))
+    } catch (e) { setError(`Anlegen fehlgeschlagen: ${e}`) }
+  }
+
   /** Dokument aus der Cloud: Speicherort wählen, leere Datei mit der Anbindung anlegen; der Abgleich füllt sie. */
   const openFromCloud = async (d: CloudDoc, server: string, key?: string) => {
     setCloudOpen(false)
-    const dialog = await import('@tauri-apps/plugin-dialog')
-    const chosen = await dialog.save({ defaultPath: `${d.name || 'Cloud-Dokument'}.grid`, filters: FILTERS })
-    if (!chosen) return
-    const p = withExt(chosen)
+    let p: string
+    if (isMobileUI) p = await docsPath(d.name || 'Cloud-Dokument')
+    else {
+      const dialog = await import('@tauri-apps/plugin-dialog')
+      const chosen = await dialog.save({ defaultPath: `${d.name || 'Cloud-Dokument'}.grid`, filters: FILTERS })
+      if (!chosen) return
+      p = withExt(chosen)
+    }
     await current.current?.flush()
     const doc = new Y.Doc(), meta = { ...newMeta(), docId: d.id, sync: key ? { server, key } : { server } }
     try {
@@ -74,7 +103,8 @@ function Single() {
     ;(async () => {
       // Vom Finder angeforderte Datei hat Vorrang vor dem zuletzt geöffneten Dokument.
       const requested = isTauri ? await invoke<string | null>('take_pending_open').catch(() => null) : null
-      const last = requested ?? (isTauri ? localStorage.getItem(LAST_KEY) : null)
+      // iPad/iPhone starten mit der Dokumentenliste (außer eine Datei wurde zum Öffnen übergeben)
+      const last = requested ?? (isTauri && !isMobileUI ? localStorage.getItem(LAST_KEY) : null)
       if (last) {
         try {
           const o = await readGrid(last)
@@ -84,12 +114,18 @@ function Single() {
           if (alive) setError(`„${baseName(last)}“ konnte nicht geöffnet werden: ${e}`)
         }
       }
-      if (alive) setSession(unsaved())
+      if (alive && !isMobileUI) setSession(unsaved())
     })()
     return () => { alive = false }
   }, [])
 
   useEffect(() => session?.attach(), [session])
+  // iPad/iPhone können die App im Hintergrund beenden: beim Wegwechseln sofort sichern
+  useEffect(() => {
+    const hide = () => { if (document.visibilityState === 'hidden') void current.current?.flush() }
+    document.addEventListener('visibilitychange', hide)
+    return () => document.removeEventListener('visibilitychange', hide)
+  }, [])
   useEffect(() => {
     if (!session) return
     session.onSyncState = setSyncState
@@ -102,7 +138,7 @@ function Single() {
 
   // Befehle der Menüleiste (Rust sendet „menu“) und Fenster schließen: erst fertig speichern.
   useEffect(() => {
-    if (!isTauri) return
+    if (!isTauri || isMobileUI) return // ohne Menüleiste gibt es keine Menübefehle
     const stops: Array<() => void> = []
     let gone = false
     ;(async () => {
@@ -173,7 +209,23 @@ function Single() {
     return () => { gone = true; stops.forEach((f) => f()) }
   }, [])
 
-  if (!session) return null
+  const dialogs = (
+    <>
+      {joinOpen && <JoinDialog onClose={() => setJoinOpen(false)} onJoined={(i: Invite) => { setJoinOpen(false); void openFromCloud({ id: i.doc, name: i.name, updated: 0 }, i.server, i.key) }} />}
+      {cloudOpen && <CloudOpenDialog onOpen={(d, server) => void openFromCloud(d, server)} onClose={() => setCloudOpen(false)} />}
+      {error && !(isMobileUI && !session) && <div className="file-error" role="alert">{error}<button type="button" onClick={() => setError(null)}>✕</button></div>}
+    </>
+  )
+  if (!session) {
+    if (!isMobileUI) return null
+    return (
+      <>
+        <DocumentList version={listVersion} error={error} onOpen={(p) => { setError(null); void openPath(p) }} onCreate={(n) => { setError(null); void createHere(n) }}
+          onCloud={() => setCloudOpen(true)} onJoin={() => setJoinOpen(true)} />
+        {dialogs}
+      </>
+    )
+  }
   const control: SyncControl = {
     state: syncState,
     members,
@@ -190,10 +242,9 @@ function Single() {
   return (
     <>
       <ClientPane key={session.key} title={UNSAVED_TITLE} doc={session.doc}
-        persist={session.path ? null : `grid-proto-${UNSAVED_TITLE}`} sync={control} />
-      {joinOpen && <JoinDialog onClose={() => setJoinOpen(false)} onJoined={(i: Invite) => { setJoinOpen(false); void openFromCloud({ id: i.doc, name: i.name, updated: 0 }, i.server, i.key) }} />}
-      {cloudOpen && <CloudOpenDialog onOpen={(d, server) => void openFromCloud(d, server)} onClose={() => setCloudOpen(false)} />}
-      {error && <div className="file-error" role="alert">{error}<button type="button" onClick={() => setError(null)}>✕</button></div>}
+        persist={session.path ? null : `grid-proto-${UNSAVED_TITLE}`} sync={control}
+        onHome={isMobileUI ? () => void goHome() : undefined} />
+      {dialogs}
     </>
   )
 }

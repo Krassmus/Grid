@@ -29,5 +29,5 @@ tauri-plugin-dialog = "2.8.4"
 tauri-plugin-opener = "2.7.3"
 
 # Schlüsselbund des Betriebssystems für den Konto-Schlüssel; anderswo (und bei Fehlern) eine Datei im Konfigurationsordner
-[target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
+[target.'cfg(any(target_os = "macos", target_os = "ios", target_os = "windows"))'.dependencies]
 keyring = { version = "3", features = ["apple-native", "windows-native"] }

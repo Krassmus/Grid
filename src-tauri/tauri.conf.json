@@ -29,7 +29,14 @@
   "bundle": {
     "active": true,
     "fileAssociations": [
-      { "ext": ["grid"], "name": "Grid-Dokument", "description": "Grid-Dokument", "role": "Editor" }
+      {
+        "ext": [
+          "grid"
+        ],
+        "name": "Grid-Dokument",
+        "description": "Grid-Dokument",
+        "role": "Editor"
+      }
     ],
     "targets": [
       "app",
@@ -44,6 +51,10 @@
     ],
     "android": {
       "debugApplicationIdSuffix": ".debug"
+    },
+    "iOS": {
+      "developmentTeam": "7GD6JHBABJ",
+      "minimumSystemVersion": "16.0"
     }
   }
 }

@@ -1,10 +1,11 @@
 mod grid_file;
 
 use std::{path::PathBuf, sync::Mutex};
+#[cfg(desktop)]
+use tauri::menu::{CheckMenuItemBuilder, MenuBuilder, MenuItemBuilder, SubmenuBuilder};
 use tauri::{
   ipc::{InvokeBody, Request, Response},
-  menu::{CheckMenuItemBuilder, MenuBuilder, MenuItemBuilder, SubmenuBuilder},
-  Emitter, Manager, Theme,
+  Emitter, Manager,
 };
 
 fn path_of(request: &Request<'_>) -> Result<PathBuf, String> {
@@ -46,7 +47,9 @@ async fn grid_open(request: Request<'_>) -> Result<Response, String> {
 // Der geheime Schlüssel des Grid-Kontos (als Text) liegt im Schlüsselbund des Betriebssystems. Wo es keinen gibt
 // (oder er nicht antwortet), ersatzweise in einer Datei, die nur der Benutzer lesen darf.
 
+#[cfg(any(target_os = "macos", target_os = "ios", target_os = "windows"))]
 const KEY_SERVICE: &str = "app.grid.desktop";
+#[cfg(any(target_os = "macos", target_os = "ios", target_os = "windows"))]
 const KEY_NAME: &str = "account";
 
 fn key_file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -55,18 +58,18 @@ fn key_file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
   Ok(dir.join("account.key"))
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "ios", target_os = "windows"))]
 fn keychain_get() -> Option<String> {
   keyring::Entry::new(KEY_SERVICE, KEY_NAME).ok()?.get_password().ok()
 }
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+#[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "windows")))]
 fn keychain_get() -> Option<String> { None }
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "ios", target_os = "windows"))]
 fn keychain_set(value: &str) -> bool {
   keyring::Entry::new(KEY_SERVICE, KEY_NAME).and_then(|e| e.set_password(value)).is_ok()
 }
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+#[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "windows")))]
 fn keychain_set(_: &str) -> bool { false }
 
 #[tauri::command]
@@ -83,6 +86,68 @@ fn identity_store(app: tauri::AppHandle, value: String) -> Result<(), String> {
   {
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).map_err(|e| e.to_string())?;
+  }
+  Ok(())
+}
+
+// ---------- Dokumente im App-Ordner (iPad/iPhone) ----------
+// Ohne Menüleiste und ohne frei wählbare Orte liegen die Dokumente im Ordner „Dokumente“ der App (in der Dateien-App sichtbar).
+
+/// Plattform der App: „ios“, „android“ oder „desktop“.
+#[tauri::command]
+fn app_platform() -> &'static str {
+  if cfg!(target_os = "ios") { "ios" } else if cfg!(target_os = "android") { "android" } else { "desktop" }
+}
+
+fn documents_folder(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+  let dir = app.path().document_dir().map_err(|e| e.to_string())?;
+  std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+  Ok(dir)
+}
+
+#[tauri::command]
+fn docs_dir(app: tauri::AppHandle) -> Result<String, String> {
+  documents_folder(&app).map(|p| p.to_string_lossy().to_string())
+}
+
+#[derive(serde::Serialize)]
+struct DocFile {
+  name: String,
+  path: String,
+  /// Änderungszeit in Sekunden seit 1970
+  modified: u64,
+  size: u64,
+}
+
+/// Alle .grid-Dateien im App-Ordner, neueste zuerst.
+#[tauri::command]
+fn list_documents(app: tauri::AppHandle) -> Result<Vec<DocFile>, String> {
+  let dir = documents_folder(&app)?;
+  let mut out = Vec::new();
+  for entry in std::fs::read_dir(&dir).map_err(|e| e.to_string())?.flatten() {
+    let path = entry.path();
+    if path.extension().and_then(|e| e.to_str()).map(|e| e.eq_ignore_ascii_case("grid")) != Some(true) { continue; }
+    let Ok(meta) = entry.metadata() else { continue };
+    let modified = meta.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs()).unwrap_or(0);
+    let name = path.file_stem().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    out.push(DocFile { name, path: path.to_string_lossy().to_string(), modified, size: meta.len() });
+  }
+  out.sort_by(|a, b| b.modified.cmp(&a.modified));
+  Ok(out)
+}
+
+/// Löscht ein Dokument aus dem App-Ordner (andere Orte sind tabu).
+#[tauri::command]
+fn delete_document(app: tauri::AppHandle, path: String) -> Result<(), String> {
+  let dir = documents_folder(&app)?.canonicalize().map_err(|e| e.to_string())?;
+  let file = PathBuf::from(&path).canonicalize().map_err(|e| e.to_string())?;
+  if file.parent() != Some(dir.as_path()) || file.extension().and_then(|e| e.to_str()) != Some("grid") {
+    return Err("Nur Dokumente im App-Ordner dürfen gelöscht werden".into());
+  }
+  // SQLite legt neben der Datei ggf. -wal/-shm ab
+  for suffix in ["", "-wal", "-shm"] {
+    let p = PathBuf::from(format!("{}{suffix}", file.display()));
+    if p.exists() { std::fs::remove_file(&p).map_err(|e| e.to_string())?; }
   }
   Ok(())
 }
@@ -106,6 +171,7 @@ struct MenuState {
   theme: Mutex<String>,
 }
 
+#[cfg(desktop)]
 fn build_menu<M: tauri::Manager<tauri::Wry>>(app: &M, recent: &[String], theme: &str) -> tauri::Result<()> {
   let item = |id: &str, text: &str, accel: &str| MenuItemBuilder::with_id(id, text).accelerator(accel).build(app);
   let mut recents = SubmenuBuilder::new(app, "Zuletzt geöffnet");
@@ -152,8 +218,16 @@ fn build_menu<M: tauri::Manager<tauri::Wry>>(app: &M, recent: &[String], theme: 
 #[tauri::command]
 fn set_recent_menu(app: tauri::AppHandle, state: tauri::State<'_, MenuState>, names: Vec<String>) -> Result<(), String> {
   *state.recent.lock().map_err(|e| e.to_string())? = names.clone();
-  let theme = state.theme.lock().map_err(|e| e.to_string())?.clone();
-  build_menu(&app, &names, &theme).map_err(|e| e.to_string())
+  #[cfg(desktop)]
+  {
+    let theme = state.theme.lock().map_err(|e| e.to_string())?.clone();
+    return build_menu(&app, &names, &theme).map_err(|e| e.to_string());
+  }
+  #[cfg(not(desktop))]
+  {
+    let _ = app; // iPad/iPhone: es gibt keine Menüleiste, die Oberfläche zeigt die Liste selbst
+    Ok(())
+  }
 }
 
 /// Erscheinungsbild („system“, „light“, „dark“): Haken im Menü und Darstellung des Fensters (Titelleiste) anpassen.
@@ -161,23 +235,28 @@ fn set_recent_menu(app: tauri::AppHandle, state: tauri::State<'_, MenuState>, na
 fn set_theme(app: tauri::AppHandle, state: tauri::State<'_, MenuState>, choice: String) -> Result<(), String> {
   let choice = if matches!(choice.as_str(), "light" | "dark") { choice } else { "system".to_string() };
   *state.theme.lock().map_err(|e| e.to_string())? = choice.clone();
-  let recent = state.recent.lock().map_err(|e| e.to_string())?.clone();
-  build_menu(&app, &recent, &choice).map_err(|e| e.to_string())?;
-  let theme = match choice.as_str() { "light" => Some(Theme::Light), "dark" => Some(Theme::Dark), _ => None };
-  for (_, window) in app.webview_windows() {
-    let _ = window.set_theme(theme);
+  #[cfg(desktop)]
+  {
+    let recent = state.recent.lock().map_err(|e| e.to_string())?.clone();
+    build_menu(&app, &recent, &choice).map_err(|e| e.to_string())?;
+    let theme = match choice.as_str() { "light" => Some(tauri::Theme::Light), "dark" => Some(tauri::Theme::Dark), _ => None };
+    for (_, window) in app.webview_windows() {
+      let _ = window.set_theme(theme);
+    }
   }
+  #[cfg(not(desktop))]
+  let _ = app;
   Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-  tauri::Builder::default()
+  let builder = tauri::Builder::default()
     .plugin(tauri_plugin_dialog::init())
     .plugin(tauri_plugin_opener::init())
     .manage(PendingOpen::default())
     .manage(MenuState { recent: Mutex::new(Vec::new()), theme: Mutex::new("system".to_string()) })
-    .invoke_handler(tauri::generate_handler![grid_save, grid_open, take_pending_open, set_recent_menu, set_theme, identity_load, identity_store])
+    .invoke_handler(tauri::generate_handler![grid_save, grid_open, take_pending_open, set_recent_menu, set_theme, identity_load, identity_store, app_platform, docs_dir, list_documents, delete_document])
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(
@@ -187,12 +266,15 @@ pub fn run() {
         )?;
       }
 
+      #[cfg(desktop)]
       build_menu(app.handle(), &[], "system")?;
       Ok(())
-    })
-    .on_menu_event(|app, event| {
-      let _ = app.emit("menu", event.id().as_ref());
-    })
+    });
+  #[cfg(desktop)]
+  let builder = builder.on_menu_event(|app, event| {
+    let _ = app.emit("menu", event.id().as_ref());
+  });
+  builder
     .build(tauri::generate_context!())
     .expect("error while building tauri application")
     .run(|app, event| {

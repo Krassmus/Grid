@@ -2,7 +2,7 @@ import { FILE } from './columnTypes'
 import { useEffect, useRef, useState } from 'react'
 import * as Y from 'yjs'
 import { addFile, moveFile, removeFile, type CellSlot, type ColumnInfo, type FileRef } from './model'
-import { getBlob, onBlobStored, storeFile, thumbKey } from './blobStore'
+import { getBlob, onBlobStored, storeFile, thumbKey, typedBlob } from './blobStore'
 import { ConfirmDialog, Modal } from './Modal'
 import { AnimItem, useAnimatedList } from './animatedList'
 
@@ -26,7 +26,7 @@ export function useBlobUrl(keys: string[]): { url: string | null; missing: boole
     ;(async () => {
       for (const k of keys) {
         const blob = await getBlob(k)
-        if (blob && alive) { url = URL.createObjectURL(blob); setState({ url, missing: false }); return }
+        if (blob && alive) { const shown = await typedBlob(blob); if (!alive) return; url = URL.createObjectURL(shown); setState({ url, missing: false }); return }
       }
       if (alive) setState({ url: null, missing: true })
     })()

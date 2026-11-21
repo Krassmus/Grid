@@ -479,6 +479,8 @@ export function ClientPane(props: {
   doc: Y.Doc
   /** IndexedDB-Name für den lokalen Zwischenspeicher; `null` = das Dokument liegt in einer Datei. Standard: nach Titel. */
   persist?: string | null
+  /** Zurück zur Dokumentenliste (nur auf iPad/iPhone) */
+  onHome?: () => void
   /** Cloud-Anbindung des Dokuments (fehlt in der Simulation). */
   sync?: SyncControl
   online?: boolean
@@ -732,6 +734,7 @@ export function ClientPane(props: {
       {/* Alles bis zur Tabelle scrollt gemeinsam; der Tabellenkopf bleibt oben stehen, die Leiste „+ Zeile“ unten. */}
       <div className="gridscroll">
       <nav className="tabs">
+        {props.onHome && <button type="button" className="home-btn" onClick={props.onHome} aria-label="Zurück zur Dokumentenliste">‹ Dokumente</button>}
         {shownTabs.map((t) => {
           const current = t.id === tab?.id
           return (

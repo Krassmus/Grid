@@ -306,13 +306,15 @@ export class SyncConnection {
         const r = await authedFetch(server, `/blobs/${docId}`)
         if (!r.ok) return
         const remote = new Set<string>(await r.json())
+        const mimes = new Map<string, string>() // Hash → Dateityp aus dem Dokument (der Server liefert nur Bytes)
+        filesOf(this.doc).forEach((f, k) => mimes.set(k.split('|')[3], f.mime))
         for (const key of neededAssetKeys(this.doc)) {
           const local = await getBlob(blobKeyOf(key))
           if (local && !remote.has(key)) {
             await authedFetch(server, `/blob/${docId}/${key}`, { method: 'PUT', body: local })
           } else if (!local && remote.has(key)) {
             const d = await authedFetch(server, `/blob/${docId}/${key}`)
-            if (d.ok) await putBlob(blobKeyOf(key), await d.blob())
+            if (d.ok) await putBlob(blobKeyOf(key), new Blob([await d.arrayBuffer()], { type: key.endsWith('.thumb') ? 'image/jpeg' : mimes.get(key) ?? '' }))
           }
         }
       } catch { /* beim nächsten Verbinden erneut */ }

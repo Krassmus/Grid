@@ -67,6 +67,16 @@ export async function makeThumb(file: Blob, max = 160): Promise<Blob | null> {
   }
 }
 
+/**
+ * Gibt einem Bild den richtigen Typ, falls er fehlt. Aus der Cloud nachgeladene Dateien kommen als „application/octet-stream“;
+ * normale Bilder erkennt der Browser trotzdem, SVG-Grafiken aber nur mit dem Typ „image/svg+xml“ (sonst bleibt das Bild leer).
+ */
+export async function typedBlob(blob: Blob): Promise<Blob> {
+  if (blob.type.startsWith('image/')) return blob
+  const head = (await blob.slice(0, 1024).text()).replace(/^\uFEFF/, '').trimStart()
+  return /^(<\?xml[^>]*\?>\s*(<!--[\s\S]*?-->\s*)*|<!--[\s\S]*?-->\s*)*<svg[\s>]/i.test(head) ? new Blob([blob], { type: 'image/svg+xml' }) : blob
+}
+
 export interface StoredFile {
   ref: { hash: string; name: string; size: number; mime: string }
   /** Erst wenn dieses Promise erfüllt ist, liegt das Original dauerhaft im Speicher. */
