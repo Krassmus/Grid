@@ -1,6 +1,6 @@
 # Grid: Synchronisation, Konten und Mitglieder
 
-Stand: Phase 1 (Sync), Phase 2 (Konten), Phase 3 (Mitglieder) und der Kern von Phase 4 (Abo und Speicher, ohne Zahlungsabwicklung) sind gebaut; der Rest von Phase 4 und Phase 5 sind Entwurf. Dieses Dokument ist die gemeinsame Grundlage; Abweichungen im Code gehören hier nachgetragen.
+Stand: Phase 1 (Sync), Phase 2 (Konten), Phase 3 (Mitglieder), der Kern von Phase 4 (Abo und Speicher, ohne Zahlungsabwicklung) und Phase 5 (mehrere Server) sind gebaut; offen sind die Zahlungsabwicklung und die Beglaubigung von Konten durch townwork.eu. Dieses Dokument ist die gemeinsame Grundlage; Abweichungen im Code gehören hier nachgetragen.
 
 ## Ziele
 
@@ -87,10 +87,20 @@ Voraussetzung: Das Konto der Person ist auf dem Server freigegeben (bei offener 
 - **In-App-Kauf** (Apple/Google): die App kauft über den Store, schickt den Beleg an den Server, der ihn beim Store prüft und dann dasselbe Abo setzt. Ein Konto, egal über welchen Weg bezahlt wurde; die Store-Gebühr trägt der Preis.
 - **E-Mail zum Konto** (Wiederherstellung bei Geräteverlust, Beglaubigung des öffentlichen Schlüssels durch townwork.eu) und eine Einstellung „Konto auf diesem Server nur mit Abo anlegen“ gehören ebenfalls hierher.
 
-### 5. Betrieb
+### 5. Mehrere Server (Phase 5, gebaut)
 
-- Ein Server-Programm (Rust, `server/`), eine Datei, eine SQLite-Datenbank pro Dokument bzw. ein Datenverzeichnis.
-- Hinter Apache per Reverse Proxy: siehe `server/README.md`.
+- **Ein Dokument weiß, wohin es gehört:** `meta.sync` in der Datei hält die Server-Adresse und den Schlüssel des Servers. Jedes Dokument kann zu einem anderen Server gehören (townwork.eu, Firmenserver, …); dasselbe Konto gilt überall, braucht aber auf jedem Server eine Freigabe.
+- **Identität des Servers:** Jeder Server erzeugt beim ersten Start ein Ed25519-Schlüsselpaar (in seiner Datenbank). `GET /server` liefert Name und öffentlichen Schlüssel; `GET /challenge` enthält zusätzlich eine Signatur des Servers über `grid-server-v1\n<nonce>`. Grid merkt sich den Schlüssel beim ersten Verbinden (Dokumentdatei, lokaler Speicher, Einladung) und verlangt ihn bei jeder Anmeldung. Bei Abweichung bricht Grid ab und bietet „Dem neuen Schlüssel vertrauen“ an. So fällt ein untergeschobener oder neu installierter Server auf, auch wenn das TLS-Zertifikat stimmt. Einladungen tragen den Server-Schlüssel mit.
+- **Dokumente werden angelegt, nicht „beansprucht“:** Wer als Erster auf eine unbekannte Dokument-ID zugreift, bekommt nichts mehr automatisch (`denied` mit `code: "unclaimed"`). Der Client legt das Dokument mit seinem Admin-Protokoll an (Gründungseintrag) und verbindet danach erneut.
+- **Umzug auf einen anderen Server:** Das Admin-Protokoll liegt auch in der Dokumentdatei (`meta.adminLog`). Beim Verbinden mit einem neuen Server kopiert ein Admin es mit `POST /docs/<doc>/import {entries}` komplett hinüber; der Server prüft die ganze Kette, nimmt sie nur für ein hier unbekanntes Dokument und nur von einem Admin des Protokolls. Mitglieder und Rollen bleiben erhalten; Mitglieder verbinden sich auf dem neuen Server selbst (solange kein Admin umgezogen ist, bekommen sie „Dokument ist hier noch nicht angelegt“). Der alte Server behält seine Kopie.
+- **Intranet-Paket:** `server/Dockerfile` und `deploy/` (Docker Compose mit Caddy als HTTPS-Vorsatz, Anleitung für Zertifikate, Konten, Sicherung).
+
+**Noch offen:** Beglaubigung von Konten durch townwork.eu (E-Mail bestätigt), damit Server solche Konten ohne manuelle Freigabe annehmen können; eine Weiterleitung, die Mitgliedern den Umzug eines Dokuments mitteilt.
+
+### 6. Betrieb
+
+- Ein Server-Programm (Rust, `server/`), eine Datei, eine SQLite-Datenbank pro Server.
+- Hinter Apache per Reverse Proxy: siehe `server/README.md`. Firmennetz: `deploy/README.md`.
 
 ## Später
 

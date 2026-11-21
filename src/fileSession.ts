@@ -1,8 +1,8 @@
 import * as Y from 'yjs'
 import { appendGrid, writeGrid, type GridMeta } from './gridFile'
 import { Materializer } from './tableSync'
-import { SyncConnection, normalizeServer, type SyncState } from './syncClient'
-import { acceptRequest, ensureGenesis, fetchMembers, rejectRequest, removeMember, setRole, type JoinRequest, type MembersInfo } from './members'
+import { SyncConnection, normalizeServer, onServerKey, pinServer, pinnedKey, type SyncState } from './syncClient'
+import { acceptRequest, claimDocument, ensureGenesis, fetchMembers, rejectRequest, removeMember, setRole, type JoinRequest, type MembersInfo } from './members'
 import { fingerprint, getIdentity } from './identity'
 import { makeInvite } from './invite'
 import type { Role } from './adminLog'
@@ -47,7 +47,12 @@ export class FileSession {
   attach(): () => void {
     this.attached = true
     if (this.meta.sync) this.openConn()
-    const detachSync = () => { this.attached = false; this.conn?.close(); this.conn = null }
+    // Zeigt ein Server zum ersten Mal seinen Schlüssel, gehört er in die Datei (so kennt ihn auch jedes andere Gerät)
+    const offKey = onServerKey((server, key) => {
+      const sync = this.meta.sync
+      if (sync && sync.server === server && sync.key !== key) { sync.key = key; this.schedule() }
+    })
+    const detachSync = () => { offKey(); this.attached = false; this.conn?.close(); this.conn = null }
     if (!this.path) return detachSync
     const onUpdate = (update: Uint8Array) => { this.pending.push(update); this.schedule() }
     this.tables = new Materializer(this.doc)
@@ -65,9 +70,12 @@ export class FileSession {
     const sync = this.meta.sync
     if (!sync) return
     this.conn?.close()
+    if (sync.key) pinServer(sync.server, sync.key) // in der Datei gemerkt: der Server muss diesen Schlüssel beweisen
+    else if (pinnedKey(sync.server)) sync.key = pinnedKey(sync.server)!
     this.conn = new SyncConnection(this.doc,
       { server: sync.server, docId: this.meta.docId, name: this.name },
-      (s) => this.setSyncState(s), () => void this.refreshMembers())
+      (s) => this.setSyncState(s), () => void this.refreshMembers(),
+      () => claimDocument(sync.server, this.meta.docId, this.meta.adminLog))
   }
 
   private setMembers(m: MembersInfo | null) { this.members = m; this.onMembers?.(m) }
@@ -80,6 +88,7 @@ export class FileSession {
       try {
         let info = await fetchMembers(server, this.meta.docId)
         if (await ensureGenesis(server, this.meta.docId, info)) info = await fetchMembers(server, this.meta.docId)
+        if (info.entries.length !== (this.meta.adminLog?.length ?? 0)) { this.meta.adminLog = info.entries; this.schedule() }
         this.setMembers(info)
       } catch { /* (noch) kein Mitglied oder offline: die Verbindung meldet den Grund */ }
     })
@@ -102,16 +111,27 @@ export class FileSession {
     const server = this.meta.sync?.server
     if (!server) throw new Error('Das Dokument ist nicht mit einem Server verbunden')
     const me = await getIdentity()
-    return makeInvite({ server, doc: this.meta.docId, name: this.name, admin: fingerprint(me.publicKey) })
+    return makeInvite({ server, doc: this.meta.docId, name: this.name, admin: fingerprint(me.publicKey), key: this.meta.sync?.key })
   }
 
   private get name() { return this.path ? this.path.split(/[\\/]/).pop()!.replace(/\.grid$/i, '') : 'Mein Dokument' }
 
   /** Dokument mit einem Server verbinden (und die Anbindung in der Datei merken). */
-  connect(server: string) {
-    this.meta.sync = { server: normalizeServer(server) }
+  connect(server: string, key?: string) {
+    const url = normalizeServer(server)
+    this.meta.sync = key ? { server: url, key } : { server: url }
     this.schedule()
     if (this.attached) this.openConn()
+  }
+
+  /** Dem Schlüssel, den der Server jetzt zeigt, vertrauen (nach einer Warnung, z. B. weil der Server neu installiert wurde). */
+  trustServer() {
+    const sync = this.meta.sync
+    if (!sync) return
+    pinServer(sync.server, null)
+    delete sync.key
+    this.schedule()
+    this.openConn()
   }
 
   /** Anbindung lösen; das Dokument bleibt lokal vollständig erhalten. */

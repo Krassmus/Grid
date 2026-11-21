@@ -4,7 +4,7 @@
 //!                      grid-server accounts plan <Kennung> free
 //! Ohne `--open-registration` (oder GRID_OPEN_REGISTRATION=1) warten neue Konten auf `approve`.
 //! Mit `--billing` (GRID_BILLING=1) braucht das Schreiben ein Abo und freien Speicher (Cloud); ohne ist alles frei.
-//! Weitere Umgebungsvariablen: GRID_ADMIN_KEY (schaltet /admin/… ein), GRID_MANAGE_URL (Link „Abo verwalten“).
+//! Weitere Umgebungsvariablen: GRID_NAME (Anzeigename des Servers), GRID_ADMIN_KEY (schaltet /admin/… ein), GRID_MANAGE_URL (Link „Abo verwalten“).
 
 use std::path::PathBuf;
 
@@ -114,6 +114,7 @@ async fn main() {
         billing,
         admin_key: std::env::var("GRID_ADMIN_KEY").ok().filter(|k| k.len() >= 16),
         manage_url: std::env::var("GRID_MANAGE_URL").ok().filter(|u| !u.is_empty()),
+        name: std::env::var("GRID_NAME").ok().filter(|n| !n.is_empty()),
     };
     if std::env::var("GRID_ADMIN_KEY").is_ok_and(|k| k.len() < 16) { eprintln!("GRID_ADMIN_KEY ist zu kurz (mindestens 16 Zeichen) und wird ignoriert."); }
     let app = grid_server::app_with(&data.join("grid.db"), cfg).expect("Datenbank öffnen");

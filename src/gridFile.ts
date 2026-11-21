@@ -11,6 +11,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { filesOf } from './model'
 import { fullOps, type Ops } from './tableSync'
 import { getBlob, hasBlob, putBlob, thumbKey } from './blobStore'
+import type { AdminEntry } from './adminLog'
 
 export const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 
@@ -22,7 +23,9 @@ export interface GridMeta {
   savedAt?: string
   app?: string
   /** Cloud-Anbindung: Adresse des Servers (der Zugangsschlüssel liegt nicht in der Datei). */
-  sync?: { server: string }
+  sync?: { server: string; /** öffentlicher Schlüssel des Servers (gemerkt beim ersten Verbinden) */ key?: string }
+  /** Admin-Protokoll des Dokuments (wer Mitglied/Admin ist), damit es mit der Datei umziehen kann */
+  adminLog?: AdminEntry[]
 }
 
 export const newMeta = (): GridMeta => ({

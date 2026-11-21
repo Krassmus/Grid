@@ -7,6 +7,8 @@ export interface Invite {
   name: string
   /** Fingerabdruck des einladenden Kontos */
   admin: string
+  /** öffentlicher Schlüssel des Servers (so erkennt der Eingeladene den richtigen Server) */
+  key?: string
 }
 
 const PREFIX = 'grid-invite:1:'
@@ -24,5 +26,8 @@ export function parseInvite(text: string): Invite {
   if (typeof o.server !== 'string' || typeof o.doc !== 'string' || !/^[0-9a-zA-Z-]{8,64}$/.test(o.doc) || !/^https?:\/\//i.test(o.server)) {
     throw new Error('Die Einladung ist unvollständig')
   }
-  return { server: o.server, doc: o.doc, name: typeof o.name === 'string' ? o.name : '', admin: typeof o.admin === 'string' ? o.admin : '' }
+  return {
+    server: o.server, doc: o.doc, name: typeof o.name === 'string' ? o.name : '', admin: typeof o.admin === 'string' ? o.admin : '',
+    ...(typeof o.key === 'string' && /^[0-9a-f]{64}$/.test(o.key) ? { key: o.key } : {}),
+  }
 }

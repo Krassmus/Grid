@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Modal } from './Modal'
 import { exportAccount, fingerprint, getIdentity, importAccount, onIdentityChanged, type Identity } from './identity'
-import { AuthError, fetchAccountInfo, listCloudDocs, normalizeServer, type AccountInfo, type CloudDoc, type SyncState } from './syncClient'
+import { AuthError, fetchAccountInfo, fetchServerInfo, listCloudDocs, normalizeServer, type AccountInfo, type CloudDoc, type ServerInfo, type SyncState } from './syncClient'
 import { MembersDialog, type MembersControl } from './MembersDialog'
 
 const LAST = 'grid-sync-last-server'
@@ -14,6 +14,8 @@ export interface SyncControl extends MembersControl {
   server: string | null
   connect: (server: string) => void
   disconnect: () => void
+  /** Dem Schlüssel vertrauen, den der Server jetzt zeigt (nach einer Warnung) */
+  trustServer: () => void
 }
 
 export const syncLabel = (c: SyncControl) => {
@@ -21,8 +23,8 @@ export const syncLabel = (c: SyncControl) => {
   switch (c.state?.status) {
     case 'online': return c.state.readonly ? 'Nur lesen' : 'Synchronisiert'
     case 'offline': return 'Offline – wird später abgeglichen'
-    case 'pending': return c.state.kind === 'join' ? 'Wartet auf Zustimmung eines Admins' : 'Wartet auf Freigabe des Kontos'
-    case 'denied': return `Abgelehnt: ${c.state.reason ?? 'kein Zugriff'}`
+    case 'pending': return c.state.kind === 'join' ? 'Wartet auf Zustimmung eines Admins' : c.state.kind === 'claim' ? 'Dokument ist hier noch nicht angelegt' : 'Wartet auf Freigabe des Kontos'
+    case 'denied': return c.state.kind === 'untrusted' ? 'Server hat einen anderen Schlüssel' : `Abgelehnt: ${c.state.reason ?? 'kein Zugriff'}`
     default: return 'Verbinde …'
   }
 }
@@ -42,6 +44,25 @@ function useAccount(): Identity | null {
 
 const GB = 1e9
 const fmtSize = (b: number) => (b >= GB ? `${(b / GB).toFixed(1)} GB` : b >= 1e6 ? `${Math.round(b / 1e6)} MB` : `${Math.round(b / 1e3)} KB`).replace('.', ',')
+
+/** Name und Schlüssel-Fingerabdruck des Servers (zum Vergleichen mit dem, was der Betreiber nennt). */
+function ServerLine(props: { server: string; onSwitch: () => void }) {
+  const [info, setInfo] = useState<ServerInfo | null>(null)
+  useEffect(() => {
+    let alive = true
+    fetchServerInfo(props.server).then((i) => alive && setInfo(i)).catch(() => alive && setInfo(null))
+    return () => { alive = false }
+  }, [props.server])
+  return (
+    <div className="sync-server-block">
+      <p className="sync-server">{info?.name && <strong>{info.name} · </strong>}{props.server}</p>
+      <p className="sync-account">
+        <span>{info ? <>Server-Schlüssel <code>{fingerprint(info.pub)}</code></> : ''}</span>
+        <button type="button" className="linklike" onClick={props.onSwitch}>Server wechseln …</button>
+      </p>
+    </div>
+  )
+}
 
 /** Abo und Speicher des Kontos (nur auf Servern mit Abo-Pflicht). */
 function PlanLine(props: { server: string; refresh: unknown }) {
@@ -92,6 +113,8 @@ export function SyncDialog(props: { control: SyncControl; onClose: () => void })
   const [server, setServer] = useState(c.server ?? lastServer())
   const [account, setAccount] = useState(false)
   const [membersOpen, setMembersOpen] = useState(false)
+  const [switching, setSwitching] = useState(false)
+  const [target, setTarget] = useState('')
   const requests = c.members?.requests.length ?? 0
   const connected = !!c.server
   const submit = () => {
@@ -111,8 +134,25 @@ export function SyncDialog(props: { control: SyncControl; onClose: () => void })
         {connected ? (
           <>
             <p className={`sync-status ${c.state?.readonly ? 'readonly' : c.state?.status ?? 'connecting'}`}><span className="dot" />{syncLabel(c)}</p>
-            <p className="sync-server">{c.server}</p>
-            {c.state?.status === 'pending' && c.state.kind === 'join'
+            <ServerLine server={c.server!} onSwitch={() => { setSwitching(true); setTarget('') }} />
+            {switching && (
+              <div className="switch-box">
+                <Field label="Neuer Server" value={target} onChange={setTarget} placeholder="https://firma.example/grid" autoFocus />
+                <p className="hint">Das Dokument wird mit allen Mitgliedern und Rollen auf den neuen Server kopiert. Mitglieder müssen dort ein Konto haben und sich selbst mit dem neuen Server verbinden. Der alte Server behält seine Kopie.</p>
+                <div className="actions">
+                  <button type="button" onClick={() => setSwitching(false)}>Abbrechen</button>
+                  <button type="button" className="primary" disabled={!normalizeServer(target)} onClick={() => { const u = normalizeServer(target); rememberServer(u); c.connect(u); setSwitching(false) }}>Umziehen</button>
+                </div>
+              </div>
+            )}
+            {c.state?.status === 'denied' && c.state.kind === 'untrusted'
+              ? <>
+                  <p className="sync-error" role="alert">{c.state.reason}</p>
+                  <div className="actions"><button type="button" className="danger-outline" onClick={() => c.trustServer()}>Dem neuen Schlüssel vertrauen</button></div>
+                </>
+              : c.state?.status === 'pending' && c.state.kind === 'claim'
+              ? <p className="hint">{c.state.reason}</p>
+              : c.state?.status === 'pending' && c.state.kind === 'join'
               ? <p className="hint">Ein Admin des Dokuments muss deine Anfrage zulassen. Nenne ihm deine Prüfnummer <code>{me ? fingerprint(me.publicKey) : ''}</code>; danach verbindet sich Grid von selbst.</p>
               : c.state?.status === 'pending'
               ? <p className="hint">Der Betreiber des Servers muss dein Konto freigeben. Nenne ihm die Kennung <code>{me?.id.slice(0, 8)}</code>

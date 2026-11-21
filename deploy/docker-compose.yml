@@ -1,0 +1,36 @@
+# Grid-Server im Firmennetz: Server plus Caddy, der HTTPS davorsetzt.
+# Starten:  GRID_HOST=grid.firma.intern docker compose up -d
+# Konten:   docker compose exec grid grid-server accounts list --data /data
+#           docker compose exec grid grid-server accounts approve <Kennung> --data /data
+services:
+  grid:
+    build: ../server
+    restart: unless-stopped
+    environment:
+      GRID_NAME: ${GRID_NAME:-Grid-Server}
+      # Neue Konten warten auf Freigabe (sicher). Auf "1" setzen, wenn jeder im Firmennetz sich selbst anmelden darf.
+      GRID_OPEN_REGISTRATION: ${GRID_OPEN_REGISTRATION:-0}
+    volumes:
+      - grid-data:/data
+    expose:
+      - "8787"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - grid
+    environment:
+      GRID_HOST: ${GRID_HOST:-grid.local}
+    ports:
+      - "443:443"
+      - "80:80"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  grid-data:
+  caddy-data:
+  caddy-config:

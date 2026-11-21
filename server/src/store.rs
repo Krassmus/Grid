@@ -110,6 +110,20 @@ impl Store {
         Ok(())
     }
 
+    // ---------- Identität des Servers ----------
+
+    /// Geheimer Schlüssel des Servers (Ed25519-Startwert, beim ersten Start erzeugt). Clients merken sich den öffentlichen Teil.
+    pub fn server_key(&self) -> rusqlite::Result<[u8; 32]> {
+        let c = self.conn();
+        if let Some(v) = c.query_row("SELECT value FROM meta WHERE key = 'server_key'", [], |r| r.get::<_, Vec<u8>>(0)).optional()? {
+            if let Ok(k) = v.try_into() { return Ok(k); }
+        }
+        let mut k = [0u8; 32];
+        getrandom::fill(&mut k).map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+        c.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('server_key', ?1)", [&k[..]])?;
+        Ok(k)
+    }
+
     // ---------- Server-Geheimnis ----------
 
     /// Das Geheimnis, mit dem Anmelde-Rätsel und Sitzungsschlüssel beglaubigt werden (beim ersten Start erzeugt).
@@ -172,16 +186,6 @@ impl Store {
 
     // ---------- Zugriff auf Dokumente ----------
 
-    /// Älteres Verfahren (vor dem Admin-Protokoll): Ein Dokument ohne Mitglieder gehört dem ersten Konto, das es braucht.
-    pub fn access(&self, doc: &str, account: &str) -> rusqlite::Result<bool> {
-        let c = self.conn();
-        c.execute(
-            "INSERT INTO members (doc, account, role) SELECT ?1, ?2, 'admin' WHERE NOT EXISTS (SELECT 1 FROM members WHERE doc = ?1)",
-            params![doc, account],
-        )?;
-        c.query_row("SELECT 1 FROM members WHERE doc = ?1 AND account = ?2", params![doc, account], |_| Ok(())).optional().map(|r| r.is_some())
-    }
-
     // ---------- Besitzer und Speicherverbrauch ----------
 
     pub fn owner(&self, doc: &str) -> rusqlite::Result<Option<String>> {
@@ -229,6 +233,16 @@ impl Store {
     pub fn append_admin(&self, doc: &str, seq: u64, json: &str) -> rusqlite::Result<()> {
         self.conn().execute("INSERT INTO admin_log (doc, seq, entry) VALUES (?1, ?2, ?3)", params![doc, seq as i64, json])?;
         Ok(())
+    }
+
+    /// Mehrere Einträge auf einmal (Umzug eines Dokuments auf diesen Server); alles oder nichts.
+    pub fn append_admin_all(&self, doc: &str, entries: &[(u64, String)]) -> rusqlite::Result<()> {
+        let mut c = self.conn();
+        let t = c.transaction()?;
+        for (seq, json) in entries {
+            t.execute("INSERT INTO admin_log (doc, seq, entry) VALUES (?1, ?2, ?3)", params![doc, *seq as i64, json])?;
+        }
+        t.commit()
     }
 
     /// Mitglieder nach dem älteren Verfahren (ohne Protokoll): (Konto, Rolle)

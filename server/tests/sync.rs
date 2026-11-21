@@ -127,6 +127,7 @@ async fn two_clients_merge_and_late_joiner_gets_state() {
     let addr = serve(&dir, true).await;
     let acc = acct(1);
     let tok = token(&addr, &acc).await;
+    make_doc(&addr, &tok, &acc).await;
 
     let (a, b) = (Doc::new(), Doc::new());
     let (ta, tb) = (a.get_or_insert_text("t"), b.get_or_insert_text("t"));
@@ -161,8 +162,7 @@ async fn documents_belong_to_their_first_account() {
     let (a, b) = (acct(1), acct(2));
     let (ta, tb) = (token(&addr, &a).await, token(&addr, &b).await);
 
-    let doc = Doc::new();
-    join(&addr, &ta, &doc).await.unwrap(); // A legt das Dokument an
+    make_doc(&addr, &ta, &a).await; // A legt das Dokument an
     // B darf weder verbinden noch Dateien lesen noch es in der Liste sehen
     assert!(join(&addr, &tb, &Doc::new()).await.unwrap_err().contains("forbidden"));
     let key = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824";
@@ -180,6 +180,7 @@ async fn state_survives_restart_and_blobs_work() {
     {
         let addr = serve(&dir, true).await;
         tok = token(&addr, &acc).await; // das Geheimnis liegt in der Datenbank: der Schlüssel gilt auch nach dem Neustart
+        make_doc(&addr, &tok, &acc).await;
         let a = Doc::new();
         let t = a.get_or_insert_text("t");
         t.insert(&mut a.transact_mut(), 0, "bleibt");
@@ -241,14 +242,9 @@ async fn invite_accept_and_remove_members() {
     let addr = serve(&dir, true).await;
     let (a, b, c) = (acct(1), acct(2), acct(3));
     let (ta, tb, tc) = (token(&addr, &a).await, token(&addr, &b).await, token(&addr, &c).await);
-    let mut chain = Chain::new();
 
     // A legt das Dokument an und gründet das Protokoll
-    let doc = Doc::new();
-    join(&addr, &ta, &doc).await.unwrap();
-    let (g, h) = chain.entry(&a, "genesis", &a, "admin", "Anna");
-    assert_eq!(status(&post_entry(&addr, &ta, &g).await), 204);
-    chain.accept(h);
+    let mut chain = make_doc(&addr, &ta, &a).await;
     assert_eq!(get_members(&addr, &ta).await.1["role"], "admin");
 
     // B kennt das Dokument nicht: weder lesen noch Protokoll fälschen
@@ -311,14 +307,11 @@ async fn invite_accept_and_remove_members() {
 async fn members_survive_restart() {
     let dir = tmp("members-restart");
     let (a, b) = (acct(1), acct(2));
-    let mut chain = Chain::new();
+    let chain;
     {
         let addr = serve(&dir, true).await;
         let ta = token(&addr, &a).await;
-        join(&addr, &ta, &Doc::new()).await.unwrap();
-        let (g, h) = chain.entry(&a, "genesis", &a, "admin", "Anna");
-        post_entry(&addr, &ta, &g).await;
-        chain.accept(h);
+        chain = make_doc(&addr, &ta, &a).await;
         let (s, _) = chain.entry(&a, "set", &b, "member", "Ben");
         assert_eq!(status(&post_entry(&addr, &ta, &s).await), 204);
     }
@@ -354,6 +347,7 @@ async fn writing_needs_a_plan_and_free_storage() {
     let a = acct(1);
     let ta = token(&addr, &a).await;
     let store = grid_server::Store::open(&dir.join("t.db")).unwrap();
+    make_doc(&addr, &ta, &a).await;
 
     // Ohne Abo: Verbindung geht, Schreiben wird abgelehnt und gemeldet, nichts wird gespeichert
     let doc = Doc::new();
@@ -400,6 +394,7 @@ async fn members_write_when_an_admin_pays_and_server_without_billing_is_free() {
     let addr = serve(&free_dir, true).await;
     let a = acct(1);
     let ta = token(&addr, &a).await;
+    make_doc(&addr, &ta, &a).await;
     let key = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824";
     assert_eq!(status(&http("PUT", &addr, &format!("/blob/{DOC}/{key}"), Some(&ta), b"hello").await), 204);
     let me: serde_json::Value = serde_json::from_str(&http("GET", &addr, "/me", Some(&ta), b"").await.1).unwrap();
@@ -412,11 +407,7 @@ async fn members_write_when_an_admin_pays_and_server_without_billing_is_free() {
     let (ta, tb) = (token(&addr, &a).await, token(&addr, &b).await);
     let store = grid_server::Store::open(&dir.join("t.db")).unwrap();
     store.set_plan(&a.id, "paid", None, 1_000_000).unwrap();
-    join(&addr, &ta, &Doc::new()).await.unwrap(); // A legt das Dokument an
-    let mut chain = Chain::new();
-    let (g, h) = chain.entry(&a, "genesis", &a, "admin", "Anna");
-    assert_eq!(status(&post_entry(&addr, &ta, &g).await), 204);
-    chain.accept(h);
+    let chain = make_doc(&addr, &ta, &a).await; // A legt das Dokument an
     let (s, _) = chain.entry(&a, "set", &b, "member", "Ben");
     assert_eq!(status(&post_entry(&addr, &ta, &s).await), 204);
     assert_eq!(status(&http("PUT", &addr, &format!("/blob/{DOC}/{key}"), Some(&tb), b"hello").await), 204, "B schreibt auf Kosten von A");
@@ -446,4 +437,83 @@ async fn admin_interface_sets_plans() {
     // Ohne Verwaltungsschlüssel in der Einstellung gibt es die Schnittstelle gar nicht
     let addr2 = serve(&tmp("adminapi-off"), true).await;
     assert_eq!(status(&http("GET", &addr2, "/admin/accounts", Some(key), b"").await), 404);
+}
+
+/// Legt das Dokument an (Admin-Protokoll mit Gründungseintrag); ohne das verweigert der Server den Zugriff.
+async fn make_doc(addr: &str, tok: &str, a: &Acct) -> Chain {
+    let mut c = Chain::new();
+    let (g, h) = c.entry(a, "genesis", a, "admin", "Anna");
+    assert_eq!(status(&post_entry(addr, tok, &g).await), 204);
+    c.accept(h);
+    c
+}
+
+// ---------- Eigene Identität des Servers, Umzug auf einen anderen Server ----------
+
+fn unhex(s: &str) -> Vec<u8> { (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap()).collect() }
+
+#[tokio::test]
+async fn server_proves_its_identity_and_keeps_it() {
+    use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+    let dir = tmp("identity");
+    let mut keys = Vec::new();
+    for _ in 0..2 { // zweimal starten: derselbe Schlüssel, weil er in der Datenbank liegt
+        let addr = serve_with(&dir, grid_server::Config { name: Some("Firmenserver".into()), ..Default::default() }).await;
+        let info: serde_json::Value = serde_json::from_str(&http("GET", &addr, "/server", None, b"").await.1).unwrap();
+        assert_eq!(info["name"], "Firmenserver");
+        let (_, ch) = http("GET", &addr, "/challenge", None, b"").await;
+        let ch: serde_json::Value = serde_json::from_str(&ch).unwrap();
+        let (pubkey, sig) = (ch["server"]["pub"].as_str().unwrap(), ch["server"]["sig"].as_str().unwrap());
+        assert_eq!(pubkey, info["pub"].as_str().unwrap());
+        let vk = VerifyingKey::from_bytes(&unhex(pubkey).try_into().unwrap()).unwrap();
+        let sig = Signature::from_bytes(&unhex(sig).try_into().unwrap());
+        vk.verify(format!("grid-server-v1\n{}", ch["nonce"].as_str().unwrap()).as_bytes(), &sig).unwrap();
+        keys.push(pubkey.to_string());
+    }
+    assert_eq!(keys[0], keys[1]);
+    assert_ne!(keys[0], { let d2 = tmp("identity2"); let a2 = serve(&d2, true).await; let i: serde_json::Value = serde_json::from_str(&http("GET", &a2, "/server", None, b"").await.1).unwrap(); i["pub"].as_str().unwrap().to_string() }, "jeder Server hat seinen eigenen Schlüssel");
+}
+
+#[tokio::test]
+async fn unclaimed_documents_must_be_created_first() {
+    let addr = serve(&tmp("unclaimed"), true).await;
+    let a = acct(1);
+    let ta = token(&addr, &a).await;
+    assert!(join(&addr, &ta, &Doc::new()).await.unwrap_err().contains("unclaimed"), "kein stilles Beanspruchen mehr");
+    make_doc(&addr, &ta, &a).await;
+    assert!(join(&addr, &ta, &Doc::new()).await.is_ok());
+}
+
+#[tokio::test]
+async fn document_can_move_to_another_server_with_its_members() {
+    let (a, b, c) = (acct(1), acct(2), acct(3));
+    // altes Zuhause: A gründet, nimmt B auf
+    let old = serve(&tmp("move-old"), true).await;
+    let (ta_old, _) = (token(&old, &a).await, token(&old, &b).await);
+    let mut chain = make_doc(&old, &ta_old, &a).await;
+    let (s, h) = chain.entry(&a, "set", &b, "member", "Ben");
+    assert_eq!(status(&post_entry(&old, &ta_old, &s).await), 204);
+    chain.accept(h);
+    let entries = get_members(&old, &ta_old).await.1["entries"].clone();
+    assert_eq!(entries.as_array().unwrap().len(), 2);
+
+    // neuer Server
+    let new = serve(&tmp("move-new"), true).await;
+    let (ta, tb, tc) = (token(&new, &a).await, token(&new, &b).await, token(&new, &c).await);
+    let import = |tok: String, body: serde_json::Value| { let new = new.clone(); async move {
+        status(&http("POST", &new, &format!("/docs/{DOC}/import"), Some(&tok), body.to_string().as_bytes()).await) } };
+    // Ein Mitglied darf nicht umziehen, Fremde auch nicht
+    assert_eq!(import(tb.clone(), serde_json::json!({ "entries": entries })).await, 403);
+    assert_eq!(import(tc.clone(), serde_json::json!({ "entries": entries })).await, 403);
+    // Eine gefälschte Kette wird abgelehnt
+    let mut forged = entries.clone();
+    forged[1]["role"] = "admin".into();
+    assert_eq!(import(ta.clone(), serde_json::json!({ "entries": forged })).await, 400);
+    // Der Admin zieht um: Mitglieder und Rollen bleiben erhalten
+    assert_eq!(import(ta.clone(), serde_json::json!({ "entries": entries })).await, 204);
+    assert_eq!(get_members(&new, &tb).await.1["role"], "member");
+    assert_eq!(get_members(&new, &ta).await.1["role"], "admin");
+    assert!(join(&new, &tb, &Doc::new()).await.is_ok());
+    // Zweimal geht nicht
+    assert_eq!(import(ta, serde_json::json!({ "entries": entries })).await, 409);
 }

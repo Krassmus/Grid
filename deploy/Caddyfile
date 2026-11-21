@@ -1,0 +1,14 @@
+# HTTPS vor dem Grid-Server (WebSocket wird von Caddy automatisch durchgereicht).
+#
+# Variante 1 (Standard): Caddy erzeugt ein eigenes Zertifikat der internen Stelle. Die Rechner müssen dem Stammzertifikat
+# vertrauen (siehe deploy/README.md).
+# Variante 2: ein Zertifikat aus der Firmen-PKI: die Zeile "tls internal" ersetzen durch
+#     tls /certs/grid.pem /certs/grid.key
+# und den Ordner mit den Dateien in docker-compose.yml unter caddy/volumes nach /certs einhängen.
+{$GRID_HOST} {
+	tls internal
+	request_body {
+		max_size 256MB
+	}
+	reverse_proxy grid:8787
+}

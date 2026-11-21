@@ -60,11 +60,15 @@ pub struct Config {
     pub admin_key: Option<String>,
     /// Adresse, unter der Benutzer ihr Abo verwalten (wird in Grid verlinkt).
     pub manage_url: Option<String>,
+    /// Name des Servers, den Grid anzeigt (z. B. „Firmenserver“).
+    pub name: Option<String>,
 }
 
 pub struct AppState {
     store: Store,
     secret: Vec<u8>,
+    /// Identität des Servers: Clients merken sich den öffentlichen Schlüssel und erkennen so einen falschen oder getauschten Server.
+    server_key: ed25519_dalek::SigningKey,
     cfg: Config,
     rooms: Mutex<HashMap<String, Arc<Room>>>,
     /// Abgespielte Admin-Protokolle (fällt bei jedem neuen Eintrag weg)
@@ -89,6 +93,7 @@ pub fn app_with(data: &std::path::Path, cfg: Config) -> rusqlite::Result<Router>
     let store = Store::open(data)?;
     let state = Arc::new(AppState {
         secret: store.secret()?,
+        server_key: ed25519_dalek::SigningKey::from_bytes(&store.server_key()?),
         store,
         cfg,
         rooms: Mutex::new(HashMap::new()),
@@ -97,6 +102,7 @@ pub fn app_with(data: &std::path::Path, cfg: Config) -> rusqlite::Result<Router>
     });
     Ok(Router::new()
         .route("/health", get(|| async { "ok" }))
+        .route("/server", get(server_info))
         .route("/challenge", get(challenge))
         .route("/login", post(login))
         .route("/me", get(me))
@@ -105,6 +111,7 @@ pub fn app_with(data: &std::path::Path, cfg: Config) -> rusqlite::Result<Router>
         .route("/docs", get(list_docs))
         .route("/docs/{doc}/members", get(members))
         .route("/docs/{doc}/admin", post(post_admin))
+        .route("/docs/{doc}/import", post(import_log))
         .route("/docs/{doc}/join", post(join_doc))
         .route("/docs/{doc}/join/{account}", axum::routing::delete(reject_join))
         .route("/blobs/{doc}", get(list_blobs))
@@ -139,8 +146,19 @@ fn fail<E: std::fmt::Display>(e: E) -> Response {
 
 // ---------- HTTP ----------
 
+fn server_pub(s: &AppState) -> String { auth::hex(&s.server_key.verifying_key().to_bytes()) }
+
+/// Wer bin ich: Name, öffentlicher Schlüssel (daran erkennt Grid den Server wieder), Abo-Pflicht.
+async fn server_info(State(s): State<Shared>) -> Response {
+    Json(serde_json::json!({ "name": s.cfg.name, "pub": server_pub(&s), "billing": s.cfg.billing, "version": env!("CARGO_PKG_VERSION") })).into_response()
+}
+
+/// Rätsel für die Anmeldung. Der Server unterschreibt es mit seinem Schlüssel und beweist so, dass er der erwartete ist.
 async fn challenge(State(s): State<Shared>) -> Response {
-    Json(serde_json::json!({ "nonce": auth::new_nonce(&s.secret) })).into_response()
+    use ed25519_dalek::Signer;
+    let nonce = auth::new_nonce(&s.secret);
+    let sig = auth::hex(&s.server_key.sign(format!("grid-server-v1\n{nonce}").as_bytes()).to_bytes());
+    Json(serde_json::json!({ "nonce": nonce, "server": { "pub": server_pub(&s), "sig": sig } })).into_response()
 }
 
 #[derive(serde::Deserialize)]
@@ -207,10 +225,14 @@ impl AppState {
         Ok(self.store.legacy_members(doc).map_err(|e| e.to_string())?.into_iter().find(|(a, _)| a == account).map(|(_, r)| r))
     }
 
-    /// Zugriff auf Inhalte. Ohne Protokoll gilt das ältere Verfahren (erstes Konto beansprucht das Dokument).
+    /// Zugriff auf Inhalte: nur Mitglieder.
     fn access(&self, doc: &str, account: &str) -> Result<bool, String> {
-        if let Some(s) = self.log_state(doc)? { return Ok(s.members.contains_key(account)); }
-        self.store.access(doc, account).map_err(|e| e.to_string())
+        Ok(self.role(doc, account)?.is_some())
+    }
+
+    /// Das Dokument hat noch keine Mitglieder (weder Protokoll noch ältere Einträge): jemand muss es erst anlegen.
+    fn unclaimed(&self, doc: &str) -> Result<bool, String> {
+        Ok(self.log_state(doc)?.is_none() && self.store.legacy_members(doc).map_err(|e| e.to_string())?.is_empty())
     }
 
     /// Admins des Dokuments (nach Kennung sortiert).
@@ -383,7 +405,29 @@ async fn post_admin(State(s): State<Shared>, h: HeaderMap, Path(doc): Path<Strin
         return (StatusCode::CONFLICT, "Das Protokoll hat sich inzwischen geändert").into_response();
     }
     s.members.lock().unwrap_or_else(|e| e.into_inner()).insert(doc.clone(), Arc::new(next));
+    if entry.kind == "genesis" { let _ = s.store.set_owner(&doc, &entry.actor); } // legt das Dokument an; der Ersteller ist Besitzer
     if entry.kind == "set" { let _ = s.store.remove_request(&doc, &entry.subject); }
+    s.notify(&doc);
+    StatusCode::NO_CONTENT.into_response()
+}
+
+#[derive(serde::Deserialize)]
+struct ImportBody { entries: Vec<adminlog::Entry> }
+
+/// Dokument auf diesen Server umziehen: das ganze Admin-Protokoll übernehmen (Mitglieder und Admins bleiben erhalten).
+/// Nur für ein Dokument, das hier noch niemand angelegt hat, und nur durch einen Admin des Protokolls.
+async fn import_log(State(s): State<Shared>, h: HeaderMap, Path(doc): Path<String>, Json(b): Json<ImportBody>) -> Response {
+    let Some(id) = current(&s, &h) else { return StatusCode::UNAUTHORIZED.into_response() };
+    if !valid_doc(&doc) { return StatusCode::BAD_REQUEST.into_response(); }
+    match s.unclaimed(&doc) { Ok(true) => {} Ok(false) => return (StatusCode::CONFLICT, "Das Dokument gibt es hier schon").into_response(), Err(e) => return fail(e) }
+    if b.entries.is_empty() || b.entries.len() > 10_000 { return StatusCode::BAD_REQUEST.into_response(); }
+    let state = match adminlog::replay(&doc, &b.entries) { Ok(st) => st, Err(e) => return (StatusCode::BAD_REQUEST, e).into_response() };
+    if state.role(&id) != Some("admin") { return (StatusCode::FORBIDDEN, "Nur ein Admin des Dokuments darf es umziehen").into_response(); }
+    let rows: Result<Vec<(u64, String)>, _> = b.entries.iter().map(|e| serde_json::to_string(e).map(|j| (e.seq, j))).collect();
+    let Ok(rows) = rows else { return StatusCode::BAD_REQUEST.into_response() };
+    if s.store.append_admin_all(&doc, &rows).is_err() { return (StatusCode::CONFLICT, "Das Dokument gibt es hier schon").into_response(); }
+    s.members.lock().unwrap_or_else(|e| e.into_inner()).insert(doc.clone(), Arc::new(state));
+    let _ = s.store.set_owner(&doc, &b.entries[0].actor);
     s.notify(&doc);
     StatusCode::NO_CONTENT.into_response()
 }
@@ -467,6 +511,8 @@ async fn session(state: Shared, id: String, mut socket: WebSocket) {
     match state.access(&id, &account.id) {
         Ok(true) => {}
         Ok(false) => {
+            // Noch niemand hat das Dokument angelegt: der Client legt es mit seinem Admin-Protokoll an und verbindet erneut
+            if state.unclaimed(&id).unwrap_or(false) { return deny(&mut socket, "unclaimed", "Dokument ist noch nicht angelegt").await; }
             // Wer angeklopft hat, wartet auf die Entscheidung eines Admins
             if state.store.has_request(&id, &account.id).unwrap_or(false) {
                 return deny(&mut socket, "requested", "Wartet auf Zustimmung eines Admins").await;

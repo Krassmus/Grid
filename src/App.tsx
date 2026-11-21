@@ -53,14 +53,14 @@ function Single() {
   }
 
   /** Dokument aus der Cloud: Speicherort wählen, leere Datei mit der Anbindung anlegen; der Abgleich füllt sie. */
-  const openFromCloud = async (d: CloudDoc, server: string) => {
+  const openFromCloud = async (d: CloudDoc, server: string, key?: string) => {
     setCloudOpen(false)
     const dialog = await import('@tauri-apps/plugin-dialog')
     const chosen = await dialog.save({ defaultPath: `${d.name || 'Cloud-Dokument'}.grid`, filters: FILTERS })
     if (!chosen) return
     const p = withExt(chosen)
     await current.current?.flush()
-    const doc = new Y.Doc(), meta = { ...newMeta(), docId: d.id, sync: { server } }
+    const doc = new Y.Doc(), meta = { ...newMeta(), docId: d.id, sync: key ? { server, key } : { server } }
     try {
       const known = await writeGrid(p, doc, meta, new Set())
       adopt(new FileSession(++counter.current, doc, p, meta, known, setError))
@@ -181,12 +181,13 @@ function Single() {
     server: session.meta.sync?.server ?? null,
     connect: (server) => { session.connect(server); bump((n) => n + 1) },
     disconnect: () => { session.disconnect(); bump((n) => n + 1) },
+    trustServer: () => { session.trustServer(); bump((n) => n + 1) },
   }
   return (
     <>
       <ClientPane key={session.key} title={UNSAVED_TITLE} doc={session.doc}
         persist={session.path ? null : `grid-proto-${UNSAVED_TITLE}`} sync={control} />
-      {joinOpen && <JoinDialog onClose={() => setJoinOpen(false)} onJoined={(i: Invite) => { setJoinOpen(false); void openFromCloud({ id: i.doc, name: i.name, updated: 0 }, i.server) }} />}
+      {joinOpen && <JoinDialog onClose={() => setJoinOpen(false)} onJoined={(i: Invite) => { setJoinOpen(false); void openFromCloud({ id: i.doc, name: i.name, updated: 0 }, i.server, i.key) }} />}
       {cloudOpen && <CloudOpenDialog onOpen={(d, server) => void openFromCloud(d, server)} onClose={() => setCloudOpen(false)} />}
       {error && <div className="file-error" role="alert">{error}<button type="button" onClick={() => setError(null)}>✕</button></div>}
     </>

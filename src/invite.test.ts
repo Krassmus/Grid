@@ -8,6 +8,11 @@ describe('Einladung', () => {
     expect(text).toMatch(/^grid-invite:1:[A-Za-z0-9_-]+$/)
     expect(parseInvite(`  ${text}\n`)).toEqual(inv)
   })
+  it('trägt den Server-Schlüssel mit (und ignoriert Unsinn)', () => {
+    const key = 'ab'.repeat(32)
+    expect(parseInvite(makeInvite({ ...inv, key })).key).toBe(key)
+    expect(parseInvite(makeInvite({ ...inv, key: 'zz' })).key).toBeUndefined()
+  })
   it('lehnt Fremdes und Beschädigtes ab', () => {
     expect(() => parseInvite('hallo')).toThrow('keine Grid-Einladung')
     expect(() => parseInvite('grid-invite:1:%%%')).toThrow('beschädigt')

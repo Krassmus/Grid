@@ -557,3 +557,6 @@ body.tile-dragging.tile-copy, body.tile-dragging.tile-copy * { cursor: copy !imp
 .plan-line p { margin: 4px 0; }
 .plan-line code { font-family: ui-monospace, Menlo, monospace; font-size: 12px; background: var(--c-e9edef); padding: 1px 5px; border-radius: 5px; word-break: break-all; }
 .sync-status.readonly .dot { background: #ff9f0a; }
+.sync-server-block .sync-server { margin: 0 0 2px; }
+.sync-server-block .sync-account { margin: 2px 0 8px; }
+.switch-box { margin: 8px 0; padding: 10px 12px; border: 1px solid var(--c-d5dce0); border-radius: 10px; background: var(--c-f4f7f8); }

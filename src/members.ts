@@ -90,3 +90,23 @@ export async function requestJoin(server: string, doc: string): Promise<'member'
   if (!r.ok) throw await fail(r, 'Beitritt')
   return (await r.json()).status
 }
+
+/**
+ * Dokument auf diesem Server anlegen. Ist das Admin-Protokoll aus einem früheren Zuhause bekannt (steht in der Datei),
+ * zieht es komplett um, damit Mitglieder und Rollen bleiben; sonst gründet der Ersteller ein neues.
+ */
+export async function claimDocument(server: string, doc: string, localLog?: AdminEntry[]): Promise<void> {
+  const me = await getIdentity()
+  if (localLog && localLog.length > 0) {
+    let state: AdminState
+    try { state = replay(doc, localLog) } catch { throw new Error('Das gespeicherte Mitgliederprotokoll ist ungültig') }
+    if (state.members.get(me.id)?.role !== 'admin') {
+      throw new Error('Das Dokument ist auf diesem Server noch nicht angelegt. Ein Admin muss es zuerst hierher umziehen.')
+    }
+    const r = await authedFetch(server, `/docs/${doc}/import`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ entries: localLog }) })
+    if (!r.ok) throw await fail(r, 'Umzug')
+    return
+  }
+  const genesis = buildEntry(me, emptyState(), doc, 'genesis', { id: me.id, pub: me.publicKey }, 'admin', getAccountName())
+  if (!(await post(server, doc, genesis))) throw new Error('Das Dokument konnte nicht angelegt werden')
+}

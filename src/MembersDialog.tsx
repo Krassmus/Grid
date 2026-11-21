@@ -3,7 +3,7 @@ import { Modal } from './Modal'
 import { fingerprint, getAccountName, getIdentity, setAccountName } from './identity'
 import { parseInvite, type Invite } from './invite'
 import { requestJoin } from './members'
-import { AuthError } from './syncClient'
+import { AuthError, pinServer, pinnedKey } from './syncClient'
 import type { Role } from './adminLog'
 import type { JoinRequest, MembersInfo } from './members'
 
@@ -119,6 +119,12 @@ export function JoinDialog(props: { onJoined: (invite: Invite) => void; onClose:
     setBusy(true); setError(null)
     try {
       setAccountName(name)
+      // Der Schlüssel aus der Einladung legt fest, welcher Server der richtige ist (außer Grid kennt für die Adresse schon einen anderen)
+      if (invite.key) {
+        const known = pinnedKey(invite.server)
+        if (known && known !== invite.key) throw new Error('Der Server dieser Einladung hat einen anderen Schlüssel als der, den Grid für diese Adresse kennt. Bitte beim Einladenden nachfragen.')
+        pinServer(invite.server, invite.key)
+      }
       await requestJoin(invite.server, invite.doc)
       props.onJoined(invite)
     } catch (e) {
@@ -136,7 +142,7 @@ export function JoinDialog(props: { onJoined: (invite: Invite) => void; onClose:
         {parseError && <p className="sync-error" role="alert">{parseError}</p>}
         {invite && (
           <>
-            <p className="invite-info">Du wirst zu <strong>„{invite.name || 'Dokument'}“</strong> eingeladen<br /><small>Server {invite.server}{invite.admin && <> · eingeladen von Konto <code>{invite.admin}</code></>}</small></p>
+            <p className="invite-info">Du wirst zu <strong>„{invite.name || 'Dokument'}“</strong> eingeladen<br /><small>Server {invite.server}{invite.key && <> (Schlüssel <code>{fingerprint(invite.key)}</code>)</>}{invite.admin && <> · eingeladen von Konto <code>{invite.admin}</code></>}</small></p>
             <label className="sync-field">
               <span>Dein Name (sehen die Admins)</span>
               <input value={name} maxLength={60} onChange={(e) => setName(e.target.value)} placeholder="z. B. Anna Beispiel" />

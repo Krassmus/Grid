@@ -43,7 +43,7 @@ grid-server accounts plan 6366823a free --data /var/lib/grid
 grid-server accounts list --data /var/lib/grid        # zeigt auch das Abo
 ```
 
-Weitere Umgebungsvariablen: `GRID_BILLING=1` (wie `--billing`), `GRID_ADMIN_KEY` (mindestens 16 Zeichen; schaltet die HTTP-Verwaltung `/admin/…` für einen Webshop ein), `GRID_MANAGE_URL` (Adresse, die Grid als „Abo verwalten“ anzeigt). Hintergrund und Pläne für Zahlung: `docs/SYNC.md`, Abschnitt 4.
+Weitere Umgebungsvariablen: `GRID_NAME` (Anzeigename), `GRID_BILLING=1` (wie `--billing`), `GRID_ADMIN_KEY` (mindestens 16 Zeichen; schaltet die HTTP-Verwaltung `/admin/…` für einen Webshop ein), `GRID_MANAGE_URL` (Adresse, die Grid als „Abo verwalten“ anzeigt). Hintergrund und Pläne für Zahlung: `docs/SYNC.md`, Abschnitt 4.
 
 ## Hinter Apache (townwork.eu)
 

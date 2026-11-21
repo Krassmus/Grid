@@ -7,12 +7,17 @@ import * as Y from 'yjs'
 import { blobKeyOf, neededAssetKeys } from './gridFile'
 import { getBlob, putBlob } from './blobStore'
 import { filesOf } from './model'
-import { getIdentity, onIdentityChanged, signMessage } from './identity'
+import { ed25519 } from '@noble/curves/ed25519.js'
+import { fromHex, getIdentity, onIdentityChanged, signMessage } from './identity'
 
 export type SyncStatus = 'connecting' | 'online' | 'offline' | 'pending' | 'denied'
-/** `pending` kann zweierlei heißen: `account` (Konto noch nicht freigegeben) oder `join` (ein Admin muss die Aufnahme ins Dokument bestätigen). */
+/**
+ * `pending` heißt: `account` (Konto noch nicht freigegeben), `join` (ein Admin muss die Aufnahme bestätigen) oder
+ * `claim` (das Dokument ist auf diesem Server noch nicht angelegt, ein Admin muss es zuerst umziehen).
+ * `denied` mit `untrusted`: der Server hat nicht den Schlüssel, den Grid von ihm kennt.
+ */
 export interface SyncState {
-  status: SyncStatus; reason?: string; kind?: 'account' | 'join'
+  status: SyncStatus; reason?: string; kind?: 'account' | 'join' | 'claim' | 'untrusted'
   /** Verbunden, aber der Server nimmt keine Änderungen an (kein Abo oder Speicher voll); lokal geht alles weiter. */
   readonly?: { code: string; reason: string }
 }
@@ -42,7 +47,49 @@ export function frame(kind: number, body: Uint8Array): Uint8Array<ArrayBuffer> {
 
 /** `pending`: das Konto wartet auf Freigabe durch den Server-Betreiber; `invalid`: abgelehnt; `unreachable`: Server nicht erreichbar. */
 export class AuthError extends Error {
-  constructor(readonly kind: 'pending' | 'invalid' | 'unreachable', message: string) { super(message) }
+  constructor(readonly kind: 'pending' | 'invalid' | 'unreachable' | 'untrusted', message: string) { super(message) }
+}
+
+// ---------- Identität des Servers: merken und prüfen ----------
+// Beim ersten Verbinden merkt sich Grid den öffentlichen Schlüssel des Servers (steht auch in der Dokumentdatei und in
+// Einladungen). Danach muss jeder Server unter dieser Adresse beweisen, dass er diesen Schlüssel hat.
+
+const PINS = 'grid-server-pins'
+const readPins = (): Record<string, string> => { try { return JSON.parse(localStorage.getItem(PINS) ?? '{}') } catch { return {} } }
+const pins = new Map<string, string>(Object.entries(readPins()))
+const keyListeners = new Set<(server: string, key: string) => void>()
+
+const savePins = () => { try { localStorage.setItem(PINS, JSON.stringify(Object.fromEntries(pins))) } catch { /* egal */ } }
+export const pinnedKey = (server: string) => pins.get(normalizeServer(server)) ?? null
+/** Schlüssel eines Servers festhalten (`null` = vergessen, beim nächsten Verbinden gilt der dann gemeldete). */
+export function pinServer(server: string, key: string | null) {
+  const url = normalizeServer(server)
+  if (key) pins.set(url, key); else pins.delete(url)
+  savePins()
+}
+/** Meldet, wenn ein Server zum ersten Mal seinen Schlüssel gezeigt hat. */
+export const onServerKey = (fn: (server: string, key: string) => void) => { keyListeners.add(fn); return () => { keyListeners.delete(fn) } }
+
+function checkServer(base: string, nonce: string, server?: { pub: string; sig: string }) {
+  const pinned = pins.get(base)
+  if (!server) {
+    if (pinned) throw new AuthError('untrusted', 'Der Server meldet keinen Schlüssel mehr, Grid kennt aber einen. Es ist vielleicht nicht der richtige Server.')
+    return // älterer Server ohne Identität
+  }
+  let ok = false
+  try { ok = ed25519.verify(fromHex(server.sig), new TextEncoder().encode(`grid-server-v1\n${nonce}`), fromHex(server.pub)) } catch { /* ungültig */ }
+  if (!ok) throw new AuthError('untrusted', 'Der Server konnte seine Identität nicht beweisen.')
+  if (pinned && pinned !== server.pub) {
+    throw new AuthError('untrusted', 'Dieser Server hat einen anderen Schlüssel als beim ersten Verbinden. Das passiert bei einer Neuinstallation – oder wenn es nicht der richtige Server ist.')
+  }
+  if (!pinned) { pins.set(base, server.pub); savePins(); keyListeners.forEach((f) => f(base, server.pub)) }
+}
+
+export interface ServerInfo { name: string | null; pub: string; billing: boolean; version: string }
+export async function fetchServerInfo(server: string): Promise<ServerInfo> {
+  const r = await fetch(`${normalizeServer(server)}/server`)
+  if (!r.ok) throw new Error(`Server antwortet mit ${r.status}`)
+  return r.json()
 }
 
 const sessions = new Map<string, { token: string; exp: number }>()
@@ -54,8 +101,11 @@ export async function sessionToken(server: string, force = false): Promise<strin
   const have = sessions.get(base)
   if (have && !force && have.exp - 60 > Date.now() / 1000) return have.token
   let res: Response
+  let challenge: { nonce: string; server?: { pub: string; sig: string } }
+  try { challenge = await (await fetch(`${base}/challenge`)).json() } catch { throw new AuthError('unreachable', 'Server nicht erreichbar') }
+  checkServer(base, challenge.nonce, challenge.server)
   try {
-    const { nonce } = await (await fetch(`${base}/challenge`)).json()
+    const { nonce } = challenge
     const me = await getIdentity()
     res = await fetch(`${base}/login`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -105,6 +155,7 @@ export class SyncConnection {
   private relogin = false
   private offIdentity: () => void
   private expired = 0
+  private claims = 0
   private readonly: { code: string; reason: string } | null = null
   private resync: ReturnType<typeof setTimeout> | undefined
 
@@ -114,6 +165,8 @@ export class SyncConnection {
     private onState: (s: SyncState) => void,
     /** Mitglieder oder Beitrittsanfragen könnten sich geändert haben (auch gleich nach dem Verbinden). */
     private onNotice: () => void = () => {},
+    /** Das Dokument gibt es auf dem Server noch nicht: anlegen (oder umziehen). Scheitert mit einer Erklärung. */
+    private onClaim: (() => Promise<void>) | null = null,
   ) {
     doc.on('update', this.onLocal)
     filesOf(doc).observe(this.onFilesChanged)
@@ -156,6 +209,9 @@ export class SyncConnection {
       if (e instanceof AuthError && e.kind === 'pending') {
         this.onState({ status: 'pending', kind: 'account', reason: e.message })
         this.retry = setTimeout(() => void this.open(), 10_000) // der Betreiber gibt vielleicht gleich frei
+      } else if (e instanceof AuthError && e.kind === 'untrusted') {
+        this.stopped = true
+        this.onState({ status: 'denied', kind: 'untrusted', reason: e.message })
       } else if (e instanceof AuthError && e.kind === 'invalid') {
         this.stopped = true
         this.onState({ status: 'denied', reason: e.message })
@@ -175,6 +231,7 @@ export class SyncConnection {
           this.online = true
           this.attempt = 0
           this.expired = 0
+          this.claims = 0
           this.readonly = null
           this.onState({ status: 'online' })
           this.onNotice()
@@ -194,6 +251,14 @@ export class SyncConnection {
           this.ws = null
           ws.close()
           if (m.code === 'expired' && this.expired++ < 2) { this.relogin = true; void this.open(); return } // Sitzung abgelaufen: neu anmelden
+          if (m.code === 'unclaimed' && this.onClaim && this.claims++ < 2) {
+            this.onClaim().then(() => void this.open(), (e: Error) => {
+              if (this.stopped) return
+              this.onState({ status: 'pending', kind: 'claim', reason: e.message })
+              this.retry = setTimeout(() => void this.open(), 30_000)
+            })
+            return
+          }
           if (m.code === 'requested') { // angeklopft: ein Admin muss zustimmen
             this.onState({ status: 'pending', kind: 'join', reason: m.reason })
             this.retry = setTimeout(() => void this.open(), 10_000)
