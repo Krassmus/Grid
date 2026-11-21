@@ -5,7 +5,7 @@ import { storeFile, thumbKey } from './blobStore'
 import { useBlobUrl } from './FileCell'
 import { CHECKBOX, DATE, FILE, GEO, NUMBER, TEXT } from './columnTypes'
 import { GEO_FORMATS, encodeGeo, decodeGeo, formatGeo, parseGeo } from './geo'
-import { toInputValue } from './dateFormat'
+import { DatePicker } from './DatePicker'
 import { Modal } from './Modal'
 import { RichField } from './richText'
 
@@ -209,7 +209,7 @@ export function RecordForm(props: {
         )
       }
       case 'date':
-        return <input autoFocus={first} type={DATE.config(c).time ? 'datetime-local' : 'date'} value={toInputValue(v, DATE.config(c).time)} onChange={(e) => set(c.id, e.target.value || null)} />
+        return <DatePicker className="date-field" autoFocus={first} value={v} withTime={DATE.config(c).time} style={DATE.config(c).style} placeholder="Datum wählen" onChange={(d) => set(c.id, d)} />
       case 'select':
         return (
           <select value={typeof v === 'string' ? v : ''} onChange={(e) => set(c.id, e.target.value || null)}>

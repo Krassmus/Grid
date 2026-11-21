@@ -9,6 +9,7 @@ import { useCell, useFileIndex, useLinkIndex, useRowVersion, useTabs } from './u
 import { FileCell } from './FileCell'
 import { SelectCell } from './SelectCell'
 import { ColumnDialog } from './ColumnDialog'
+import { DatePicker } from './DatePicker'
 import { SheetIcon } from './icons'
 import { useVirtualRows } from './virtualRows'
 import { beginTileDrag, registerDropTarget, type DragPayload } from './tileDrag'
@@ -27,7 +28,6 @@ import { MapView } from './MapView'
 import { MapDialog } from './MapDialog'
 import { aggLabel, allowedAggs, defaultAgg } from './aggregate'
 import { sortedRowIds, type SortDir } from './sorting'
-import { formatDate, toInputValue } from './dateFormat'
 import { CHECKBOX, DATE, FILE, ROLLUP, NUMBER, RELATION, TEXT } from './columnTypes'
 import { RichPreview, RichTextDialog } from './richText'
 import { AnimItem, useAnimatedList } from './animatedList'
@@ -323,19 +323,10 @@ function CheckboxInput({ doc, table, rowId, col, value }: { doc: Y.Doc; table: s
 
 function DateInput({ doc, table, rowId, col, value }: { doc: Y.Doc; table: string; rowId: string; col: ColumnInfo; value: unknown }) {
   const cfg = DATE.config(col)
-  const [editing, setEditing] = useState(false)
-  const shown = formatDate(value, cfg.style, cfg.time)
   return (
     <div className="c">
-      {editing ? (
-        <input className="cell" autoFocus type={cfg.time ? 'datetime-local' : 'date'} value={toInputValue(value, cfg.time)}
-          onChange={(e) => setCell(doc, table, rowId, col.id, e.target.value || null)}
-          onBlur={() => setEditing(false)} onKeyDown={(e) => e.key === 'Enter' && setEditing(false)} />
-      ) : (
-        <button type="button" className="cell cell-date" onClick={() => setEditing(true)} onFocus={() => setEditing(true)}>
-          {shown || <span className="placeholder">{col.name}</span>}
-        </button>
-      )}
+      <DatePicker className="cell cell-date" value={value} withTime={cfg.time} style={cfg.style} placeholder={col.name}
+        onChange={(v) => setCell(doc, table, rowId, col.id, v)} />
     </div>
   )
 }

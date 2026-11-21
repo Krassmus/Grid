@@ -469,3 +469,27 @@ textarea.cell { resize: none; line-height: 1.35; overflow: hidden; display: bloc
 .tile-ghost.copy::after { content: '+'; position: absolute; right: -9px; top: -9px; width: 20px; height: 20px; border-radius: 50%; background: #2e9e4f; color: #fff; font: 700 15px/20px system-ui, sans-serif; text-align: center; box-shadow: 0 1px 3px #0005; }
 body.tile-dragging, body.tile-dragging * { cursor: grabbing !important; user-select: none !important; -webkit-user-select: none !important; }
 body.tile-dragging.tile-copy, body.tile-dragging.tile-copy * { cursor: copy !important; }
+
+/* Datumswähler (DatePicker.tsx) */
+.date-field { width: 100%; box-sizing: border-box; text-align: left; font: inherit; padding: 8px 10px; background: #fff; border: 1px solid #d5dce0; border-radius: 8px; cursor: pointer; }
+.date-field .placeholder { color: #9aa5ab; }
+.datepop { position: fixed; z-index: 2000; box-sizing: border-box; padding: 12px; background: #fff; border: 1px solid #d5dce0; border-radius: 12px; box-shadow: 0 10px 30px #0004; display: flex; flex-direction: column; gap: 8px; font-size: 14px; color: #1f2a30; }
+.datepop-text { width: 100%; box-sizing: border-box; padding: 8px 10px; font: inherit; font-size: 16px; border: 1px solid #b9c4ca; border-radius: 8px; }
+.datepop-text:focus { outline: 2px solid #0a84ff55; border-color: #0a84ff; }
+.datepop-text.invalid { border-color: #c0392b; outline-color: #c0392b44; }
+.datepop-hint { min-height: 16px; color: #667; }
+.datepop-hint.invalid { color: #c0392b; }
+.datepop-nav { display: flex; align-items: center; gap: 6px; }
+.datepop-nav button { width: 30px; height: 30px; padding: 0; border: 1px solid #d5dce0; border-radius: 8px; background: #fff; font-size: 18px; line-height: 1; cursor: pointer; }
+.datepop-nav select { flex: 1; min-width: 0; padding: 5px 6px; border: 1px solid #d5dce0; border-radius: 8px; background: #fff; font: inherit; }
+.datepop-year { width: 66px; padding: 5px 6px; border: 1px solid #d5dce0; border-radius: 8px; font: inherit; }
+.datepop-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; text-align: center; }
+.datepop-grid .wd { padding: 4px 0; font-size: 12px; color: #889; }
+.datepop-grid .day { padding: 0; height: 34px; border: 1px solid transparent; border-radius: 8px; background: none; font: inherit; cursor: pointer; color: inherit; }
+.datepop-grid .day:hover { background: #eef4ff; }
+.datepop-grid .day.other { color: #aab3b8; }
+.datepop-grid .day.today { border-color: #0a84ff88; }
+.datepop-grid .day.on { background: #1456c8; color: #fff; border-color: #1456c8; }
+.datepop-actions { display: flex; justify-content: space-between; }
+.datepop-actions button { padding: 6px 12px; border: 1px solid #d5dce0; border-radius: 8px; background: #fff; font: inherit; cursor: pointer; }
+.datepop-actions button:disabled { opacity: .45; cursor: default; }
