@@ -6,6 +6,7 @@ import { setWindowTitle } from './windowTitle'
 import { invoke } from '@tauri-apps/api/core'
 import { baseName, isTauri, newMeta, readGrid, writeGrid, type OpenedGrid } from './gridFile'
 import { FileSession } from './fileSession'
+import { isThemeChoice, setTheme } from './theme'
 import { forgetRecent, noteRecent, readRecent, writeRecent } from './recentFiles'
 
 /** Normalfall: ein Dokument, ein Client. Mit ?sim in der URL: zwei simulierte Clients zum Testen von Merges. */
@@ -116,6 +117,8 @@ function Single() {
       const actions: Record<string, () => Promise<void>> = { open, new: create, save, save_as: saveAs }
       const unlisten = await listen<string>('menu', (e) => {
         if (e.payload === 'clear_recent') { writeRecent([]); return }
+        const theme = /^theme:(.+)$/.exec(e.payload)
+        if (theme) { if (isThemeChoice(theme[1])) setTheme(theme[1]); return }
         const recent = /^recent:(\d+)$/.exec(e.payload)
         const run = recent ? () => { const p = readRecent()[Number(recent[1])]; return p ? openPath(p) : Promise.resolve() } : actions[e.payload]
         if (!run || busy.current) return

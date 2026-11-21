@@ -6,12 +6,12 @@ import { useCell } from './useTables'
 
 /** Farben der Optionen: Hintergrund, Text, Punkt. Das Dokument speichert nur die Farb-ID. */
 const PALETTE: Record<string, { bg: string; fg: string; dot: string }> = {
-  sand: { bg: '#f4ecdc', fg: '#6e5a2a', dot: '#8a6d2f' },
-  green: { bg: '#e9f0f6', fg: '#3b5a3c', dot: '#4b6b4c' },
-  blue: { bg: '#e6eef8', fg: '#2f4f78', dot: '#3b6ea5' },
-  rose: { bg: '#f6e6e3', fg: '#7a3b32', dot: '#b4503f' },
-  violet: { bg: '#eee8f6', fg: '#54407a', dot: '#7b5cb0' },
-  gray: { bg: '#eceff1', fg: '#4b5a62', dot: '#7b8890' },
+  sand: { bg: 'var(--opt-sand-bg)', fg: 'var(--opt-sand-fg)', dot: 'var(--opt-sand-dot)' },
+  green: { bg: 'var(--opt-green-bg)', fg: 'var(--opt-green-fg)', dot: 'var(--opt-green-dot)' },
+  blue: { bg: 'var(--opt-blue-bg)', fg: 'var(--opt-blue-fg)', dot: 'var(--opt-blue-dot)' },
+  rose: { bg: 'var(--opt-rose-bg)', fg: 'var(--opt-rose-fg)', dot: 'var(--opt-rose-dot)' },
+  violet: { bg: 'var(--opt-violet-bg)', fg: 'var(--opt-violet-fg)', dot: 'var(--opt-violet-dot)' },
+  gray: { bg: 'var(--opt-gray-bg)', fg: 'var(--opt-gray-fg)', dot: 'var(--opt-gray-dot)' },
 }
 const paletteOf = (id: string) => PALETTE[id] ?? PALETTE.gray
 

@@ -3,8 +3,8 @@ mod grid_file;
 use std::{path::PathBuf, sync::Mutex};
 use tauri::{
   ipc::{InvokeBody, Request, Response},
-  menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder},
-  Emitter,
+  menu::{CheckMenuItemBuilder, MenuBuilder, MenuItemBuilder, SubmenuBuilder},
+  Emitter, Manager, Theme,
 };
 
 fn path_of(request: &Request<'_>) -> Result<PathBuf, String> {
@@ -54,7 +54,14 @@ fn take_pending_open(state: tauri::State<'_, PendingOpen>) -> Option<String> {
 
 /// Menüleiste: Datei-Befehle gehen als Ereignis „menu“ an die Oberfläche. `recent` sind die Namen der zuletzt
 /// geöffneten Dateien; ein Klick darauf sendet „recent:<Nummer>“, die Oberfläche kennt die zugehörigen Pfade.
-fn build_menu<M: tauri::Manager<tauri::Wry>>(app: &M, recent: &[String]) -> tauri::Result<()> {
+/// Stand der Menüleiste, damit sie sich bei Änderungen an einer Stelle neu aufbauen lässt.
+struct MenuState {
+  recent: Mutex<Vec<String>>,
+  /// „system“, „light“ oder „dark“
+  theme: Mutex<String>,
+}
+
+fn build_menu<M: tauri::Manager<tauri::Wry>>(app: &M, recent: &[String], theme: &str) -> tauri::Result<()> {
   let item = |id: &str, text: &str, accel: &str| MenuItemBuilder::with_id(id, text).accelerator(accel).build(app);
   let mut recents = SubmenuBuilder::new(app, "Zuletzt geöffnet");
   if recent.is_empty() {
@@ -81,15 +88,39 @@ fn build_menu<M: tauri::Manager<tauri::Wry>>(app: &M, recent: &[String]) -> taur
   let app_menu = SubmenuBuilder::new(app, "Grid")
     .about(None).separator().hide().hide_others().show_all().separator().quit()
     .build()?;
+  // Einstellungen: Erscheinungsbild (die Oberfläche wertet „theme:…“ aus und meldet den Stand über `set_theme` zurück)
+  let choice = |id: &str, text: &str| CheckMenuItemBuilder::with_id(format!("theme:{id}"), text).checked(theme == id).build(app);
+  let settings = SubmenuBuilder::new(app, "Einstellungen")
+    .item(&MenuItemBuilder::with_id("theme_label", "Erscheinungsbild").enabled(false).build(app)?)
+    .item(&choice("system", "Systemstandard")?)
+    .item(&choice("light", "Hell")?)
+    .item(&choice("dark", "Dunkel")?)
+    .build()?;
   let window = SubmenuBuilder::new(app, "Fenster").minimize().maximize().build()?;
-  app.app_handle().set_menu(MenuBuilder::new(app).items(&[&app_menu, &file, &edit, &window]).build()?)?;
+  app.app_handle().set_menu(MenuBuilder::new(app).items(&[&app_menu, &file, &edit, &settings, &window]).build()?)?;
   Ok(())
 }
 
 /// Ersetzt das Untermenü „Zuletzt geöffnet“ durch die übergebenen Dateinamen.
 #[tauri::command]
-fn set_recent_menu(app: tauri::AppHandle, names: Vec<String>) -> Result<(), String> {
-  build_menu(&app, &names).map_err(|e| e.to_string())
+fn set_recent_menu(app: tauri::AppHandle, state: tauri::State<'_, MenuState>, names: Vec<String>) -> Result<(), String> {
+  *state.recent.lock().map_err(|e| e.to_string())? = names.clone();
+  let theme = state.theme.lock().map_err(|e| e.to_string())?.clone();
+  build_menu(&app, &names, &theme).map_err(|e| e.to_string())
+}
+
+/// Erscheinungsbild („system“, „light“, „dark“): Haken im Menü und Darstellung des Fensters (Titelleiste) anpassen.
+#[tauri::command]
+fn set_theme(app: tauri::AppHandle, state: tauri::State<'_, MenuState>, choice: String) -> Result<(), String> {
+  let choice = if matches!(choice.as_str(), "light" | "dark") { choice } else { "system".to_string() };
+  *state.theme.lock().map_err(|e| e.to_string())? = choice.clone();
+  let recent = state.recent.lock().map_err(|e| e.to_string())?.clone();
+  build_menu(&app, &recent, &choice).map_err(|e| e.to_string())?;
+  let theme = match choice.as_str() { "light" => Some(Theme::Light), "dark" => Some(Theme::Dark), _ => None };
+  for (_, window) in app.webview_windows() {
+    let _ = window.set_theme(theme);
+  }
+  Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -97,7 +128,8 @@ pub fn run() {
   tauri::Builder::default()
     .plugin(tauri_plugin_dialog::init())
     .manage(PendingOpen::default())
-    .invoke_handler(tauri::generate_handler![grid_save, grid_open, take_pending_open, set_recent_menu])
+    .manage(MenuState { recent: Mutex::new(Vec::new()), theme: Mutex::new("system".to_string()) })
+    .invoke_handler(tauri::generate_handler![grid_save, grid_open, take_pending_open, set_recent_menu, set_theme])
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(
@@ -107,7 +139,7 @@ pub fn run() {
         )?;
       }
 
-      build_menu(app.handle(), &[])?;
+      build_menu(app.handle(), &[], "system")?;
       Ok(())
     })
     .on_menu_event(|app, event| {
