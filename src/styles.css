@@ -459,3 +459,5 @@ textarea.cell { resize: none; line-height: 1.35; overflow: hidden; display: bloc
 .rowsearch input { width: 220px; padding: 6px 10px; border: 1px solid #d5dce0; border-radius: 8px; background: #fff; font-size: 14px; }
 .rowsearch small { color: #667; white-space: nowrap; }
 .addrow-bar.view-bar { justify-content: flex-start; }
+/* Virtualisierte Zeilen gleichen Höhenänderungen selbst aus (virtualRows.ts); das Ausgleichen des Browsers würde doppelt wirken */
+.gridscroll, main:not(.single) { overflow-anchor: none; }

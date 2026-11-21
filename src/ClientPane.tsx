@@ -10,6 +10,7 @@ import { FileCell } from './FileCell'
 import { SelectCell } from './SelectCell'
 import { ColumnDialog } from './ColumnDialog'
 import { SheetIcon } from './icons'
+import { useVirtualRows } from './virtualRows'
 import { computeView } from './viewEngine'
 import { FooterCell } from './Footer'
 import { GeoCell } from './GeoCell'
@@ -557,17 +558,6 @@ export function ClientPane(props: {
   }, [doc, tables, table?.id, index, fileIndex])
   const reprOf = useCallback((id: string) => reprs.get(id), [reprs])
 
-  // Nach „+ Zeile“: zur neuen Zeile scrollen und ihre erste Zelle fokussieren
-  const [focusRow, setFocusRow] = useState<string | null>(null)
-  useEffect(() => {
-    if (!focusRow) return
-    const row = sectionRef.current?.querySelector<HTMLElement>(`[data-row="${focusRow}"]`)
-    if (!row) return // noch nicht gerendert: der Effekt läuft mit der nächsten Zeilenliste erneut
-    row.scrollIntoView({ block: 'nearest' })
-    row.querySelector<HTMLElement>('input, textarea, button')?.focus({ preventScroll: true })
-    setFocusRow(null)
-  }, [focusRow, rowIds])
-
   const [liveWidth, setLiveWidth] = useState<{ id: string; w: number } | null>(null)
   const startResize = (e: ReactMouseEvent, colId: string) => {
     e.preventDefault()
@@ -605,6 +595,24 @@ export function ClientPane(props: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doc, table?.id, query, sortTick, table?.rowIds.length, index, fileIndex])
   const visibleIds = useMemo(() => (matching ? rowIds.filter((id) => matching.has(id)) : rowIds), [rowIds, matching])
+  // Große Tabellen: nur die Zeilen in und um den sichtbaren Bereich zeichnen
+  const virt = useVirtualRows(visibleIds)
+
+  // Nach „+ Zeile“: zur neuen Zeile scrollen und ihre erste Zelle fokussieren
+  const [focusRow, setFocusRow] = useState<string | null>(null)
+  useEffect(() => {
+    if (!focusRow) return
+    const row = sectionRef.current?.querySelector<HTMLElement>(`[data-row="${focusRow}"]`)
+    if (!row) {
+      // noch nicht gezeichnet (große Tabelle): hinscrollen, der Effekt läuft mit dem neuen Bereich erneut
+      const i = visibleIds.indexOf(focusRow)
+      if (i >= 0) virt.scrollToIndex(i)
+      return
+    }
+    row.scrollIntoView({ block: 'nearest' })
+    row.querySelector<HTMLElement>('input, textarea, button')?.focus({ preventScroll: true })
+    setFocusRow(null)
+  }, [focusRow, rowIds, visibleIds, virt.start, virt.end])
   const template = table
     ? [
         ...shownColumns.map((c, i) =>
@@ -704,7 +712,8 @@ export function ClientPane(props: {
                 ))}
                 <div className="h"><button className="add-col" onClick={() => setDialog('column')} title="Spalte hinzufügen" aria-label="Spalte hinzufügen">+</button></div>
               </div>
-              {visibleIds.map((rid) => (
+              {virt.virtual && <div ref={virt.anchorRef} style={{ height: virt.topPad }} aria-hidden />}
+              {visibleIds.slice(virt.start, virt.end).map((rid) => (
                 <div key={rid} className="row-outer" data-row={rid}>
                   <div className="row-inner">
                     {shownColumns.map((c, i) =>
@@ -731,6 +740,7 @@ export function ClientPane(props: {
                   </div>
                 </div>
               ))}
+              {virt.virtual && <div style={{ height: virt.bottomPad }} aria-hidden />}
               <div className="grid-foot">
                 <div className="row-inner">
                   {shownColumns.map((c) => (
