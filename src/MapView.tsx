@@ -9,6 +9,7 @@ import { newCtx } from './cells'
 import { reprMap, type Repr } from './repr'
 import { TileContent } from './ReprTile'
 import { useFileIndex, useLinkIndex } from './useTables'
+import { glide, type Tag } from './markerGlide'
 import { formatArea, formatLength, pathLength, ringArea, type Pt } from './mapGeometry'
 
 type Mode = 'select' | 'point' | 'line' | 'area'
@@ -33,6 +34,8 @@ export function MapView(props: { doc: Y.Doc; map: MapInfo; tables: TableInfo[]; 
   const [mode, setMode] = useState<Mode>('select')
   const [draft, setDraft] = useState<Pt[]>([])
   const [selected, setSelected] = useState<string | null>(null)
+  /** Marker der Zeilen auf der Karte (Schlüssel: Tabelle|Zeile|Spalte) samt laufender Bewegung */
+  const tags = useRef(new Map<string, Tag>())
   const [hosts, setHosts] = useState<{ key: string; el: HTMLElement; repr?: Repr }[]>([])
   const live = useRef({ mode, draft, map, selected })
   live.current = { mode, draft, map, selected }
@@ -105,7 +108,7 @@ export function MapView(props: { doc: Y.Doc; map: MapInfo; tables: TableInfo[]; 
       setReady(true)
       setTimeout(() => m.invalidateSize(), 50)
     })()
-    return () => { alive = false; m?.remove(); lf.current = null }
+    return () => { alive = false; for (const t of tags.current.values()) cancelAnimationFrame(t.anim); tags.current.clear(); m?.remove(); lf.current = null }
   }, [])
 
   // Erster Ausschnitt: alles, was auf der Karte liegt
@@ -124,11 +127,13 @@ export function MapView(props: { doc: Y.Doc; map: MapInfo; tables: TableInfo[]; 
     g.map.getContainer().style.cursor = mode === 'select' ? '' : 'crosshair'
   }, [ready, mode])
 
-  // Zeilen der gewählten Geo-Spalten, jeweils mit ihrer Darstellung
+  // Zeilen der gewählten Geo-Spalten, jeweils mit ihrer Darstellung.
+  // Die Marker bleiben bestehen und werden nur nachgeführt: Ändert sich eine Position (z. B. weil jemand anderes das Objekt
+  // verschoben hat), gleitet der Marker in einer Sekunde dorthin.
   useEffect(() => {
     const g = lf.current
     if (!ready || !g) return
-    g.data.clearLayers()
+    const seen = new Set<string>()
     const next: { key: string; el: HTMLElement; repr?: Repr }[] = []
     for (const layer of map.layers) {
       const t = tables.find((x) => x.id === layer.table)
@@ -136,50 +141,70 @@ export function MapView(props: { doc: Y.Doc; map: MapInfo; tables: TableInfo[]; 
       for (const rid of t.rowIds) {
         const p = decodeGeo(getCell(doc, t.id, rid, layer.col))
         if (!p) continue
-        const marker = g.L.marker([p.lat, p.lon], { keyboard: false, icon: g.L.divIcon({ className: 'geo-tag-wrap', html: '', iconSize: [0, 0], iconAnchor: [0, 0] }) }).addTo(g.data)
-        let moved = false
-        marker.on('click', (e: any) => {
-          if (moved) { moved = false; return }
-          // Öffnen nur über das Label (oder den Pin ohne Label); alles darunter ist zum Ziehen da
-          const hit = (e.originalEvent?.target as HTMLElement | null)?.closest('.tile, .geo-pin')
-          if (hit && live.current.mode === 'select') openRef.current(t.id, rid)
-        })
-        const icon: HTMLElement | undefined = marker.getElement()
-        if (!icon) continue
-        const host = document.createElement('div')
-        host.className = 'geo-tag-host'
-        icon.appendChild(host)
-        // Verschieben: die Spitze (Pfeil bzw. Punkt) ziehen und loslassen; ein Klick auf die Kachel öffnet weiter das Formular
-        // Leaflet schwenkt die Karte bei mousedown/touchstart: dort darf die Spitze nicht durchgereicht werden
-        const onTip = (e: Event) => !(e.target as HTMLElement).closest('.tile') && live.current.mode === 'select'
-        for (const type of ['mousedown', 'touchstart']) host.addEventListener(type, (e) => { if (onTip(e)) e.stopPropagation() })
-        host.addEventListener('pointerdown', (e: PointerEvent) => {
-          if (e.button !== 0 || !onTip(e)) return
-          e.stopPropagation()
-          const map = g.map
-          const start = map.mouseEventToContainerPoint(e)
-          const origin = map.latLngToContainerPoint(marker.getLatLng())
-          let target = marker.getLatLng()
-          moved = false
-          const move = (ev: PointerEvent) => {
-            const q = map.mouseEventToContainerPoint(ev)
-            if (!moved && Math.hypot(q.x - start.x, q.y - start.y) < 4) return
-            moved = true
-            host.classList.add('dragging')
-            target = map.containerPointToLatLng([origin.x + q.x - start.x, origin.y + q.y - start.y])
-            marker.setLatLng(target)
-          }
-          const up = () => {
-            window.removeEventListener('pointermove', move)
-            window.removeEventListener('pointerup', up)
-            host.classList.remove('dragging')
-            if (moved) setCell(doc, t.id, rid, layer.col, encodeGeo({ lat: target.lat, lon: ((target.lng + 540) % 360) - 180 }))
-          }
-          window.addEventListener('pointermove', move)
-          window.addEventListener('pointerup', up)
-        })
-        next.push({ key: `${t.id}|${rid}|${layer.col}`, el: host, repr: reprs.get(t.id)?.get(rid) })
+        const key = `${t.id}|${rid}|${layer.col}`
+        let tag = tags.current.get(key)
+        if (tag) glide(tag, p.lat, p.lon)
+        else {
+          const marker = g.L.marker([p.lat, p.lon], { keyboard: false, icon: g.L.divIcon({ className: 'geo-tag-wrap', html: '', iconSize: [0, 0], iconAnchor: [0, 0] }) }).addTo(g.data)
+          let moved = false
+          marker.on('click', (e: any) => {
+            if (moved) { moved = false; return }
+            // Öffnen nur über das Label (oder den Pin ohne Label); alles darunter ist zum Ziehen da
+            const hit = (e.originalEvent?.target as HTMLElement | null)?.closest('.tile, .geo-pin')
+            if (hit && live.current.mode === 'select') openRef.current(t.id, rid)
+          })
+          const icon: HTMLElement | undefined = marker.getElement()
+          if (!icon) continue
+          const host = document.createElement('div')
+          host.className = 'geo-tag-host'
+          icon.appendChild(host)
+          tag = { marker, host, anim: 0, target: { lat: p.lat, lng: p.lon } }
+          tags.current.set(key, tag)
+          // Verschieben: die Spitze (Pfeil bzw. Punkt) ziehen und loslassen; ein Klick auf die Kachel öffnet weiter das Formular
+          // Leaflet schwenkt die Karte bei mousedown/touchstart: dort darf die Spitze nicht durchgereicht werden
+          const onTip = (e: Event) => !(e.target as HTMLElement).closest('.tile') && live.current.mode === 'select'
+          for (const type of ['mousedown', 'touchstart']) host.addEventListener(type, (e) => { if (onTip(e)) e.stopPropagation() })
+          host.addEventListener('pointerdown', (e: PointerEvent) => {
+            if (e.button !== 0 || !onTip(e)) return
+            e.stopPropagation()
+            const map = g.map
+            const self = tags.current.get(key)
+            if (self) { cancelAnimationFrame(self.anim); self.anim = 0 } // wer greift, hält das Objekt an
+            const start = map.mouseEventToContainerPoint(e)
+            const origin = map.latLngToContainerPoint(marker.getLatLng())
+            let target = marker.getLatLng()
+            moved = false
+            const move = (ev: PointerEvent) => {
+              const q = map.mouseEventToContainerPoint(ev)
+              if (!moved && Math.hypot(q.x - start.x, q.y - start.y) < 4) return
+              moved = true
+              host.classList.add('dragging')
+              target = map.containerPointToLatLng([origin.x + q.x - start.x, origin.y + q.y - start.y])
+              marker.setLatLng(target)
+            }
+            const up = () => {
+              window.removeEventListener('pointermove', move)
+              window.removeEventListener('pointerup', up)
+              host.classList.remove('dragging')
+              if (moved) {
+                const lon = ((target.lng + 540) % 360) - 180
+                if (self) self.target = { lat: target.lat, lng: lon } // eigene Bewegung: der Marker steht schon dort
+                setCell(doc, t.id, rid, layer.col, encodeGeo({ lat: target.lat, lon }))
+              }
+            }
+            window.addEventListener('pointermove', move)
+            window.addEventListener('pointerup', up)
+          })
+        }
+        seen.add(key)
+        next.push({ key, el: tag.host, repr: reprs.get(t.id)?.get(rid) })
       }
+    }
+    for (const [key, tag] of tags.current) {
+      if (seen.has(key)) continue
+      cancelAnimationFrame(tag.anim)
+      g.data.removeLayer(tag.marker)
+      tags.current.delete(key)
     }
     setHosts(next)
   }, [ready, tables, map.layers, reprs])
