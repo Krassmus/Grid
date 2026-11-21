@@ -125,7 +125,7 @@ button.primary:disabled { opacity: .4; cursor: default; }
 button.danger { background: #d92d20; border-color: #d92d20; color: #fff; }
 
 /* „+ Zeile“ bleibt am unteren Fensterrand sichtbar, solange die Tabelle länger ist als das Fenster */
-.addrow-bar { position: sticky; bottom: 0; z-index: 3; flex: none; background: #f4f7f8; padding: 10px 0 12px; box-shadow: 0 -1px 0 #e1e7ea; }
+.addrow-bar { display: flex; align-items: center; gap: 14px; position: sticky; bottom: 0; z-index: 3; flex: none; background: #f4f7f8; padding: 10px 0 12px; box-shadow: 0 -1px 0 #e1e7ea; }
 
 /* Normalmodus: Die Seite selbst scrollt nie. Nur die Tabelle (.gridscroll) scrollt – und federt dabei (Bounce) –,
    die Leiste mit „+ Zeile“ liegt darunter und bewegt sich nicht. */
@@ -455,3 +455,7 @@ textarea.cell { resize: none; line-height: 1.35; overflow: hidden; display: bloc
 .tiles .tile:not(:has(.tile-body)) .avatar { width: 52px; height: 52px; border-radius: 10px; border: 1px solid #e1e7ea; box-sizing: border-box; }
 .tiles .tile:not(:has(.tile-body)) .avatar.symbol { width: 52px; background: #fff; font-size: 30px; }
 .tiles .tile.clickable:not(:has(.tile-body)):hover .avatar { border-color: #0a84ff; }
+.rowsearch { display: inline-flex; align-items: center; gap: 10px; }
+.rowsearch input { width: 220px; padding: 6px 10px; border: 1px solid #d5dce0; border-radius: 8px; background: #fff; font-size: 14px; }
+.rowsearch small { color: #667; white-space: nowrap; }
+.addrow-bar.view-bar { justify-content: flex-start; }

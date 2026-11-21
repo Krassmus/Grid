@@ -7,12 +7,12 @@ export interface LatLon { lat: number; lon: number }
 
 export type GeoFormat = 'dd' | 'lonlat' | 'dms' | 'dm' | 'utm' | 'map'
 export const GEO_FORMATS: { id: GeoFormat; label: string; example: string }[] = [
+  { id: 'map', label: 'Kleine Karte', example: '' },
   { id: 'dd', label: 'Dezimalgrad (Breite, Länge)', example: '52.37052, 9.73219' },
   { id: 'lonlat', label: 'Dezimalgrad (Länge, Breite)', example: '9.73219, 52.37052' },
   { id: 'dms', label: 'Grad, Minuten, Sekunden (GPS)', example: '52°22\'13.9"N 9°43\'55.9"E' },
   { id: 'dm', label: 'Grad, Dezimalminuten (GPS)', example: '52°22.232\'N 9°43.932\'E' },
   { id: 'utm', label: 'UTM', example: '32U 549260 5800540' },
-  { id: 'map', label: 'Kleine Karte', example: '' },
 ]
 
 // ---------- Speicherformat ----------

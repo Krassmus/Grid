@@ -269,7 +269,7 @@ export interface GeoConfig { format: GeoFormat }
 class GeoColumn extends ColumnType<GeoConfig> {
   readonly type = 'geo'
   readonly label = 'Geokoordinate'
-  readonly defaults: GeoConfig = { format: 'dd' }
+  readonly defaults: GeoConfig = { format: 'map' }
   renderConfig({ config, set }: ConfigContext<GeoConfig>) {
     const ex = GEO_FORMATS.find((f) => f.id === config.format)?.example
     return (

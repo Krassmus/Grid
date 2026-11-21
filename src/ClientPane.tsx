@@ -590,6 +590,21 @@ export function ClientPane(props: {
   }
 
   const shownColumns = table ? table.columns.filter((c) => !c.hidden) : [] // ausgeblendete Spalten bleiben für Formeln und Darstellung nutzbar
+
+  // Suche: nur Zeilen, bei denen der Suchtext (ohne Beachtung der Groß-/Kleinschreibung) in einer sichtbaren Spalte vorkommt.
+  // Wie die Sortierung wird sie während der Eingabe in der Tabelle nicht neu ausgewertet, damit Zeilen nicht unter dem Cursor verschwinden.
+  const [searches, setSearches] = useState<Record<string, string>>({})
+  const query = (table && searches[table.id]?.trim().toLowerCase()) || ''
+  const matching = useMemo(() => {
+    if (!table || !query) return null
+    const ctx = newCtx()
+    const texts = shownColumns.map((c) => columnCells(doc, tables, table, c, ctx))
+    const ok = new Set<string>()
+    for (const rid of table.rowIds) if (texts.some((m) => (m.get(rid)?.text ?? '').toLowerCase().includes(query))) ok.add(rid)
+    return ok
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doc, table?.id, query, sortTick, table?.rowIds.length, index, fileIndex])
+  const visibleIds = useMemo(() => (matching ? rowIds.filter((id) => matching.has(id)) : rowIds), [rowIds, matching])
   const template = table
     ? [
         ...shownColumns.map((c, i) =>
@@ -689,7 +704,7 @@ export function ClientPane(props: {
                 ))}
                 <div className="h"><button className="add-col" onClick={() => setDialog('column')} title="Spalte hinzufügen" aria-label="Spalte hinzufügen">+</button></div>
               </div>
-              {rowIds.map((rid) => (
+              {visibleIds.map((rid) => (
                 <div key={rid} className="row-outer" data-row={rid}>
                   <div className="row-inner">
                     {shownColumns.map((c, i) =>
@@ -732,7 +747,13 @@ export function ClientPane(props: {
       </div>
       {table && (
         <div className="addrow-bar">
-          <button className="add-row" onClick={() => setFocusRow(addRow(doc, table.id))}>+ Zeile</button>
+          <button className="add-row" onClick={() => { setSearches((s) => ({ ...s, [table.id]: '' })); setFocusRow(addRow(doc, table.id)) }}>+ Zeile</button>
+          <span className="rowsearch">
+            <input type="search" placeholder="Suchen …" aria-label="Tabelle durchsuchen" value={searches[table.id] ?? ''}
+              onChange={(e) => setSearches((s) => ({ ...s, [table.id]: e.target.value }))}
+              onKeyDown={(e) => { if (e.key === 'Escape') setSearches((s) => ({ ...s, [table.id]: '' })) }} />
+            {matching && <small>{visibleIds.length} von {table.rowIds.length}</small>}
+          </span>
         </div>
       )}
       {view && (
