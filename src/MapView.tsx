@@ -13,6 +13,11 @@ import { glide, type Tag } from './markerGlide'
 import { formatArea, formatLength, pathLength, ringArea, type Pt } from './mapGeometry'
 
 type Mode = 'select' | 'point' | 'line' | 'area'
+/** Marker einer Zeile: dazu ein laufendes Ausblenden (Zeitgeber) und die zuletzt gezeigte Darstellung, die während des Ausblendens stehen bleibt */
+type LiveTag = Tag & { leaving: number | null; repr?: Repr }
+/** Dauer des Ein- und Ausblendens in Millisekunden (siehe .geo-tag-host.appearing/.leaving in styles.css) */
+const FADE_MS = 500
+const calmMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
 const COLORS = ['#0a84ff', '#34c759', '#ff3b30', '#ff9500', '#af52de', '#5856d6', '#8e8e93', '#1c1c1e']
 const KIND_LABEL = { point: 'Punkt', line: 'Strecke', area: 'Gebiet' } as const
 const MIN_POINTS = { line: 2, area: 3 } as const
@@ -35,7 +40,8 @@ export function MapView(props: { doc: Y.Doc; map: MapInfo; tables: TableInfo[]; 
   const [draft, setDraft] = useState<Pt[]>([])
   const [selected, setSelected] = useState<string | null>(null)
   /** Marker der Zeilen auf der Karte (Schlüssel: Tabelle|Zeile|Spalte) samt laufender Bewegung */
-  const tags = useRef(new Map<string, Tag>())
+  const tags = useRef(new Map<string, LiveTag>())
+  const firstFill = useRef(true) // beim ersten Füllen der Karte erscheinen die Marker ohne Animation
   const [hosts, setHosts] = useState<{ key: string; el: HTMLElement; repr?: Repr }[]>([])
   const live = useRef({ mode, draft, map, selected })
   live.current = { mode, draft, map, selected }
@@ -108,7 +114,7 @@ export function MapView(props: { doc: Y.Doc; map: MapInfo; tables: TableInfo[]; 
       setReady(true)
       setTimeout(() => m.invalidateSize(), 50)
     })()
-    return () => { alive = false; for (const t of tags.current.values()) cancelAnimationFrame(t.anim); tags.current.clear(); m?.remove(); lf.current = null }
+    return () => { alive = false; for (const t of tags.current.values()) { cancelAnimationFrame(t.anim); if (t.leaving !== null) clearTimeout(t.leaving) } tags.current.clear(); m?.remove(); lf.current = null }
   }, [])
 
   // Erster Ausschnitt: alles, was auf der Karte liegt
@@ -143,8 +149,10 @@ export function MapView(props: { doc: Y.Doc; map: MapInfo; tables: TableInfo[]; 
         if (!p) continue
         const key = `${t.id}|${rid}|${layer.col}`
         let tag = tags.current.get(key)
-        if (tag) glide(tag, p.lat, p.lon)
-        else {
+        if (tag) {
+          if (tag.leaving !== null) { clearTimeout(tag.leaving); tag.leaving = null; tag.host.classList.remove('leaving') } // kommt zurück, bevor es ausgeblendet war
+          glide(tag, p.lat, p.lon)
+        } else {
           const marker = g.L.marker([p.lat, p.lon], { keyboard: false, icon: g.L.divIcon({ className: 'geo-tag-wrap', html: '', iconSize: [0, 0], iconAnchor: [0, 0] }) }).addTo(g.data)
           let moved = false
           marker.on('click', (e: any) => {
@@ -158,8 +166,14 @@ export function MapView(props: { doc: Y.Doc; map: MapInfo; tables: TableInfo[]; 
           const host = document.createElement('div')
           host.className = 'geo-tag-host'
           icon.appendChild(host)
-          tag = { marker, host, anim: 0, target: { lat: p.lat, lng: p.lon } }
+          tag = { marker, host, anim: 0, target: { lat: p.lat, lng: p.lon }, leaving: null }
           tags.current.set(key, tag)
+          if (!firstFill.current && !calmMotion()) { // neu dazugekommen: einblenden und von klein auf groß wachsen
+            host.classList.add('appearing')
+            const done = () => host.classList.remove('appearing')
+            host.addEventListener('animationend', done, { once: true })
+            setTimeout(done, FADE_MS + 150) // falls der Browser die Animation nicht abspielt (z. B. verdeckter Tab): Marker trotzdem zeigen
+          }
           // Verschieben: die Spitze (Pfeil bzw. Punkt) ziehen und loslassen; ein Klick auf die Kachel öffnet weiter das Formular
           // Leaflet schwenkt die Karte bei mousedown/touchstart: dort darf die Spitze nicht durchgereicht werden
           const onTip = (e: Event) => !(e.target as HTMLElement).closest('.tile') && live.current.mode === 'select'
@@ -197,15 +211,24 @@ export function MapView(props: { doc: Y.Doc; map: MapInfo; tables: TableInfo[]; 
           })
         }
         seen.add(key)
-        next.push({ key, el: tag.host, repr: reprs.get(t.id)?.get(rid) })
+        tag.repr = reprs.get(t.id)?.get(rid)
+        next.push({ key, el: tag.host, repr: tag.repr })
       }
     }
     for (const [key, tag] of tags.current) {
       if (seen.has(key)) continue
       cancelAnimationFrame(tag.anim)
-      g.data.removeLayer(tag.marker)
-      tags.current.delete(key)
+      tag.anim = 0
+      if (tag.leaving === null) {
+        const remove = () => { g.data.removeLayer(tag.marker); tags.current.delete(key); setHosts((h) => h.filter((x) => x.key !== key)) }
+        if (calmMotion()) { remove(); continue }
+        tag.host.classList.remove('appearing')
+        tag.host.classList.add('leaving') // ausblenden; der Marker verschwindet danach
+        tag.leaving = window.setTimeout(remove, FADE_MS)
+      }
+      next.push({ key, el: tag.host, repr: tag.repr }) // die Kachel bleibt während des Ausblendens stehen
     }
+    firstFill.current = false
     setHosts(next)
   }, [ready, tables, map.layers, reprs])
 

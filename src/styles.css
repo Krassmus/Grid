@@ -634,3 +634,14 @@ main.single { padding-top: env(safe-area-inset-top); padding-left: env(safe-area
 .col-menu { position: absolute; top: calc(100% + 6px); left: 6px; z-index: 30; min-width: 150px; padding: 4px; background: var(--c-ffffff); border: 1px solid var(--c-d5dce0); border-radius: 12px; box-shadow: 0 8px 28px #0003; text-transform: none; letter-spacing: 0; font-weight: 400; }
 .col-menu button { color: var(--c-1f2a30); display: block; width: 100%; text-align: left; border: none; background: none; padding: 10px 14px; border-radius: 8px; font: inherit; font-size: 16px; cursor: pointer; min-height: 44px; }
 .col-menu button:active, .col-menu button:hover { background: var(--c-e9edef); }
+
+/* Marker auf der Karte: neu dazugekommene wachsen aus der Spitze heraus und werden eingeblendet, entfernte blenden aus.
+   Animiert wird der Inhalt (Kachel mit Pfeil bzw. Pin), nicht das Host-Element: das trägt schon die Verschiebung um die halbe
+   Breite, und der Inhalt wächst um seine untere Mitte, also genau um die Spitze. */
+.mapview .geo-tag-host.appearing > .geo-tag, .mapview .geo-tag-host.appearing > .geo-pin { transform-origin: 50% 100%; animation: geo-in .5s ease-out; }
+.mapview .geo-tag-host.appearing::after { animation: geo-fade .5s ease-out; }
+.mapview .geo-tag-host.leaving { animation: geo-out .5s ease-in forwards; pointer-events: none; }
+@keyframes geo-in { from { opacity: 0; transform: scale(.2); } to { opacity: 1; transform: scale(1); } }
+@keyframes geo-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes geo-out { from { opacity: 1; } to { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .mapview .geo-tag-host.appearing > .geo-tag, .mapview .geo-tag-host.appearing > .geo-pin, .mapview .geo-tag-host.appearing::after, .mapview .geo-tag-host.leaving { animation: none; } }
