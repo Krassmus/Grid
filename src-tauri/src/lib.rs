@@ -26,9 +26,10 @@ fn path_of(request: &Request<'_>) -> Result<PathBuf, String> {
   String::from_utf8(bytes).map(PathBuf::from).map_err(|e| e.to_string())
 }
 
-/// Schreibt das Dokument als .grid-Datei. Body: Binärpaket der Oberfläche, Header `x-path`: Zielpfad.
+/// Schreibt Änderungen in die .grid-Datei (oder legt sie neu an). Body: Binärpaket der Oberfläche, Header `x-path`: Zielpfad.
+/// Liefert die Zahl der Updates im Protokoll.
 #[tauri::command]
-async fn grid_save(request: Request<'_>) -> Result<(), String> {
+async fn grid_save(request: Request<'_>) -> Result<u64, String> {
   let path = path_of(&request)?;
   let InvokeBody::Raw(body) = request.body() else { return Err("Binärdaten erwartet".into()) };
   grid_file::save_grid(&path, body)

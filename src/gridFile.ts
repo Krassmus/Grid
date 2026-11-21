@@ -1,21 +1,22 @@
 /**
- * Das .grid-Dateiformat (ZIP mit meta.json, data.sqlite und assets/) wird in Rust geschrieben und gelesen
- * (src-tauri/src/grid_file.rs). Hier: Zusammenstellen des Binärpakets für die IPC-Schnittstelle,
- * die lesbare relationale Abbildung des Dokuments (landet als Tabellen in data.sqlite) und das Einlesen.
+ * Das .grid-Dateiformat (eine SQLite-Datenbank) wird in Rust geschrieben und gelesen
+ * (src-tauri/src/grid_file.rs). Hier: Zusammenstellen des Binärpakets für die IPC-Schnittstelle und das Einlesen.
  *
- * Maßgeblich beim Öffnen ist der CRDT-Zustand (Tabelle `ydoc`); die übrigen SQLite-Tabellen sind
- * eine abgeleitete Sicht für Auswertungen mit normalen SQLite-Werkzeugen.
+ * Maßgeblich beim Öffnen ist der CRDT-Zustand (Protokoll `ydoc_log`); die Datentabellen (siehe tableSync.ts)
+ * sind eine abgeleitete Sicht für Auswertungen mit normalen SQLite-Werkzeugen.
+ * Ältere Dateien (ZIP) werden beim Öffnen erkannt (`legacy`) und beim ersten Speichern umgewandelt.
  */
 import * as Y from 'yjs'
 import { invoke } from '@tauri-apps/api/core'
-import { filesOf, linksOf, readTables, tablesOf } from './model'
+import { filesOf } from './model'
+import { fullOps, type Ops } from './tableSync'
 import { getBlob, hasBlob, putBlob, thumbKey } from './blobStore'
 
 export const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 
 export interface GridMeta {
   format: 'grid'
-  formatVersion: 1
+  formatVersion: 2
   docId: string
   createdAt: string
   savedAt?: string
@@ -23,44 +24,8 @@ export interface GridMeta {
 }
 
 export const newMeta = (): GridMeta => ({
-  format: 'grid', formatVersion: 1, docId: crypto.randomUUID(), createdAt: new Date().toISOString(),
+  format: 'grid', formatVersion: 2, docId: crypto.randomUUID(), createdAt: new Date().toISOString(),
 })
-
-// ---------- Abbildung für SQLite ----------
-
-export function projectionOf(doc: Y.Doc) {
-  const tables = readTables(doc)
-  const cells: [string, string, string, string | number][] = []
-  for (const t of tables) {
-    const colIds = new Set(t.columns.map((c) => c.id))
-    const rows: Y.Map<Y.Map<any>> = tablesOf(doc).get(t.id)!.get('rows')
-    for (const rid of t.rowIds) {
-      rows.get(rid)?.forEach((v, col) => {
-        if (colIds.has(col) && (typeof v === 'string' || typeof v === 'number')) cells.push([t.id, rid, col, v])
-      })
-    }
-  }
-  const links: [string, string, string, string, number][] = []
-  linksOf(doc).forEach((v, key) => {
-    const [t, r, c, x] = key.split('|')
-    links.push([t, r, c, x, typeof v === 'number' ? v : 0])
-  })
-  const files: [string, string, string, string, string, number, string][] = []
-  filesOf(doc).forEach((m, key) => {
-    const [t, r, c, h] = key.split('|')
-    files.push([t, r, c, h, m.name, m.size, m.mime])
-  })
-  return {
-    tables: tables.map((t) => ({
-      id: t.id, name: t.name, rows: t.rowIds,
-      columns: t.columns.map((c) => ({
-        id: c.id, name: c.name, type: c.type, target: c.target ?? null, width: c.width ?? null,
-        options: (c.options ?? []).map((o) => ({ id: o.id, name: o.name, color: o.color })),
-      })),
-    })),
-    cells, links, files,
-  }
-}
 
 // ---------- Binärpaket: u32 Länge, JSON, Binärdaten ----------
 
@@ -96,55 +61,80 @@ export function referencedHashes(doc: Y.Doc): Set<string> {
 
 type BlobGetter = (key: string) => Promise<Blob | undefined>
 
-/**
- * Stellt das Speicherpaket zusammen. Nur vom Dokument referenzierte Dateien kommen in die Datei
- * (nicht mehr benutzte entfallen so beim nächsten Speichern). Was `known` schon im Zielarchiv liegt,
- * wird nicht erneut gesendet, sondern dort übernommen.
- */
-export async function buildSaveBundle(doc: Y.Doc, meta: GridMeta, known: Set<string>, get: BlobGetter = getBlob) {
-  const assets: { key: string; len: number; keep?: boolean }[] = []
-  const chunks: Uint8Array[] = []
-  const keys = new Set<string>()
+/** Dateien, die das Dokument braucht und die `known` (schon in der Datei) noch nicht hat, mit ihren Bytes; Unauffindbares entfällt. */
+export async function newAssets(doc: Y.Doc, known: Set<string>, get: BlobGetter = getBlob) {
+  const list: { key: string; bytes: Uint8Array }[] = []
   for (const hash of referencedHashes(doc)) {
     for (const key of assetKeysOf(hash)) {
-      if (known.has(key)) { assets.push({ key, len: 0, keep: true }); keys.add(key); continue }
+      if (known.has(key)) continue
       const blob = await get(blobKeyOf(key))
-      if (!blob) continue // z. B. von einem anderen Gerät, noch nicht heruntergeladen
-      const bytes = new Uint8Array(await blob.arrayBuffer())
-      assets.push({ key, len: bytes.length }); chunks.push(bytes); keys.add(key)
+      if (blob) list.push({ key, bytes: new Uint8Array(await blob.arrayBuffer()) }) // fehlt z. B. noch von einem anderen Gerät
     }
   }
-  const ydoc = Y.encodeStateAsUpdate(doc)
+  return list
+}
+
+/** Alle Asset-Schlüssel, die das Dokument braucht (alles andere darf aus der Datei entfallen). */
+export const neededAssetKeys = (doc: Y.Doc) => [...referencedHashes(doc)].flatMap(assetKeysOf)
+
+export interface SaveOptions {
+  /** Datei neu anlegen (alle Tabellen und Dateien); sonst nur `ops` und die neuen Updates anhängen. */
+  full?: boolean
+  /** Updates für das Protokoll; bei `compact` ein Gesamtzustand, der es ersetzt. */
+  updates: Uint8Array[]
+  compact?: boolean
+  ops?: Ops
+}
+
+/** Stellt das Speicherpaket zusammen. Liefert auch, welche Asset-Schlüssel danach in der Datei liegen. */
+export async function buildSaveBundle(doc: Y.Doc, meta: GridMeta, known: Set<string>, opts: SaveOptions, get: BlobGetter = getBlob) {
+  const assets = await newAssets(doc, opts.full ? new Set() : known, get)
+  const ops: Ops = opts.full ? fullOps(doc) : { ...opts.ops }
+  if (opts.full || opts.compact) ops.pruneAssets = neededAssetKeys(doc) // nicht mehr benutzte Dateien entfallen
   const header = {
     meta: { ...meta, savedAt: new Date().toISOString(), app: 'Grid' },
-    projection: projectionOf(doc),
-    ydocLen: ydoc.length,
-    assets,
+    full: !!opts.full,
+    compact: !!opts.compact,
+    ops,
+    updates: opts.updates.map((u) => u.length),
+    assets: assets.map((a) => ({ key: a.key, len: a.bytes.length })),
   }
-  return { bytes: encodeBundle(header, [ydoc, ...chunks]), keys }
+  const keys = new Set(opts.full ? [] : known)
+  for (const a of assets) keys.add(a.key)
+  return { bytes: encodeBundle(header, [...opts.updates, ...assets.map((a) => a.bytes)]), keys }
 }
 
 const pathHeader = (path: string) => ({ headers: { 'x-path': encodeURIComponent(path) } })
 
-/** Schreibt das Dokument nach `path`. Liefert die Asset-Namen, die jetzt in der Datei liegen. */
-export async function writeGrid(path: string, doc: Y.Doc, meta: GridMeta, known: Set<string>): Promise<Set<string>> {
-  const { bytes, keys } = await buildSaveBundle(doc, meta, known)
-  await invoke('grid_save', bytes, pathHeader(path))
+/** Schreibt das Dokument komplett nach `path` (neue Datei, „Speichern unter“, Umwandlung alter Dateien). Liefert die Asset-Namen in der Datei. */
+export async function writeGrid(path: string, doc: Y.Doc, meta: GridMeta, _known: Set<string> = new Set()): Promise<Set<string>> {
+  const { bytes, keys } = await buildSaveBundle(doc, meta, new Set(), { full: true, updates: [Y.encodeStateAsUpdate(doc)] })
+  await invoke<number>('grid_save', bytes, pathHeader(path))
   return keys
 }
 
-export interface OpenedGrid { doc: Y.Doc; meta: GridMeta; known: Set<string> }
+/** Hängt Änderungen an die vorhandene Datei an. Liefert Asset-Namen in der Datei und die Länge des Protokolls. */
+export async function appendGrid(path: string, doc: Y.Doc, meta: GridMeta, known: Set<string>, opts: SaveOptions) {
+  const { bytes, keys } = await buildSaveBundle(doc, meta, known, opts)
+  const logEntries = await invoke<number>('grid_save', bytes, pathHeader(path))
+  return { keys, logEntries }
+}
+
+export interface OpenedGrid { doc: Y.Doc; meta: GridMeta; known: Set<string>; /** altes ZIP-Format: beim ersten Speichern umwandeln */ legacy: boolean }
 
 /** Liest eine .grid-Datei, legt die Dateien im lokalen Blob-Speicher ab (zur Anzeige) und baut das Dokument auf. */
 export async function readGrid(path: string): Promise<OpenedGrid> {
   const buf = await invoke<ArrayBuffer>('grid_open', new Uint8Array(0), pathHeader(path))
-  const { header, bin } = decodeBundle<{ meta: GridMeta; ydocLen: number; assets: { key: string; len: number }[] }>(buf)
+  const { header, bin } = decodeBundle<{ meta: GridMeta; legacy: boolean; updates: number[]; assets: { key: string; len: number }[] }>(buf)
   const doc = new Y.Doc()
-  Y.applyUpdate(doc, bin.slice(0, header.ydocLen))
+  let at = 0
+  for (const len of header.updates) {
+    Y.applyUpdate(doc, bin.subarray(at, at + len))
+    at += len
+  }
 
   const mimes = new Map<string, string>()
   filesOf(doc).forEach((m, key) => mimes.set(key.split('|')[3], m.mime))
-  let at = header.ydocLen
   const known = new Set<string>()
   for (const a of header.assets) {
     const bytes = bin.slice(at, at + a.len)
@@ -156,7 +146,7 @@ export async function readGrid(path: string): Promise<OpenedGrid> {
       await putBlob(key, new Blob([bytes], { type }))
     }
   }
-  return { doc, meta: header.meta, known }
+  return { doc, meta: header.meta, known, legacy: !!header.legacy }
 }
 
 export const baseName = (path: string) => (path.split(/[\\/]/).pop() ?? path).replace(/\.grid$/i, '')

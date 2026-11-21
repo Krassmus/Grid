@@ -30,7 +30,7 @@ function Single() {
   const busy = useRef(false)
 
   const unsaved = () => new FileSession(++counter.current, new Y.Doc(), null, newMeta(), new Set(), setError)
-  const fromFile = (path: string, o: OpenedGrid) => new FileSession(++counter.current, o.doc, path, o.meta, o.known, setError)
+  const fromFile = (path: string, o: OpenedGrid) => new FileSession(++counter.current, o.doc, path, o.meta, o.known, setError, o.legacy)
   const adopt = (s: FileSession) => { remember(s.path); setSession(s) }
 
   const openPath = async (p: string) => {
