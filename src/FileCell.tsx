@@ -2,7 +2,7 @@ import { FILE } from './columnTypes'
 import { useEffect, useRef, useState } from 'react'
 import * as Y from 'yjs'
 import { addFile, moveFile, removeFile, type CellSlot, type ColumnInfo, type FileRef } from './model'
-import { getBlob, storeFile, thumbKey } from './blobStore'
+import { getBlob, onBlobStored, storeFile, thumbKey } from './blobStore'
 import { ConfirmDialog, Modal } from './Modal'
 import { AnimItem, useAnimatedList } from './animatedList'
 
@@ -17,6 +17,9 @@ const ext = (name: string) => (name.includes('.') ? name.split('.').pop()!.slice
 export function useBlobUrl(keys: string[]): { url: string | null; missing: boolean } {
   const [state, setState] = useState<{ url: string | null; missing: boolean }>({ url: null, missing: false })
   const dep = keys.join('|')
+  const [retry, setRetry] = useState(0)
+  // Fehlt der Blob noch (kommt vielleicht gleich aus der Cloud), bei jedem neuen Blob erneut versuchen.
+  useEffect(() => (state.missing ? onBlobStored(() => setRetry((n) => n + 1)) : undefined), [state.missing])
   useEffect(() => {
     let alive = true
     let url: string | null = null
@@ -28,7 +31,7 @@ export function useBlobUrl(keys: string[]): { url: string | null; missing: boole
       if (alive) setState({ url: null, missing: true })
     })()
     return () => { alive = false; if (url) URL.revokeObjectURL(url) }
-  }, [dep])
+  }, [dep, retry])
   return state
 }
 

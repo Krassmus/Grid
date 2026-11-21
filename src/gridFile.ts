@@ -21,6 +21,8 @@ export interface GridMeta {
   createdAt: string
   savedAt?: string
   app?: string
+  /** Cloud-Anbindung: Adresse des Servers (der Zugangsschlüssel liegt nicht in der Datei). */
+  sync?: { server: string }
 }
 
 export const newMeta = (): GridMeta => ({
@@ -51,7 +53,7 @@ export function decodeBundle<H>(buf: ArrayBuffer | Uint8Array): { header: H; bin
 
 /** Asset-Namen im Archiv: `<hash>` für das Original, `<hash>.thumb` für das Vorschaubild. */
 export const assetKeysOf = (hash: string) => [hash, `${hash}.thumb`]
-const blobKeyOf = (assetKey: string) => (assetKey.endsWith('.thumb') ? thumbKey(assetKey.slice(0, -6)) : assetKey)
+export const blobKeyOf = (assetKey: string) => (assetKey.endsWith('.thumb') ? thumbKey(assetKey.slice(0, -6)) : assetKey)
 
 export function referencedHashes(doc: Y.Doc): Set<string> {
   const out = new Set<string>()

@@ -31,6 +31,7 @@ import { aggLabel, allowedAggs, defaultAgg } from './aggregate'
 import { sortedRowIds, type SortDir } from './sorting'
 import { CHECKBOX, DATE, FILE, ROLLUP, NUMBER, RELATION, TEXT } from './columnTypes'
 import { RichPreview, RichTextDialog } from './richText'
+import { SyncDialog, syncLabel, type SyncControl } from './SyncDialog'
 import { AnimItem, useAnimatedList } from './animatedList'
 import { ConfirmDialog, Modal } from './Modal'
 import { TableDialog } from './TableDialog'
@@ -452,6 +453,20 @@ function TextInput({ doc, table, rowId, col, value }: { doc: Y.Doc; table: strin
   )
 }
 
+/** Wolke unten rechts: zeigt den Stand der Synchronisation, ein Klick öffnet die Einstellungen. */
+function SyncButton(props: { control: SyncControl; onClick: () => void }) {
+  const { control } = props
+  const status = control.server ? control.state?.status ?? 'connecting' : 'none'
+  return (
+    <button type="button" className={`sync-btn ${status}`} onClick={props.onClick} title={syncLabel(control)} aria-label={`Cloud: ${syncLabel(control)}`}>
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M7 18a4 4 0 0 1-.6-7.96A5.5 5.5 0 0 1 17 9.5a4.25 4.25 0 0 1 .5 8.5H7z" />
+      </svg>
+      {status !== 'none' && <i className="dot" />}
+    </button>
+  )
+}
+
 // ---------- Pane ----------
 
 export function ClientPane(props: {
@@ -459,6 +474,8 @@ export function ClientPane(props: {
   doc: Y.Doc
   /** IndexedDB-Name für den lokalen Zwischenspeicher; `null` = das Dokument liegt in einer Datei. Standard: nach Titel. */
   persist?: string | null
+  /** Cloud-Anbindung des Dokuments (fehlt in der Simulation). */
+  sync?: SyncControl
   online?: boolean
   onToggle?: () => void
 }) {
@@ -493,6 +510,7 @@ export function ClientPane(props: {
   const [deletingView, setDeletingView] = useState<string | null>(null)
   const [mapDialog, setMapDialog] = useState<{ mode: 'new' } | { mode: 'edit'; id: string } | null>(null)
   const [deletingMap, setDeletingMap] = useState<string | null>(null)
+  const [syncOpen, setSyncOpen] = useState(false)
   const [mapRecord, setMapRecord] = useState<{ tableId: string; rowId: string } | null>(null) // auf der Karte angeklickte Zeile
 
   const [synced, setSynced] = useState(false)
@@ -835,6 +853,7 @@ export function ClientPane(props: {
               onKeyDown={(e) => { if (e.key === 'Escape') { setSearches((s) => ({ ...s, [table.id]: '' })); e.currentTarget.blur() } }} />
             {matching && <small>{visibleIds.length} von {table.rowIds.length}</small>}
           </span>
+          {props.sync && <SyncButton control={props.sync} onClick={() => setSyncOpen(true)} />}
         </div>
       )}
       {view && (
@@ -843,6 +862,8 @@ export function ClientPane(props: {
           <button type="button" onClick={() => setViewDialog({ mode: 'edit', id: view.id })}>Bearbeiten …</button>
         </div>
       )}
+
+      {syncOpen && props.sync && <SyncDialog control={props.sync} onClose={() => setSyncOpen(false)} />}
 
       {editing && (() => {
         const col = editing.kind === 'column' ? table?.columns.find((c) => c.id === editing.id) : undefined

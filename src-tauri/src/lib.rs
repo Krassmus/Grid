@@ -75,6 +75,7 @@ fn build_menu<M: tauri::Manager<tauri::Wry>>(app: &M, recent: &[String], theme: 
   let file = SubmenuBuilder::new(app, "Ablage")
     .item(&item("new", "Neu …", "CmdOrCtrl+N")?)
     .item(&item("open", "Öffnen …", "CmdOrCtrl+O")?)
+    .item(&MenuItemBuilder::with_id("open_cloud", "Aus Cloud öffnen …").build(app)?)
     .item(&recents.build()?)
     .separator()
     .item(&item("save", "Sichern", "CmdOrCtrl+S")?)

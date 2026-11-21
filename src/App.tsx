@@ -7,6 +7,8 @@ import { invoke } from '@tauri-apps/api/core'
 import { baseName, isTauri, newMeta, readGrid, writeGrid, type OpenedGrid } from './gridFile'
 import { FileSession } from './fileSession'
 import { isThemeChoice, setTheme } from './theme'
+import { CloudOpenDialog, type SyncControl } from './SyncDialog'
+import { rememberToken, type CloudDoc, type SyncState } from './syncClient'
 import { forgetRecent, noteRecent, readRecent, writeRecent } from './recentFiles'
 
 /** Normalfall: ein Dokument, ein Client. Mit ?sim in der URL: zwei simulierte Clients zum Testen von Merges. */
@@ -29,6 +31,9 @@ function Single() {
   const [error, setError] = useState<string | null>(null)
   const counter = useRef(0)
   const busy = useRef(false)
+  const [syncState, setSyncState] = useState<SyncState | null>(null)
+  const [, bump] = useState(0)
+  const [cloudOpen, setCloudOpen] = useState(false)
 
   const unsaved = () => new FileSession(++counter.current, new Y.Doc(), null, newMeta(), new Set(), setError)
   const fromFile = (path: string, o: OpenedGrid) => new FileSession(++counter.current, o.doc, path, o.meta, o.known, setError, o.legacy)
@@ -40,6 +45,22 @@ function Single() {
       forgetRecent(p) // Datei fehlt oder ist kaputt: nicht weiter im Menü anbieten
       setError(`„${baseName(p)}“ konnte nicht geöffnet werden: ${e}`)
     }
+  }
+
+  /** Dokument aus der Cloud: Speicherort wählen, leere Datei mit der Anbindung anlegen; der Abgleich füllt sie. */
+  const openFromCloud = async (d: CloudDoc, server: string, token: string) => {
+    setCloudOpen(false)
+    const dialog = await import('@tauri-apps/plugin-dialog')
+    const chosen = await dialog.save({ defaultPath: `${d.name || 'Cloud-Dokument'}.grid`, filters: FILTERS })
+    if (!chosen) return
+    const p = withExt(chosen)
+    await current.current?.flush()
+    rememberToken(server, token)
+    const doc = new Y.Doc(), meta = { ...newMeta(), docId: d.id, sync: { server } }
+    try {
+      const known = await writeGrid(p, doc, meta, new Set())
+      adopt(new FileSession(++counter.current, doc, p, meta, known, setError))
+    } catch (e) { setError(`Anlegen fehlgeschlagen: ${e}`) }
   }
 
   // Beim Start das zuletzt geöffnete Dokument laden.
@@ -65,6 +86,12 @@ function Single() {
   }, [])
 
   useEffect(() => session?.attach(), [session])
+  useEffect(() => {
+    if (!session) return
+    session.onSyncState = setSyncState
+    setSyncState(session.syncState)
+    return () => { session.onSyncState = null }
+  }, [session])
   useEffect(() => { if (session) setWindowTitle(session.path ? baseName(session.path) : UNSAVED_TITLE) }, [session])
 
   // Befehle der Menüleiste (Rust sendet „menu“) und Fenster schließen: erst fertig speichern.
@@ -114,7 +141,7 @@ function Single() {
         await cur.flush()
       }
 
-      const actions: Record<string, () => Promise<void>> = { open, new: create, save, save_as: saveAs }
+      const actions: Record<string, () => Promise<void>> = { open, new: create, save, save_as: saveAs, open_cloud: async () => setCloudOpen(true) }
       const unlisten = await listen<string>('menu', (e) => {
         if (e.payload === 'clear_recent') { writeRecent([]); return }
         const theme = /^theme:(.+)$/.exec(e.payload)
@@ -141,10 +168,17 @@ function Single() {
   }, [])
 
   if (!session) return null
+  const control: SyncControl = {
+    state: syncState,
+    server: session.meta.sync?.server ?? null,
+    connect: (server, token) => { session.connect(server, token); bump((n) => n + 1) },
+    disconnect: () => { session.disconnect(); bump((n) => n + 1) },
+  }
   return (
     <>
       <ClientPane key={session.key} title={UNSAVED_TITLE} doc={session.doc}
-        persist={session.path ? null : `grid-proto-${UNSAVED_TITLE}`} />
+        persist={session.path ? null : `grid-proto-${UNSAVED_TITLE}`} sync={control} />
+      {cloudOpen && <CloudOpenDialog onOpen={(d, server, token) => void openFromCloud(d, server, token)} onClose={() => setCloudOpen(false)} />}
       {error && <div className="file-error" role="alert">{error}<button type="button" onClick={() => setError(null)}>✕</button></div>}
     </>
   )

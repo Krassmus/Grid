@@ -27,7 +27,12 @@ async function run<T>(mode: IDBTransactionMode, fn: (s: IDBObjectStore) => IDBRe
   })
 }
 
-export const putBlob = (key: string, blob: Blob) => run('readwrite', (s) => s.put(blob, key)).then(() => undefined)
+const listeners = new Set<() => void>()
+/** Meldet, wenn irgendein Blob neu gespeichert wurde (z. B. aus der Cloud nachgeladen); liefert die Abmeldung. */
+export const onBlobStored = (fn: () => void) => { listeners.add(fn); return () => { listeners.delete(fn) } }
+
+export const putBlob = (key: string, blob: Blob) =>
+  run('readwrite', (s) => s.put(blob, key)).then(() => { listeners.forEach((f) => f()) })
 /** Noch laufende Schreibvorgänge (Hash -> Promise): Leser warten darauf, statt "fehlt" zu melden. */
 const pending = new Map<string, Promise<unknown>>()
 

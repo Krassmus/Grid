@@ -508,3 +508,22 @@ body.tile-dragging.tile-copy, body.tile-dragging.tile-copy * { cursor: copy !imp
 .pick-none { flex: 1; min-width: 0; box-sizing: border-box; padding: 12px; border: 1px dashed var(--c-b9c4ca); border-radius: 10px; background: var(--c-ffffff); color: var(--c-555566); }
 .pick-item:hover .pick-none { border-color: #0a84ff; }
 .pick-item.on .pick-none { border-color: #1456c8; border-style: solid; }
+
+/* Cloud-Synchronisation */
+.addrow-bar .sync-btn { margin-left: auto; position: relative; display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 30px; padding: 0; border: none; background: none; border-radius: 8px; color: var(--c-7b8890); cursor: pointer; }
+.addrow-bar .sync-btn:hover { background: var(--c-e9edef); color: var(--c-3b4a52); }
+.sync-btn .dot, .sync-status .dot { width: 8px; height: 8px; border-radius: 50%; background: #ff9f0a; display: inline-block; }
+.sync-btn .dot { position: absolute; right: 4px; bottom: 4px; border: 2px solid var(--c-f4f7f8); box-sizing: content-box; }
+.sync-btn.online .dot, .sync-status.online .dot { background: #1a7f37; }
+.sync-btn.denied .dot, .sync-status.denied .dot { background: #c0392b; }
+.sync-btn.online { color: var(--c-3b4a52); }
+.sync-dialog { min-width: 380px; }
+.sync-field { display: flex; flex-direction: column; gap: 4px; margin: 10px 0; font-size: 13px; color: var(--c-666677); }
+.sync-field input { padding: 8px 10px; border: 1px solid var(--c-d5dce0); border-radius: 8px; background: var(--c-ffffff); font-size: 14px; color: inherit; }
+.sync-status { display: flex; align-items: center; gap: 8px; font-weight: 500; margin: 6px 0 2px; }
+.sync-server { margin: 0 0 8px; color: var(--c-666677); font-size: 13px; word-break: break-all; }
+.sync-error { color: #c0392b; font-size: 13px; margin: 6px 0; }
+.cloud-docs { list-style: none; margin: 10px 0; padding: 0; max-height: 280px; overflow: auto; display: flex; flex-direction: column; gap: 6px; }
+.cloud-docs button { width: 100%; display: flex; justify-content: space-between; align-items: baseline; gap: 16px; padding: 9px 12px; border: 1px solid var(--c-d5dce0); border-radius: 8px; background: var(--c-ffffff); cursor: pointer; text-align: left; color: inherit; font: inherit; }
+.cloud-docs button:hover { border-color: var(--c-0a58ca); }
+.cloud-docs small { color: var(--c-666677); white-space: nowrap; }
