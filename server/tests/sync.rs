@@ -204,3 +204,126 @@ async fn state_survives_restart_and_blobs_work() {
     let got = http("GET", &addr, &path, Some(&tok), b"").await;
     assert!(got.0.contains("200") && got.1 == "hello");
 }
+
+// ---------- Mitglieder: Admin-Protokoll, Anklopfen, Entfernen ----------
+
+/// Baut signierte Protokolleinträge für ein Dokument (Verkettung wird mitgeführt).
+struct Chain { seq: u64, prev: String }
+impl Chain {
+    fn new() -> Chain { Chain { seq: 1, prev: String::new() } }
+    fn entry(&self, signer: &Acct, kind: &str, subject: &Acct, role: &str, name: &str) -> (serde_json::Value, String) {
+        let time = 1_700_000_000i64;
+        let text = ["grid-admin-v1", DOC, &self.seq.to_string(), &self.prev, kind, &signer.id, &subject.id, &pub_hex(subject), role, name, &time.to_string()].join("\n");
+        let sig: String = signer.key.sign(text.as_bytes()).to_bytes().iter().map(|b| format!("{b:02x}")).collect();
+        let hash = {
+            use sha2::{Digest, Sha256};
+            Sha256::digest(format!("{text}\n{sig}")).iter().map(|b| format!("{b:02x}")).collect::<String>()
+        };
+        let v = serde_json::json!({ "v": 1, "doc": DOC, "seq": self.seq, "prev": self.prev, "type": kind, "actor": signer.id,
+            "subject": subject.id, "subjectPub": pub_hex(subject), "role": role, "name": name, "time": time, "sig": sig });
+        (v, hash)
+    }
+    fn accept(&mut self, hash: String) { self.seq += 1; self.prev = hash; }
+}
+
+fn status(r: &(String, String)) -> u16 { r.0.split(' ').nth(1).unwrap().parse().unwrap() }
+async fn post_entry(addr: &str, tok: &str, e: &serde_json::Value) -> (String, String) {
+    http("POST", addr, &format!("/docs/{DOC}/admin"), Some(tok), e.to_string().as_bytes()).await
+}
+async fn get_members(addr: &str, tok: &str) -> (u16, serde_json::Value) {
+    let r = http("GET", addr, &format!("/docs/{DOC}/members"), Some(tok), b"").await;
+    (status(&r), serde_json::from_str(&r.1).unwrap_or(serde_json::Value::Null))
+}
+
+#[tokio::test]
+async fn invite_accept_and_remove_members() {
+    let dir = tmp("members");
+    let addr = serve(&dir, true).await;
+    let (a, b, c) = (acct(1), acct(2), acct(3));
+    let (ta, tb, tc) = (token(&addr, &a).await, token(&addr, &b).await, token(&addr, &c).await);
+    let mut chain = Chain::new();
+
+    // A legt das Dokument an und gründet das Protokoll
+    let doc = Doc::new();
+    join(&addr, &ta, &doc).await.unwrap();
+    let (g, h) = chain.entry(&a, "genesis", &a, "admin", "Anna");
+    assert_eq!(status(&post_entry(&addr, &ta, &g).await), 204);
+    chain.accept(h);
+    assert_eq!(get_members(&addr, &ta).await.1["role"], "admin");
+
+    // B kennt das Dokument nicht: weder lesen noch Protokoll fälschen
+    assert_eq!(get_members(&addr, &tb).await.0, 403);
+    let (forged, _) = chain.entry(&b, "set", &b, "admin", "Ben");
+    assert_eq!(status(&post_entry(&addr, &tb, &forged).await), 400, "Nur Admins dürfen das");
+
+    // B klopft an, A sieht die Anfrage mit Namen und Schlüssel
+    let r = http("POST", &addr, &format!("/docs/{DOC}/join"), Some(&tb), br#"{"name":"Ben"}"#).await;
+    assert_eq!(status(&r), 202);
+    assert!(join(&addr, &tb, &Doc::new()).await.unwrap_err().contains("requested"), "B wartet auf die Entscheidung");
+    let (_, m) = get_members(&addr, &ta).await;
+    assert_eq!(m["requests"][0]["account"], b.id.as_str());
+    assert_eq!(m["requests"][0]["pub"], pub_hex(&b).as_str());
+    // Mitglieder sehen keine Anfragen, und B als Wartender noch nichts
+    assert_eq!(get_members(&addr, &tb).await.0, 403);
+
+    // A nimmt B auf
+    let mut wb_doc = Doc::new();
+    let (set, h) = chain.entry(&a, "set", &b, "member", "Ben");
+    assert_eq!(status(&post_entry(&addr, &ta, &set).await), 204);
+    chain.accept(h);
+    assert_eq!(get_members(&addr, &ta).await.1["requests"].as_array().unwrap().len(), 0);
+    let mut wb = join(&addr, &tb, &wb_doc).await.unwrap();
+    assert_eq!(get_members(&addr, &tb).await.1["role"], "member");
+    // ein Mitglied darf nichts ändern
+    let (try_set, _) = chain.entry(&b, "set", &c, "member", "Cora");
+    assert_eq!(status(&post_entry(&addr, &tb, &try_set).await), 400);
+    // veraltete Nummer: abgelehnt
+    let (old, _) = Chain::new().entry(&a, "set", &c, "member", "Cora");
+    assert_eq!(status(&post_entry(&addr, &ta, &old).await), 400);
+
+    // C klopft an und wird abgelehnt
+    http("POST", &addr, &format!("/docs/{DOC}/join"), Some(&tc), br#"{"name":"Cora"}"#).await;
+    assert_eq!(status(&http("DELETE", &addr, &format!("/docs/{DOC}/join/{}", c.id), Some(&tb), b"").await), 403, "nur Admins");
+    assert_eq!(status(&http("DELETE", &addr, &format!("/docs/{DOC}/join/{}", c.id), Some(&ta), b"").await), 204);
+    assert!(join(&addr, &tc, &Doc::new()).await.unwrap_err().contains("forbidden"));
+
+    // A entfernt B: die laufende Verbindung wird getrennt, neue Zugriffe scheitern
+    let (rm, h) = chain.entry(&a, "remove", &b, "member", "");
+    assert_eq!(status(&post_entry(&addr, &ta, &rm).await), 204);
+    chain.accept(h);
+    let mut closed = false;
+    for _ in 0..10 {
+        match tokio::time::timeout(std::time::Duration::from_millis(300), wb.next()).await {
+            Ok(None) | Ok(Some(Err(_))) | Ok(Some(Ok(Message::Close(_)))) => { closed = true; break }
+            _ => {}
+        }
+    }
+    assert!(closed, "B wurde nicht getrennt");
+    wb_doc = Doc::new();
+    assert!(join(&addr, &tb, &wb_doc).await.unwrap_err().contains("forbidden"));
+    assert_eq!(get_members(&addr, &tb).await.0, 403);
+    // der letzte Admin kann sich nicht selbst entfernen
+    let (last, _) = chain.entry(&a, "remove", &a, "admin", "");
+    assert_eq!(status(&post_entry(&addr, &ta, &last).await), 400);
+}
+
+#[tokio::test]
+async fn members_survive_restart() {
+    let dir = tmp("members-restart");
+    let (a, b) = (acct(1), acct(2));
+    let mut chain = Chain::new();
+    {
+        let addr = serve(&dir, true).await;
+        let ta = token(&addr, &a).await;
+        join(&addr, &ta, &Doc::new()).await.unwrap();
+        let (g, h) = chain.entry(&a, "genesis", &a, "admin", "Anna");
+        post_entry(&addr, &ta, &g).await;
+        chain.accept(h);
+        let (s, _) = chain.entry(&a, "set", &b, "member", "Ben");
+        assert_eq!(status(&post_entry(&addr, &ta, &s).await), 204);
+    }
+    let addr = serve(&dir, true).await;
+    let tb = token(&addr, &b).await;
+    assert_eq!(get_members(&addr, &tb).await.1["role"], "member");
+    assert!(join(&addr, &tb, &Doc::new()).await.is_ok());
+}

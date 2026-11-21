@@ -1,6 +1,6 @@
 # Grid: Synchronisation, Konten und Mitglieder
 
-Stand: Phase 1 (Sync) und Phase 2 (Konten) sind gebaut; Phase 3 bis 5 sind Entwurf. Dieses Dokument ist die gemeinsame Grundlage; Abweichungen im Code gehören hier nachgetragen.
+Stand: Phase 1 (Sync), Phase 2 (Konten) und Phase 3 (Mitglieder) sind gebaut; Phase 4 und 5 sind Entwurf. Dieses Dokument ist die gemeinsame Grundlage; Abweichungen im Code gehören hier nachgetragen.
 
 ## Ziele
 
@@ -43,12 +43,32 @@ Der Zugriff auf Dokumente richtet sich nach dem Konto (Abschnitt 2): Ein Dokumen
 - Zweites Gerät: „Sichern oder übertragen“ erzeugt das Konto als Text, mit einem Passwort verschlüsselt (PBKDF2-SHA-256, AES-GCM); auf dem anderen Gerät wird er eingefügt. Gerätschlüssel mit Zertifikaten (verlorene Geräte sperren) kommen später; das Format ist dafür offen.
 - townwork.eu beglaubigt später öffentliche Schlüssel (E-Mail bestätigt, Abo-Status). Intranet-Server dürfen dem vertrauen oder eigene Freigabe nutzen.
 
-### 3. Besitz und Mitglieder (Phase 3)
+### 3. Besitz und Mitglieder (Phase 3, gebaut)
 
-- Rollen und Mitglieder stehen **nicht** im Yjs-Dokument (jeder Schreibende könnte sie ändern), sondern in einem **Admin-Protokoll**: Kette signierter Einträge. Eintrag 0 gründet das Dokument (Schlüssel des Erstellers = erster Admin), danach „Mitglied hinzu/entfernt“, „Admin hinzu/entfernt“ – jeweils von einem Admin signiert. Server und Clients prüfen die Kette.
-- Das Dokument trägt im Kopf: `docId` (UUID), Server-Adresse, Fingerabdruck des Server-Schlüssels.
-- Einladen online: per Konto. Im Intranet: Link mit Dokument, Server und Admin-Fingerabdruck; die Person „klopft an“ mit ihrem öffentlichen Schlüssel, der Admin sieht einen Prüfcode (wenige Wörter) zum Abgleich im Gespräch und lässt zu (= signierter Eintrag).
-- Feinere Rechte (Lesen/Schreiben, Gruppen, mehrere Admins) kommen später als weitere Eintragstypen.
+**Admin-Protokoll.** Mitglieder und Admins stehen **nicht** im Yjs-Dokument (jeder Schreibende könnte sie ändern), sondern in einer Kette signierter Einträge, je Dokument. Ein Eintrag:
+`{v, doc, seq, prev, type, actor, subject, subjectPub, role, name, time, sig}`
+
+- `type`: `genesis` (Gründung: Ersteller = erster Admin, `actor == subject`), `set` (Mitglied hinzufügen oder Rolle/Namen ändern), `remove`.
+- `role`: `admin` oder `member`. Beide lesen und schreiben; verwalten dürfen nur Admins. Feinere Rechte kommen später als weitere Eintragstypen.
+- Unterschrieben wird (Ed25519 über UTF-8) der Text `grid-admin-v1\n<doc>\n<seq>\n<prev>\n<type>\n<actor>\n<subject>\n<subjectPub>\n<role>\n<name>\n<time>`; `prev` ist der Hash (SHA-256, hex) von Text, Zeilenumbruch und Signatur des vorigen Eintrags (leer beim ersten).
+- Regeln: Nummern lückenlos, Verkettung stimmt, Unterschrift vom Schlüssel, der für `actor` in der Kette steht (bei `genesis` der eigene); `actor` ist Admin; der Schlüssel eines Mitglieds lässt sich nicht austauschen; es bleibt mindestens ein Admin.
+- Server (`server/src/adminlog.rs`) und Client (`src/adminLog.ts`) prüfen mit denselben Regeln; ein gemeinsamer Testvektor stellt sicher, dass beide dieselbe Signatur und denselben Hash erzeugen.
+- Der Server lässt nur Mitglieder an Inhalte (WebSocket, Dateien) und trennt entfernte Mitglieder sofort. Dokumente aus der Zeit vor dem Protokoll gehören dem ersten Konto; dessen Client legt beim nächsten Verbinden automatisch den Anfang der Kette an.
+
+**Endpunkte** (alle mit Sitzungsschlüssel):
+
+| Aufruf | Zweck |
+|---|---|
+| `GET /docs/<doc>/members` | Rolle des Aufrufers, Protokoll, für Admins die offenen Beitrittsanfragen |
+| `POST /docs/<doc>/admin` | neuer Protokolleintrag (`409`, wenn zwischendurch jemand anderes etwas eingetragen hat) |
+| `POST /docs/<doc>/join` `{name}` | „Anklopfen“: Beitrittsanfrage (`202`) |
+| `DELETE /docs/<doc>/join/<Konto>` | Admin lehnt eine Anfrage ab |
+
+Über die WebSocket-Verbindung kommt `{"t":"members"}`, wenn sich Mitglieder oder Anfragen geändert haben. Ein angeklopftes, noch nicht zugelassenes Konto bekommt `denied` mit `code: "requested"` und versucht es alle 10 Sekunden erneut.
+
+**Einladen.** Ein Admin erzeugt in Grid einen Einladungstext `grid-invite:1:<base64url(JSON)>` mit Server, Dokument-ID, Name und seinem Fingerabdruck (kein Geheimnis darin). Die Person fügt ihn unter „Ablage → Einladung annehmen …“ ein, gibt ihren Namen an und klopft an. Der Admin sieht die Anfrage (Name und **Prüfnummer** = Fingerabdruck des Schlüssels, in der Wolke mit Zähler) und vergleicht die Prüfnummer mit der, die die Person in ihrem Dialog sieht (z. B. am Telefon). Erst dann „Zulassen“, was einen signierten `set`-Eintrag erzeugt. Weil die Person ihre Prüfnummer lokal aus ihrem eigenen Schlüssel ableitet, fällt auch ein untergeschobener Schlüssel auf.
+
+Voraussetzung: Das Konto der Person ist auf dem Server freigegeben (bei offener Registrierung automatisch). Name und Prüfnummer-Wörter statt Hex sind denkbare Verbesserungen.
 
 ### 4. Cloud townwork.eu (Phase 4)
 

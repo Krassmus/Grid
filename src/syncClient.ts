@@ -10,7 +10,8 @@ import { filesOf } from './model'
 import { getIdentity, onIdentityChanged, signMessage } from './identity'
 
 export type SyncStatus = 'connecting' | 'online' | 'offline' | 'pending' | 'denied'
-export interface SyncState { status: SyncStatus; reason?: string }
+/** `pending` kann zweierlei heißen: `account` (Konto noch nicht freigegeben) oder `join` (ein Admin muss die Aufnahme ins Dokument bestätigen). */
+export interface SyncState { status: SyncStatus; reason?: string; kind?: 'account' | 'join' }
 
 const REMOTE = Symbol('remote')
 const STEP1 = 0
@@ -64,7 +65,7 @@ export async function sessionToken(server: string, force = false): Promise<strin
 }
 
 /** `fetch` mit Sitzungsschlüssel; bei „abgelaufen“ einmal neu anmelden. */
-async function authedFetch(server: string, path: string, init: RequestInit = {}): Promise<Response> {
+export async function authedFetch(server: string, path: string, init: RequestInit = {}): Promise<Response> {
   const go = async (force: boolean) => fetch(`${normalizeServer(server)}${path}`, {
     ...init, headers: { ...init.headers, Authorization: `Bearer ${await sessionToken(server, force)}` },
   })
@@ -96,6 +97,8 @@ export class SyncConnection {
     private doc: Y.Doc,
     private cfg: { server: string; docId: string; name: string },
     private onState: (s: SyncState) => void,
+    /** Mitglieder oder Beitrittsanfragen könnten sich geändert haben (auch gleich nach dem Verbinden). */
+    private onNotice: () => void = () => {},
   ) {
     doc.on('update', this.onLocal)
     filesOf(doc).observe(this.onFilesChanged)
@@ -136,7 +139,7 @@ export class SyncConnection {
     } catch (e) {
       if (this.stopped) return
       if (e instanceof AuthError && e.kind === 'pending') {
-        this.onState({ status: 'pending', reason: e.message })
+        this.onState({ status: 'pending', kind: 'account', reason: e.message })
         this.retry = setTimeout(() => void this.open(), 10_000) // der Betreiber gibt vielleicht gleich frei
       } else if (e instanceof AuthError && e.kind === 'invalid') {
         this.stopped = true
@@ -158,12 +161,20 @@ export class SyncConnection {
           this.attempt = 0
           this.expired = 0
           this.onState({ status: 'online' })
+          this.onNotice()
           ws.send(frame(STEP1, Y.encodeStateVector(this.doc)))
           void this.syncBlobs()
+        } else if (m.t === 'members') {
+          this.onNotice()
         } else if (m.t === 'denied') {
           this.ws = null
           ws.close()
           if (m.code === 'expired' && this.expired++ < 2) { this.relogin = true; void this.open(); return } // Sitzung abgelaufen: neu anmelden
+          if (m.code === 'requested') { // angeklopft: ein Admin muss zustimmen
+            this.onState({ status: 'pending', kind: 'join', reason: m.reason })
+            this.retry = setTimeout(() => void this.open(), 10_000)
+            return
+          }
           this.stopped = true // ohne Berechtigung hilft Wiederholen nicht
           this.onState({ status: 'denied', reason: m.reason })
         }

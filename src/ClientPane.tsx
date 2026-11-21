@@ -457,12 +457,15 @@ function TextInput({ doc, table, rowId, col, value }: { doc: Y.Doc; table: strin
 function SyncButton(props: { control: SyncControl; onClick: () => void }) {
   const { control } = props
   const status = control.server ? control.state?.status ?? 'connecting' : 'none'
+  const requests = control.members?.requests.length ?? 0
+  const title = requests > 0 ? `${syncLabel(control)} – ${requests} Beitrittsanfrage${requests === 1 ? '' : 'n'}` : syncLabel(control)
   return (
-    <button type="button" className={`sync-btn ${status}`} onClick={props.onClick} title={syncLabel(control)} aria-label={`Cloud: ${syncLabel(control)}`}>
+    <button type="button" className={`sync-btn ${status}${requests > 0 ? ' requests' : ''}`} onClick={props.onClick} title={title} aria-label={`Cloud: ${title}`}>
       <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
         <path d="M7 18a4 4 0 0 1-.6-7.96A5.5 5.5 0 0 1 17 9.5a4.25 4.25 0 0 1 .5 8.5H7z" />
       </svg>
       {status !== 'none' && <i className="dot" />}
+      {requests > 0 && <b className="req-badge">{requests}</b>}
     </button>
   )
 }

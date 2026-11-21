@@ -89,6 +89,13 @@ export function fingerprint(publicKeyHex: string): string {
   return h.match(/.{4}/g)!.join('-')
 }
 
+// ---------- Anzeigename ----------
+
+const NAME_KEY = 'grid-account-name'
+/** Name, unter dem andere dich in Dokumenten sehen (nur auf diesem Gerät gespeichert, geht in Beitrittsanfragen ein). */
+export const getAccountName = () => { try { return localStorage.getItem(NAME_KEY) ?? '' } catch { return '' } }
+export const setAccountName = (n: string) => { try { localStorage.setItem(NAME_KEY, n.replace(/[\r\n]/g, ' ').trim().slice(0, 60)) } catch { /* egal */ } }
+
 // ---------- Übertragen auf ein anderes Gerät ----------
 
 const ITER = 600_000

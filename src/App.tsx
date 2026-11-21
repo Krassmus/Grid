@@ -8,6 +8,9 @@ import { baseName, isTauri, newMeta, readGrid, writeGrid, type OpenedGrid } from
 import { FileSession } from './fileSession'
 import { isThemeChoice, setTheme } from './theme'
 import { CloudOpenDialog, type SyncControl } from './SyncDialog'
+import { JoinDialog } from './MembersDialog'
+import type { MembersInfo } from './members'
+import type { Invite } from './invite'
 import { type CloudDoc, type SyncState } from './syncClient'
 import { forgetRecent, noteRecent, readRecent, writeRecent } from './recentFiles'
 
@@ -34,6 +37,8 @@ function Single() {
   const [syncState, setSyncState] = useState<SyncState | null>(null)
   const [, bump] = useState(0)
   const [cloudOpen, setCloudOpen] = useState(false)
+  const [joinOpen, setJoinOpen] = useState(false)
+  const [members, setMembers] = useState<MembersInfo | null>(null)
 
   const unsaved = () => new FileSession(++counter.current, new Y.Doc(), null, newMeta(), new Set(), setError)
   const fromFile = (path: string, o: OpenedGrid) => new FileSession(++counter.current, o.doc, path, o.meta, o.known, setError, o.legacy)
@@ -88,8 +93,10 @@ function Single() {
   useEffect(() => {
     if (!session) return
     session.onSyncState = setSyncState
+    session.onMembers = setMembers
     setSyncState(session.syncState)
-    return () => { session.onSyncState = null }
+    setMembers(session.members)
+    return () => { session.onSyncState = null; session.onMembers = null }
   }, [session])
   useEffect(() => { if (session) setWindowTitle(session.path ? baseName(session.path) : UNSAVED_TITLE) }, [session])
 
@@ -140,7 +147,7 @@ function Single() {
         await cur.flush()
       }
 
-      const actions: Record<string, () => Promise<void>> = { open, new: create, save, save_as: saveAs, open_cloud: async () => setCloudOpen(true) }
+      const actions: Record<string, () => Promise<void>> = { open, new: create, save, save_as: saveAs, open_cloud: async () => setCloudOpen(true), join: async () => setJoinOpen(true) }
       const unlisten = await listen<string>('menu', (e) => {
         if (e.payload === 'clear_recent') { writeRecent([]); return }
         const theme = /^theme:(.+)$/.exec(e.payload)
@@ -169,6 +176,8 @@ function Single() {
   if (!session) return null
   const control: SyncControl = {
     state: syncState,
+    members,
+    accept: session.accept, reject: session.reject, remove: session.remove, changeRole: session.changeRole, invite: () => session.invite(),
     server: session.meta.sync?.server ?? null,
     connect: (server) => { session.connect(server); bump((n) => n + 1) },
     disconnect: () => { session.disconnect(); bump((n) => n + 1) },
@@ -177,6 +186,7 @@ function Single() {
     <>
       <ClientPane key={session.key} title={UNSAVED_TITLE} doc={session.doc}
         persist={session.path ? null : `grid-proto-${UNSAVED_TITLE}`} sync={control} />
+      {joinOpen && <JoinDialog onClose={() => setJoinOpen(false)} onJoined={(i: Invite) => { setJoinOpen(false); void openFromCloud({ id: i.doc, name: i.name, updated: 0 }, i.server) }} />}
       {cloudOpen && <CloudOpenDialog onOpen={(d, server) => void openFromCloud(d, server)} onClose={() => setCloudOpen(false)} />}
       {error && <div className="file-error" role="alert">{error}<button type="button" onClick={() => setError(null)}>✕</button></div>}
     </>

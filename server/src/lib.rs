@@ -1,6 +1,7 @@
 //! Grid-Sync-Server: Yjs-Dokumente über WebSocket abgleichen, Protokoll und Dateien speichern.
 //! Protokoll und Hintergrund: docs/SYNC.md
 
+mod adminlog;
 mod auth;
 pub mod store;
 
@@ -37,7 +38,15 @@ const MAX_WS_MESSAGE: usize = 128 * 1024 * 1024;
 /// Ein Dokument im Speicher: Yjs-Zustand und Verteiler an die verbundenen Clients.
 struct Room {
     doc: Mutex<Doc>,
-    tx: broadcast::Sender<(u64, Arc<Vec<u8>>)>,
+    tx: broadcast::Sender<Event>,
+}
+
+#[derive(Clone)]
+enum Event {
+    /// Yjs-Update von Client `from`
+    Update(u64, Arc<Vec<u8>>),
+    /// Mitglieder oder Beitrittsanfragen haben sich geändert: Berechtigung neu prüfen, Clients benachrichtigen
+    Members,
 }
 
 pub struct AppState {
@@ -46,6 +55,8 @@ pub struct AppState {
     /// Neue Konten werden gleich freigegeben (z. B. im eigenen Netz); sonst warten sie auf `accounts approve`.
     open_registration: bool,
     rooms: Mutex<HashMap<String, Arc<Room>>>,
+    /// Abgespielte Admin-Protokolle (fällt bei jedem neuen Eintrag weg)
+    members: Mutex<HashMap<String, Arc<adminlog::State>>>,
     next_client: Mutex<u64>,
 }
 
@@ -58,6 +69,7 @@ pub fn app(data: &std::path::Path, open_registration: bool) -> rusqlite::Result<
         store,
         open_registration,
         rooms: Mutex::new(HashMap::new()),
+        members: Mutex::new(HashMap::new()),
         next_client: Mutex::new(0),
     });
     Ok(Router::new()
@@ -65,6 +77,10 @@ pub fn app(data: &std::path::Path, open_registration: bool) -> rusqlite::Result<
         .route("/challenge", get(challenge))
         .route("/login", post(login))
         .route("/docs", get(list_docs))
+        .route("/docs/{doc}/members", get(members))
+        .route("/docs/{doc}/admin", post(post_admin))
+        .route("/docs/{doc}/join", post(join_doc))
+        .route("/docs/{doc}/join/{account}", axum::routing::delete(reject_join))
         .route("/blobs/{doc}", get(list_blobs))
         .route("/blob/{doc}/{key}", get(get_blob).put(put_blob))
         .route("/ws/{doc}", get(ws))
@@ -136,16 +152,52 @@ fn current(s: &AppState, h: &HeaderMap) -> Option<String> {
 fn doc_access(s: &AppState, h: &HeaderMap, doc: &str) -> Result<String, Response> {
     let id = current(s, h).ok_or_else(|| StatusCode::UNAUTHORIZED.into_response())?;
     if !valid_doc(doc) { return Err(StatusCode::BAD_REQUEST.into_response()); }
-    match s.store.access(doc, &id) {
+    match s.access(doc, &id) {
         Ok(true) => Ok(id),
         Ok(false) => Err(StatusCode::FORBIDDEN.into_response()),
         Err(e) => Err(fail(e)),
     }
 }
 
+impl AppState {
+    /// Mitglieder laut Admin-Protokoll; `None`, wenn das Dokument (noch) kein Protokoll hat.
+    fn log_state(&self, doc: &str) -> Result<Option<Arc<adminlog::State>>, String> {
+        if let Some(s) = self.members.lock().unwrap_or_else(|e| e.into_inner()).get(doc) { return Ok(Some(s.clone())); }
+        let entries = self.entries(doc)?;
+        if entries.is_empty() { return Ok(None); }
+        let state = Arc::new(adminlog::replay(doc, &entries).map_err(|e| format!("Admin-Protokoll ungültig: {e}"))?);
+        self.members.lock().unwrap_or_else(|e| e.into_inner()).insert(doc.to_string(), state.clone());
+        Ok(Some(state))
+    }
+
+    fn entries(&self, doc: &str) -> Result<Vec<adminlog::Entry>, String> {
+        self.store.admin_log(doc).map_err(|e| e.to_string())?
+            .iter().map(|j| serde_json::from_str(j).map_err(|e| e.to_string())).collect()
+    }
+
+    /// Rolle des Kontos im Dokument (`admin`/`member`), ohne etwas zu beanspruchen.
+    fn role(&self, doc: &str, account: &str) -> Result<Option<String>, String> {
+        if let Some(s) = self.log_state(doc)? { return Ok(s.role(account).map(String::from)); }
+        Ok(self.store.legacy_members(doc).map_err(|e| e.to_string())?.into_iter().find(|(a, _)| a == account).map(|(_, r)| r))
+    }
+
+    /// Zugriff auf Inhalte. Ohne Protokoll gilt das ältere Verfahren (erstes Konto beansprucht das Dokument).
+    fn access(&self, doc: &str, account: &str) -> Result<bool, String> {
+        if let Some(s) = self.log_state(doc)? { return Ok(s.members.contains_key(account)); }
+        self.store.access(doc, account).map_err(|e| e.to_string())
+    }
+
+    fn notify(&self, doc: &str) {
+        if let Some(r) = self.rooms.lock().unwrap_or_else(|e| e.into_inner()).get(doc) { let _ = r.tx.send(Event::Members); }
+    }
+}
+
 async fn list_docs(State(s): State<Shared>, h: HeaderMap) -> Response {
     let Some(id) = current(&s, &h) else { return StatusCode::UNAUTHORIZED.into_response() };
-    match s.store.docs(&id) { Ok(d) => Json(d).into_response(), Err(e) => fail(e) }
+    match s.store.all_docs() {
+        Ok(all) => Json(all.into_iter().filter(|d| s.role(&d.id, &id).ok().flatten().is_some()).collect::<Vec<_>>()).into_response(),
+        Err(e) => fail(e),
+    }
 }
 
 async fn list_blobs(State(s): State<Shared>, h: HeaderMap, Path(doc): Path<String>) -> Response {
@@ -172,6 +224,71 @@ async fn put_blob(State(s): State<Shared>, h: HeaderMap, Path((doc, key)): Path<
         if hex != key { return (StatusCode::BAD_REQUEST, "Hash passt nicht zum Inhalt").into_response(); }
     }
     match s.store.put_blob(&doc, &key, &body) { Ok(()) => StatusCode::NO_CONTENT.into_response(), Err(e) => fail(e) }
+}
+
+/// Mitglieder, Rolle des Aufrufers und (für Admins) offene Beitrittsanfragen.
+async fn members(State(s): State<Shared>, h: HeaderMap, Path(doc): Path<String>) -> Response {
+    let Some(id) = current(&s, &h) else { return StatusCode::UNAUTHORIZED.into_response() };
+    if !valid_doc(&doc) { return StatusCode::BAD_REQUEST.into_response(); }
+    let role = match s.role(&doc, &id) { Ok(Some(r)) => r, Ok(None) => return StatusCode::FORBIDDEN.into_response(), Err(e) => return fail(e) };
+    let entries = match s.entries(&doc) { Ok(e) => e, Err(e) => return fail(e) };
+    let requests = if role == "admin" { s.store.requests(&doc).unwrap_or_default() } else { Vec::new() };
+    Json(serde_json::json!({ "role": role, "entries": entries, "requests": requests })).into_response()
+}
+
+/// Neuer Eintrag im Admin-Protokoll (vom Aufrufer unterschrieben).
+async fn post_admin(State(s): State<Shared>, h: HeaderMap, Path(doc): Path<String>, Json(entry): Json<adminlog::Entry>) -> Response {
+    let Some(id) = current(&s, &h) else { return StatusCode::UNAUTHORIZED.into_response() };
+    if !valid_doc(&doc) { return StatusCode::BAD_REQUEST.into_response(); }
+    if entry.actor != id { return (StatusCode::FORBIDDEN, "Der Eintrag muss vom angemeldeten Konto stammen").into_response(); }
+    let state = match s.log_state(&doc) { Ok(st) => st, Err(e) => return fail(e) };
+    let before = match &state {
+        Some(st) => (**st).clone(),
+        None => {
+            // Anfang des Protokolls: nur der Ersteller; bei Dokumenten aus der Zeit davor nur dessen Admin
+            let legacy = match s.store.legacy_members(&doc) { Ok(l) => l, Err(e) => return fail(e) };
+            if !legacy.is_empty() && !legacy.iter().any(|(a, r)| a == &id && r == "admin") {
+                return (StatusCode::FORBIDDEN, "Das Dokument gehört einem anderen Konto").into_response();
+            }
+            adminlog::State::default()
+        }
+    };
+    let next = match before.apply(&doc, &entry) { Ok(n) => n, Err(e) => return (StatusCode::BAD_REQUEST, e).into_response() };
+    let json = match serde_json::to_string(&entry) { Ok(j) => j, Err(e) => return fail(e) };
+    if s.store.append_admin(&doc, entry.seq, &json).is_err() {
+        return (StatusCode::CONFLICT, "Das Protokoll hat sich inzwischen geändert").into_response();
+    }
+    s.members.lock().unwrap_or_else(|e| e.into_inner()).insert(doc.clone(), Arc::new(next));
+    if entry.kind == "set" { let _ = s.store.remove_request(&doc, &entry.subject); }
+    s.notify(&doc);
+    StatusCode::NO_CONTENT.into_response()
+}
+
+#[derive(serde::Deserialize)]
+struct JoinBody { name: Option<String> }
+
+/// „Anklopfen“: ein Konto bittet um Aufnahme in das Dokument; ein Admin entscheidet.
+async fn join_doc(State(s): State<Shared>, h: HeaderMap, Path(doc): Path<String>, Json(body): Json<JoinBody>) -> Response {
+    let Some(id) = current(&s, &h) else { return StatusCode::UNAUTHORIZED.into_response() };
+    if !valid_doc(&doc) { return StatusCode::BAD_REQUEST.into_response(); }
+    match s.role(&doc, &id) { Ok(Some(_)) => return Json(serde_json::json!({ "status": "member" })).into_response(), Ok(None) => {} Err(e) => return fail(e) }
+    if !s.store.doc_exists(&doc).unwrap_or(false) { return StatusCode::NOT_FOUND.into_response(); }
+    if s.store.requests(&doc).map(|r| r.len()).unwrap_or(0) >= 100 { return StatusCode::TOO_MANY_REQUESTS.into_response(); }
+    let Ok(Some(acct)) = s.store.account(&id) else { return StatusCode::UNAUTHORIZED.into_response() };
+    let name: String = body.name.unwrap_or_default().chars().filter(|c| !c.is_control()).take(60).collect();
+    if s.store.add_request(&doc, &id, &acct.pubkey, name.trim()).is_err() { return StatusCode::INTERNAL_SERVER_ERROR.into_response(); }
+    s.notify(&doc);
+    (StatusCode::ACCEPTED, Json(serde_json::json!({ "status": "requested" }))).into_response()
+}
+
+/// Ein Admin lehnt eine Beitrittsanfrage ab.
+async fn reject_join(State(s): State<Shared>, h: HeaderMap, Path((doc, account)): Path<(String, String)>) -> Response {
+    let Some(id) = current(&s, &h) else { return StatusCode::UNAUTHORIZED.into_response() };
+    if !valid_doc(&doc) || !valid_doc(&account) { return StatusCode::BAD_REQUEST.into_response(); }
+    match s.role(&doc, &id) { Ok(Some(r)) if r == "admin" => {} Ok(_) => return StatusCode::FORBIDDEN.into_response(), Err(e) => return fail(e) }
+    let _ = s.store.remove_request(&doc, &account);
+    s.notify(&doc);
+    StatusCode::NO_CONTENT.into_response()
 }
 
 // ---------- WebSocket ----------
@@ -223,9 +340,15 @@ async fn session(state: Shared, id: String, mut socket: WebSocket) {
         .and_then(|id| state.store.account(&id).ok().flatten()).filter(|a| a.approved()) else {
         return deny(&mut socket, "expired", "Anmeldung abgelaufen").await;
     };
-    match state.store.access(&id, &account.id) {
+    match state.access(&id, &account.id) {
         Ok(true) => {}
-        Ok(false) => return deny(&mut socket, "forbidden", "Kein Zugriff auf dieses Dokument").await,
+        Ok(false) => {
+            // Wer angeklopft hat, wartet auf die Entscheidung eines Admins
+            if state.store.has_request(&id, &account.id).unwrap_or(false) {
+                return deny(&mut socket, "requested", "Wartet auf Zustimmung eines Admins").await;
+            }
+            return deny(&mut socket, "forbidden", "Kein Zugriff auf dieses Dokument").await;
+        }
         Err(_) => return deny(&mut socket, "error", "Speicherfehler").await,
     }
     let room = match room(&state, &id) {
@@ -263,6 +386,7 @@ async fn session(state: Shared, id: String, mut socket: WebSocket) {
                     }
                     MSG_UPDATE => {
                         if body.len() <= 2 { continue } // leere Differenz
+                        if !state.access(&id, &account.id).unwrap_or(false) { break } // inzwischen entfernt
                         let Ok(update) = Update::decode_v1(body) else { continue };
                         let full = {
                             let doc = room.doc.lock().unwrap_or_else(|e| e.into_inner());
@@ -274,17 +398,22 @@ async fn session(state: Shared, id: String, mut socket: WebSocket) {
                             }
                         };
                         if let Some(full) = full { let _ = state.store.compact(&id, &full); }
-                        let _ = room.tx.send((me, Arc::new(body.to_vec())));
+                        let _ = room.tx.send(Event::Update(me, Arc::new(body.to_vec())));
                     }
                     _ => {}
                 }
             }
             outgoing = rx.recv() => {
                 match outgoing {
-                    Ok((from, body)) if from != me => {
+                    Ok(Event::Update(from, body)) if from != me => {
                         if socket.send(frame(MSG_UPDATE, &body)).await.is_err() { break }
                     }
-                    Ok(_) => {}
+                    Ok(Event::Update(..)) => {}
+                    Ok(Event::Members) => {
+                        // Wer nicht mehr Mitglied ist, wird getrennt; alle anderen erfahren von der Änderung
+                        if !state.access(&id, &account.id).unwrap_or(false) { break }
+                        if socket.send(Message::Text("{\"t\":\"members\"}".into())).await.is_err() { break }
+                    }
                     // Verteiler übergelaufen: Differenz neu anbieten, damit nichts fehlt
                     Err(broadcast::error::RecvError::Lagged(_)) => {
                         let sv = room.doc.lock().unwrap_or_else(|e| e.into_inner()).transact().state_vector().encode_v1();

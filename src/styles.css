@@ -537,3 +537,17 @@ body.tile-dragging.tile-copy, body.tile-dragging.tile-copy * { cursor: copy !imp
 .sync-btn.pending .dot { background: #ff9f0a; }
 .sync-account { flex-wrap: wrap; }
 .sync-account code, .sync-account .linklike { white-space: nowrap; }
+.sync-btn .req-badge { position: absolute; top: -3px; right: -2px; min-width: 16px; height: 16px; padding: 0 4px; box-sizing: border-box; border-radius: 8px; background: #d92d20; color: #fff; font-size: 11px; font-weight: 600; line-height: 16px; text-align: center; }
+.badge { margin-left: 6px; display: inline-block; min-width: 18px; padding: 0 5px; box-sizing: border-box; border-radius: 9px; background: #d92d20; color: #fff; font-size: 11px; font-weight: 600; line-height: 18px; text-align: center; }
+.members-dialog h4 { margin: 14px 0 6px; font-size: 13px; }
+.member-row { display: flex; justify-content: space-between; align-items: center; gap: 14px; padding: 8px 0; border-bottom: 1px solid var(--c-e1e7ea); }
+.member-row:last-of-type { border-bottom: none; }
+.member-row > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.member-row small { color: var(--c-666677); font-size: 12px; }
+.member-row code { font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+.member-actions { display: flex; gap: 10px; align-items: center; flex: none; }
+.danger-text { color: #c0392b; }
+.invite-info { margin: 12px 0 4px; }
+.invite-info small { color: var(--c-666677); font-size: 12px; word-break: break-all; }
+.members-dialog textarea, .sync-dialog textarea { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--c-d5dce0); border-radius: 8px; background: var(--c-ffffff); color: inherit; font: 12px ui-monospace, Menlo, monospace; resize: vertical; word-break: break-all; }
+.member-row small { white-space: nowrap; }

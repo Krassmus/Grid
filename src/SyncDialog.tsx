@@ -2,13 +2,14 @@ import { useEffect, useState } from 'react'
 import { Modal } from './Modal'
 import { exportAccount, fingerprint, getIdentity, importAccount, onIdentityChanged, type Identity } from './identity'
 import { AuthError, listCloudDocs, normalizeServer, type CloudDoc, type SyncState } from './syncClient'
+import { MembersDialog, type MembersControl } from './MembersDialog'
 
 const LAST = 'grid-sync-last-server'
 const lastServer = () => { try { return localStorage.getItem(LAST) ?? '' } catch { return '' } }
 const rememberServer = (s: string) => { try { localStorage.setItem(LAST, s) } catch { /* egal */ } }
 
 /** Was die Oberfläche über die Cloud-Anbindung des Dokuments wissen und tun darf. */
-export interface SyncControl {
+export interface SyncControl extends MembersControl {
   state: SyncState | null
   server: string | null
   connect: (server: string) => void
@@ -20,7 +21,7 @@ export const syncLabel = (c: SyncControl) => {
   switch (c.state?.status) {
     case 'online': return 'Synchronisiert'
     case 'offline': return 'Offline – wird später abgeglichen'
-    case 'pending': return 'Wartet auf Freigabe des Kontos'
+    case 'pending': return c.state.kind === 'join' ? 'Wartet auf Zustimmung eines Admins' : 'Wartet auf Freigabe des Kontos'
     case 'denied': return `Abgelehnt: ${c.state.reason ?? 'kein Zugriff'}`
     default: return 'Verbinde …'
   }
@@ -66,6 +67,8 @@ export function SyncDialog(props: { control: SyncControl; onClose: () => void })
   const me = useAccount()
   const [server, setServer] = useState(c.server ?? lastServer())
   const [account, setAccount] = useState(false)
+  const [membersOpen, setMembersOpen] = useState(false)
+  const requests = c.members?.requests.length ?? 0
   const connected = !!c.server
   const submit = () => {
     const url = normalizeServer(server)
@@ -74,6 +77,7 @@ export function SyncDialog(props: { control: SyncControl; onClose: () => void })
     c.connect(url)
   }
   if (account) return <AccountDialog onClose={() => setAccount(false)} />
+  if (membersOpen) return <MembersDialog control={c} onClose={() => setMembersOpen(false)} />
   return (
     <Modal onClose={props.onClose}>
       <form className="dialog sync-dialog" onMouseDown={(e) => e.stopPropagation()}
@@ -84,11 +88,19 @@ export function SyncDialog(props: { control: SyncControl; onClose: () => void })
           <>
             <p className={`sync-status ${c.state?.status ?? 'connecting'}`}><span className="dot" />{syncLabel(c)}</p>
             <p className="sync-server">{c.server}</p>
-            {c.state?.status === 'pending'
+            {c.state?.status === 'pending' && c.state.kind === 'join'
+              ? <p className="hint">Ein Admin des Dokuments muss deine Anfrage zulassen. Nenne ihm deine Prüfnummer <code>{me ? fingerprint(me.publicKey) : ''}</code>; danach verbindet sich Grid von selbst.</p>
+              : c.state?.status === 'pending'
               ? <p className="hint">Der Betreiber des Servers muss dein Konto freigeben. Nenne ihm die Kennung <code>{me?.id.slice(0, 8)}</code>
                   ({me ? fingerprint(me.publicKey) : ''}); danach verbindet sich Grid von selbst.</p>
               : <p className="hint">Änderungen werden laufend abgeglichen. Ohne Verbindung arbeitest du lokal weiter; beim nächsten Verbinden werden beide Seiten zusammengeführt.</p>}
             <AccountLine me={me} onManage={() => setAccount(true)} />
+            {c.state?.status === 'online' && (
+              <p className="sync-account">
+                <span>Mitglieder{c.members?.state ? ` (${c.members.state.members.size})` : ''}</span>
+                <button type="button" className="linklike" onClick={() => setMembersOpen(true)}>Verwalten und einladen …{requests > 0 && <span className="badge">{requests}</span>}</button>
+              </p>
+            )}
             <div className="actions split">
               <button type="button" className="danger-outline" onClick={() => { c.disconnect(); props.onClose() }}>Verbindung lösen</button>
               <button type="button" className="primary" onClick={props.onClose}>Fertig</button>
