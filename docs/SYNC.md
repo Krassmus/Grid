@@ -1,6 +1,6 @@
 # Grid: Synchronisation, Konten und Mitglieder
 
-Stand: Entwurf, Phase 1 wird gebaut. Dieses Dokument ist die gemeinsame Grundlage; Abweichungen im Code gehören hier nachgetragen.
+Stand: Phase 1 (Sync) und Phase 2 (Konten) sind gebaut; Phase 3 bis 5 sind Entwurf. Dieses Dokument ist die gemeinsame Grundlage; Abweichungen im Code gehören hier nachgetragen.
 
 ## Ziele
 
@@ -20,7 +20,7 @@ WebSocket `wss://<server>/ws/<docId>`, binäre Nachrichten, erstes Byte = Typ (a
 | `0` | Sync Schritt 1 | Yjs-Zustandsvektor des Absenders |
 | `1` | Update | Yjs-Update (Antwort auf Schritt 1 oder laufende Änderung) |
 
-Vor der ersten binären Nachricht schickt der Client eine Text-Nachricht `{"t":"hello","token":"…","name":"Dateiname"}`; der Server antwortet `{"t":"ok"}` oder `{"t":"denied","reason":"…"}` und schließt.
+Vor der ersten binären Nachricht schickt der Client eine Text-Nachricht `{"t":"hello","token":"<Sitzungsschlüssel>","name":"Dateiname"}`; der Server antwortet `{"t":"ok"}` oder `{"t":"denied","code":"expired|forbidden|error","reason":"…"}` und schließt. Bei `expired` meldet sich der Client neu an und versucht es noch einmal.
 Danach schickt jede Seite Typ 0, die andere antwortet mit Typ 1 (Differenz). Jede lokale Änderung geht als Typ 1 an den Server, der sie speichert und an die anderen Clients des Dokuments verteilt.
 
 Der Server hält je Dokument ein Update-Protokoll (SQLite, wie `ydoc_log` in der Datei) und fasst es ab 200 Einträgen zu einem Gesamtzustand zusammen.
@@ -30,14 +30,18 @@ Der Server hält je Dokument ein Update-Protokoll (SQLite, wie `ydoc_log` in der
 
 `GET /docs` listet die Dokumente (ID, Name, Änderungszeit), damit ein zweites Gerät ein Dokument aus der Cloud laden kann.
 
-Authentifizierung in Phase 1: ein gemeinsames Token (`Authorization: Bearer …` bzw. `hello`). Das ist ausdrücklich ein Zwischenstand und wird in Phase 2 durch Signaturen ersetzt, ohne dass sich das Sync-Protokoll ändert.
+Der Zugriff auf Dokumente richtet sich nach dem Konto (Abschnitt 2): Ein Dokument gehört zunächst dem Konto, das es als erstes braucht (Tabelle `members`, Rolle `admin`); andere Konten bekommen `403`, bis Phase 3 das Einladen ermöglicht. `GET /docs` zeigt nur Dokumente, in denen das Konto Mitglied ist.
 
-### 2. Identität (Phase 2)
+### 2. Identität (Phase 2, gebaut)
 
-- Konto = Ed25519-Schlüsselpaar plus UUID. Offline anlegbar. Privatschlüssel im Schlüsselbund des Betriebssystems.
-- Anmeldung am Server per Challenge-Antwort (Signatur) statt Passwort.
-- Mehrere Geräte: jedes Gerät hat einen eigenen Schlüssel, vom Konto-Schlüssel zertifiziert; Kopplung per QR/Kurzcode; verlorene Geräte lassen sich sperren. Sicherung des Konto-Schlüssels als verschlüsselte Datei bzw. Wiederherstellungsphrase.
-- townwork.eu beglaubigt öffentliche Schlüssel (E-Mail bestätigt, Abo-Status). Intranet-Server dürfen dem vertrauen oder eigene Beglaubigung nutzen.
+- Konto = Kennung (UUID) plus Ed25519-Schlüsselpaar. Es entsteht beim ersten Bedarf auf dem Gerät, ohne Internet. Der geheime Schlüssel liegt im Schlüsselbund des Betriebssystems (macOS, Windows), sonst in einer Datei im Konfigurationsordner (nur für den Benutzer lesbar); im Browser (Entwicklung) im lokalen Speicher.
+- Anmeldung statt Passwort:
+  1. `GET /challenge` liefert ein Rätsel `{"nonce":"<Zeit>.<Beglaubigung>"}` (60 Sekunden gültig, zustandslos mit dem Server-Geheimnis beglaubigt).
+  2. `POST /login {id, pub, nonce, sig}`; `sig` = Ed25519-Signatur über `grid-login-v1\n<id>\n<nonce>`.
+  3. Antwort bei freigegebenem Konto: `{"status":"ok","token":"…","exp":…}` (Sitzungsschlüssel, 1 Stunde, `Authorization: Bearer …` bzw. `hello`). Unbekannte Konten werden als **wartend** vermerkt (`403`, `status: pending`); gleiche Kennung mit anderem Schlüssel wird abgelehnt.
+- Freigabe: Der Betreiber gibt Konten auf dem Server frei: `grid-server accounts list|approve <Kennung>|remove <Kennung>`. Mit `--open-registration` (oder `GRID_OPEN_REGISTRATION=1`) werden neue Konten sofort freigegeben (eigenes Netz, Tests). Später übernimmt das townwork.eu mit Registrierung und Abo.
+- Zweites Gerät: „Sichern oder übertragen“ erzeugt das Konto als Text, mit einem Passwort verschlüsselt (PBKDF2-SHA-256, AES-GCM); auf dem anderen Gerät wird er eingefügt. Gerätschlüssel mit Zertifikaten (verlorene Geräte sperren) kommen später; das Format ist dafür offen.
+- townwork.eu beglaubigt später öffentliche Schlüssel (E-Mail bestätigt, Abo-Status). Intranet-Server dürfen dem vertrauen oder eigene Freigabe nutzen.
 
 ### 3. Besitz und Mitglieder (Phase 3)
 

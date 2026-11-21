@@ -42,6 +42,51 @@ async fn grid_open(request: Request<'_>) -> Result<Response, String> {
   grid_file::open_grid(&path).map(Response::new)
 }
 
+// ---------- Konto-Schlüssel ----------
+// Der geheime Schlüssel des Grid-Kontos (als Text) liegt im Schlüsselbund des Betriebssystems. Wo es keinen gibt
+// (oder er nicht antwortet), ersatzweise in einer Datei, die nur der Benutzer lesen darf.
+
+const KEY_SERVICE: &str = "app.grid.desktop";
+const KEY_NAME: &str = "account";
+
+fn key_file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+  let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
+  std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+  Ok(dir.join("account.key"))
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn keychain_get() -> Option<String> {
+  keyring::Entry::new(KEY_SERVICE, KEY_NAME).ok()?.get_password().ok()
+}
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn keychain_get() -> Option<String> { None }
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn keychain_set(value: &str) -> bool {
+  keyring::Entry::new(KEY_SERVICE, KEY_NAME).and_then(|e| e.set_password(value)).is_ok()
+}
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn keychain_set(_: &str) -> bool { false }
+
+#[tauri::command]
+fn identity_load(app: tauri::AppHandle) -> Option<String> {
+  keychain_get().or_else(|| std::fs::read_to_string(key_file(&app).ok()?).ok()).filter(|s| !s.trim().is_empty())
+}
+
+#[tauri::command]
+fn identity_store(app: tauri::AppHandle, value: String) -> Result<(), String> {
+  if keychain_set(&value) { return Ok(()); }
+  let path = key_file(&app)?;
+  std::fs::write(&path, &value).map_err(|e| e.to_string())?;
+  #[cfg(unix)]
+  {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).map_err(|e| e.to_string())?;
+  }
+  Ok(())
+}
+
 /// Per Finder (Doppelklick, „Öffnen mit“) angeforderte Datei, bis die Oberfläche sie abgeholt hat
 /// (beim Kaltstart kommt das Ereignis vor dem ersten Rendern).
 #[derive(Default)]
@@ -130,7 +175,7 @@ pub fn run() {
     .plugin(tauri_plugin_dialog::init())
     .manage(PendingOpen::default())
     .manage(MenuState { recent: Mutex::new(Vec::new()), theme: Mutex::new("system".to_string()) })
-    .invoke_handler(tauri::generate_handler![grid_save, grid_open, take_pending_open, set_recent_menu, set_theme])
+    .invoke_handler(tauri::generate_handler![grid_save, grid_open, take_pending_open, set_recent_menu, set_theme, identity_load, identity_store])
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(

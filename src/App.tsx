@@ -8,7 +8,7 @@ import { baseName, isTauri, newMeta, readGrid, writeGrid, type OpenedGrid } from
 import { FileSession } from './fileSession'
 import { isThemeChoice, setTheme } from './theme'
 import { CloudOpenDialog, type SyncControl } from './SyncDialog'
-import { rememberToken, type CloudDoc, type SyncState } from './syncClient'
+import { type CloudDoc, type SyncState } from './syncClient'
 import { forgetRecent, noteRecent, readRecent, writeRecent } from './recentFiles'
 
 /** Normalfall: ein Dokument, ein Client. Mit ?sim in der URL: zwei simulierte Clients zum Testen von Merges. */
@@ -48,14 +48,13 @@ function Single() {
   }
 
   /** Dokument aus der Cloud: Speicherort wählen, leere Datei mit der Anbindung anlegen; der Abgleich füllt sie. */
-  const openFromCloud = async (d: CloudDoc, server: string, token: string) => {
+  const openFromCloud = async (d: CloudDoc, server: string) => {
     setCloudOpen(false)
     const dialog = await import('@tauri-apps/plugin-dialog')
     const chosen = await dialog.save({ defaultPath: `${d.name || 'Cloud-Dokument'}.grid`, filters: FILTERS })
     if (!chosen) return
     const p = withExt(chosen)
     await current.current?.flush()
-    rememberToken(server, token)
     const doc = new Y.Doc(), meta = { ...newMeta(), docId: d.id, sync: { server } }
     try {
       const known = await writeGrid(p, doc, meta, new Set())
@@ -171,14 +170,14 @@ function Single() {
   const control: SyncControl = {
     state: syncState,
     server: session.meta.sync?.server ?? null,
-    connect: (server, token) => { session.connect(server, token); bump((n) => n + 1) },
+    connect: (server) => { session.connect(server); bump((n) => n + 1) },
     disconnect: () => { session.disconnect(); bump((n) => n + 1) },
   }
   return (
     <>
       <ClientPane key={session.key} title={UNSAVED_TITLE} doc={session.doc}
         persist={session.path ? null : `grid-proto-${UNSAVED_TITLE}`} sync={control} />
-      {cloudOpen && <CloudOpenDialog onOpen={(d, server, token) => void openFromCloud(d, server, token)} onClose={() => setCloudOpen(false)} />}
+      {cloudOpen && <CloudOpenDialog onOpen={(d, server) => void openFromCloud(d, server)} onClose={() => setCloudOpen(false)} />}
       {error && <div className="file-error" role="alert">{error}<button type="button" onClick={() => setError(null)}>✕</button></div>}
     </>
   )

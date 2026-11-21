@@ -27,7 +27,10 @@ impl Store {
              PRAGMA synchronous = NORMAL;
              CREATE TABLE IF NOT EXISTS docs (id TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '', updated INTEGER NOT NULL);
              CREATE TABLE IF NOT EXISTS log (doc TEXT NOT NULL, seq INTEGER NOT NULL, data BLOB NOT NULL, PRIMARY KEY (doc, seq));
-             CREATE TABLE IF NOT EXISTS blobs (doc TEXT NOT NULL, key TEXT NOT NULL, data BLOB NOT NULL, PRIMARY KEY (doc, key));",
+             CREATE TABLE IF NOT EXISTS blobs (doc TEXT NOT NULL, key TEXT NOT NULL, data BLOB NOT NULL, PRIMARY KEY (doc, key));
+             CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value BLOB NOT NULL);
+             CREATE TABLE IF NOT EXISTS accounts (id TEXT PRIMARY KEY, pub TEXT NOT NULL, status TEXT NOT NULL, created INTEGER NOT NULL);
+             CREATE TABLE IF NOT EXISTS members (doc TEXT NOT NULL, account TEXT NOT NULL, role TEXT NOT NULL, PRIMARY KEY (doc, account));",
         )?;
         Ok(Store(Mutex::new(c)))
     }
@@ -45,10 +48,13 @@ impl Store {
         Ok(())
     }
 
-    pub fn docs(&self) -> rusqlite::Result<Vec<DocInfo>> {
+    /// Dokumente, in denen das Konto Mitglied ist.
+    pub fn docs(&self, account: &str) -> rusqlite::Result<Vec<DocInfo>> {
         let c = self.conn();
-        let mut s = c.prepare("SELECT id, name, updated FROM docs ORDER BY updated DESC")?;
-        let rows = s.query_map([], |r| Ok(DocInfo { id: r.get(0)?, name: r.get(1)?, updated: r.get(2)? }))?;
+        let mut s = c.prepare(
+            "SELECT d.id, d.name, d.updated FROM docs d JOIN members m ON m.doc = d.id WHERE m.account = ?1 ORDER BY d.updated DESC",
+        )?;
+        let rows = s.query_map([account], |r| Ok(DocInfo { id: r.get(0)?, name: r.get(1)?, updated: r.get(2)? }))?;
         rows.collect()
     }
 
@@ -94,4 +100,86 @@ impl Store {
         self.conn().execute("INSERT OR REPLACE INTO blobs (doc, key, data) VALUES (?1, ?2, ?3)", params![doc, key, data])?;
         Ok(())
     }
+
+    // ---------- Server-Geheimnis ----------
+
+    /// Das Geheimnis, mit dem Anmelde-Rätsel und Sitzungsschlüssel beglaubigt werden (beim ersten Start erzeugt).
+    pub fn secret(&self) -> rusqlite::Result<Vec<u8>> {
+        let c = self.conn();
+        if let Some(v) = c.query_row("SELECT value FROM meta WHERE key = 'secret'", [], |r| r.get::<_, Vec<u8>>(0)).optional()? {
+            return Ok(v);
+        }
+        let mut v = vec![0u8; 32];
+        getrandom::fill(&mut v).map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+        c.execute("INSERT INTO meta (key, value) VALUES ('secret', ?1)", [&v])?;
+        Ok(v)
+    }
+
+    // ---------- Konten ----------
+
+    pub fn account(&self, id: &str) -> rusqlite::Result<Option<Account>> {
+        self.conn()
+            .query_row("SELECT id, pub, status, created FROM accounts WHERE id = ?1", [id], Account::from_row)
+            .optional()
+    }
+
+    /// Legt ein Konto an (wartend oder gleich freigegeben).
+    pub fn add_account(&self, id: &str, pubkey: &str, approved: bool) -> rusqlite::Result<()> {
+        self.conn().execute(
+            "INSERT OR IGNORE INTO accounts (id, pub, status, created) VALUES (?1, ?2, ?3, ?4)",
+            params![id, pubkey, if approved { "approved" } else { "pending" }, now()],
+        )?;
+        Ok(())
+    }
+
+    pub fn accounts(&self) -> rusqlite::Result<Vec<Account>> {
+        let c = self.conn();
+        let mut s = c.prepare("SELECT id, pub, status, created FROM accounts ORDER BY created")?;
+        let rows = s.query_map([], Account::from_row)?;
+        rows.collect()
+    }
+
+    /// Konten, deren Kennung mit `prefix` beginnt.
+    pub fn find_accounts(&self, prefix: &str) -> rusqlite::Result<Vec<Account>> {
+        Ok(self.accounts()?.into_iter().filter(|a| !prefix.is_empty() && a.id.starts_with(prefix)).collect())
+    }
+
+    pub fn set_status(&self, id: &str, status: &str) -> rusqlite::Result<()> {
+        self.conn().execute("UPDATE accounts SET status = ?2 WHERE id = ?1", params![id, status])?;
+        Ok(())
+    }
+
+    pub fn remove_account(&self, id: &str) -> rusqlite::Result<()> {
+        let c = self.conn();
+        c.execute("DELETE FROM accounts WHERE id = ?1", [id])?;
+        c.execute("DELETE FROM members WHERE account = ?1", [id])?;
+        Ok(())
+    }
+
+    // ---------- Zugriff auf Dokumente ----------
+
+    /// Darf das Konto auf das Dokument zugreifen? Ein Dokument ohne Mitglieder gehört dem ersten Konto, das es braucht.
+    pub fn access(&self, doc: &str, account: &str) -> rusqlite::Result<bool> {
+        let c = self.conn();
+        c.execute(
+            "INSERT INTO members (doc, account, role) SELECT ?1, ?2, 'admin' WHERE NOT EXISTS (SELECT 1 FROM members WHERE doc = ?1)",
+            params![doc, account],
+        )?;
+        c.query_row("SELECT 1 FROM members WHERE doc = ?1 AND account = ?2", params![doc, account], |_| Ok(())).optional().map(|r| r.is_some())
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Account {
+    pub id: String,
+    pub pubkey: String,
+    pub status: String,
+    pub created: i64,
+}
+
+impl Account {
+    fn from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Account> {
+        Ok(Account { id: r.get(0)?, pubkey: r.get(1)?, status: r.get(2)?, created: r.get(3)? })
+    }
+    pub fn approved(&self) -> bool { self.status == "approved" }
 }

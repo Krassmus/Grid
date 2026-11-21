@@ -517,7 +517,7 @@ body.tile-dragging.tile-copy, body.tile-dragging.tile-copy * { cursor: copy !imp
 .sync-btn.online .dot, .sync-status.online .dot { background: #1a7f37; }
 .sync-btn.denied .dot, .sync-status.denied .dot { background: #c0392b; }
 .sync-btn.online { color: var(--c-3b4a52); }
-.sync-dialog { min-width: 380px; }
+.sync-dialog { min-width: 420px; }
 .sync-field { display: flex; flex-direction: column; gap: 4px; margin: 10px 0; font-size: 13px; color: var(--c-666677); }
 .sync-field input { padding: 8px 10px; border: 1px solid var(--c-d5dce0); border-radius: 8px; background: var(--c-ffffff); font-size: 14px; color: inherit; }
 .sync-status { display: flex; align-items: center; gap: 8px; font-weight: 500; margin: 6px 0 2px; }
@@ -527,3 +527,13 @@ body.tile-dragging.tile-copy, body.tile-dragging.tile-copy * { cursor: copy !imp
 .cloud-docs button { width: 100%; display: flex; justify-content: space-between; align-items: baseline; gap: 16px; padding: 9px 12px; border: 1px solid var(--c-d5dce0); border-radius: 8px; background: var(--c-ffffff); cursor: pointer; text-align: left; color: inherit; font: inherit; }
 .cloud-docs button:hover { border-color: var(--c-0a58ca); }
 .cloud-docs small { color: var(--c-666677); white-space: nowrap; }
+.sync-account { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin: 12px 0 4px; font-size: 13px; color: var(--c-666677); }
+.sync-account code, .sync-dialog .hint code { font-family: ui-monospace, Menlo, monospace; font-size: 12px; background: var(--c-e9edef); padding: 1px 5px; border-radius: 5px; color: var(--c-3b4a52); }
+.linklike { border: none; background: none; padding: 0; color: var(--c-0a58ca); font: inherit; cursor: pointer; }
+.linklike:hover { text-decoration: underline; }
+.account-dialog h4 { margin: 16px 0 4px; font-size: 13px; }
+.account-dialog textarea { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--c-d5dce0); border-radius: 8px; background: var(--c-ffffff); color: inherit; font: 12px ui-monospace, Menlo, monospace; resize: vertical; word-break: break-all; }
+.sync-ok { color: #1a7f37; font-size: 13px; margin: 6px 0; }
+.sync-btn.pending .dot { background: #ff9f0a; }
+.sync-account { flex-wrap: wrap; }
+.sync-account code, .sync-account .linklike { white-space: nowrap; }

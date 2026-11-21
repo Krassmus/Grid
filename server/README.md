@@ -7,11 +7,25 @@ Gleicht Grid-Dokumente zwischen Geräten ab (Protokoll: `docs/SYNC.md`). Eine Da
 ```bash
 cd server
 cargo build --release
-GRID_TOKEN="$(openssl rand -hex 24)" ./target/release/grid-server --listen 127.0.0.1:8787 --data /var/lib/grid
+./target/release/grid-server --listen 127.0.0.1:8787 --data /var/lib/grid
 ```
 
-`GRID_TOKEN` ist der Zugangsschlüssel (Zwischenstand, bis Konten kommen); er wird in Grid beim Verbinden eingetragen.
 Optionen auch als `GRID_LISTEN` und `GRID_DATA`. Test: `cargo test`.
+
+## Konten
+
+Grid meldet sich mit dem Konto des Benutzers an (Schlüsselpaar, kein Passwort). Ein neues Konto **wartet**, bis du es freigibst:
+
+```bash
+grid-server accounts list --data /var/lib/grid                 # zeigt wartende und freigegebene Konten
+grid-server accounts approve 6366823a --data /var/lib/grid     # Anfang der Kennung genügt
+grid-server accounts remove 6366823a --data /var/lib/grid
+```
+
+Die Kennung zeigt Grid im Dialog „Cloud-Synchronisation“ an, solange das Konto wartet. Im eigenen Netz kannst du den Server mit `--open-registration` starten, dann werden neue Konten sofort freigegeben.
+Die Befehle arbeiten direkt auf der Datenbank und gehen auch bei laufendem Server (als Benutzer `grid`, falls die Datei ihm gehört: `sudo -u grid …`).
+
+**Umstellung vom alten Zugangsschlüssel:** `GRID_TOKEN` gibt es nicht mehr. Die Zeile `Environment=GRID_TOKEN=…` in der Service-Datei kann gelöscht werden. Bereits vorhandene Dokumente gehören dem ersten Konto, das sie öffnet.
 
 ## Hinter Apache (townwork.eu)
 
@@ -45,7 +59,6 @@ After=network.target
 
 [Service]
 ExecStart=/opt/grid/grid-server --listen 127.0.0.1:8787 --data /var/lib/grid
-Environment=GRID_TOKEN=HIER-DEN-SCHLUESSEL-EINTRAGEN
 User=grid
 Restart=on-failure
 
