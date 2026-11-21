@@ -461,3 +461,11 @@ textarea.cell { resize: none; line-height: 1.35; overflow: hidden; display: bloc
 .addrow-bar.view-bar { justify-content: flex-start; }
 /* Virtualisierte Zeilen gleichen Höhenänderungen selbst aus (virtualRows.ts); das Ausgleichen des Browsers würde doppelt wirken */
 .gridscroll, main:not(.single) { overflow-anchor: none; }
+/* Kacheln ziehen (tileDrag.ts): Geisterbild am Zeiger, grünes Plus beim Kopieren (Umschalt/Alt) */
+.tile.draggable { cursor: grab; touch-action: manipulation; }
+.tile.draggable.dragging { opacity: .35; }
+.tile-ghost { position: fixed; left: 0; top: 0; z-index: 1000; margin: 0; pointer-events: none; opacity: .92; box-shadow: 0 6px 18px #0004; transition: none; }
+.tile-ghost .tile-x { display: none; }
+.tile-ghost.copy::after { content: '+'; position: absolute; right: -9px; top: -9px; width: 20px; height: 20px; border-radius: 50%; background: #2e9e4f; color: #fff; font: 700 15px/20px system-ui, sans-serif; text-align: center; box-shadow: 0 1px 3px #0005; }
+body.tile-dragging, body.tile-dragging * { cursor: grabbing !important; user-select: none !important; -webkit-user-select: none !important; }
+body.tile-dragging.tile-copy, body.tile-dragging.tile-copy * { cursor: copy !important; }

@@ -11,6 +11,7 @@ import { SelectCell } from './SelectCell'
 import { ColumnDialog } from './ColumnDialog'
 import { SheetIcon } from './icons'
 import { useVirtualRows } from './virtualRows'
+import { beginTileDrag, registerDropTarget, type DragPayload } from './tileDrag'
 import { computeView } from './viewEngine'
 import { FooterCell } from './Footer'
 import { GeoCell } from './GeoCell'
@@ -35,10 +36,6 @@ import { TableDialog } from './TableDialog'
 
 // ---------- Kacheln ----------
 
-/** Aktuell gezogene Verknüpfung (dataTransfer ist in dragover nicht lesbar, daher Modulvariable). */
-interface DragInfo { slot: LinkSlot; targetRow: string; targetTable?: string }
-let dragging: DragInfo | null = null
-
 /** Gerade umsortierter Tab bzw. Spaltenkopf. */
 type ReorderKind = 'table' | 'column'
 let dragReorder: { kind: ReorderKind; id: string } | null = null
@@ -57,7 +54,6 @@ function Tile(props: {
   display?: 'avatar' | 'full'
 }) {
   const { doc, table, rowId } = props
-  const [isDragging, setIsDragging] = useState(false)
   useRowVersion(doc, table?.id ?? '', rowId)
   const exists = !!table && rowExists(doc, table.id, rowId)
   const reprs = useReprs()
@@ -68,17 +64,10 @@ function Tile(props: {
     : props.display === 'full' ? { ...base, hideTitle: false }
     : base.avatar ? { ...base, hideTitle: true, subs: [], avatarInCells: true } : base
   return (
-    <div className={`tile ${tileClasses(s)} ${exists ? '' : 'deleted'} ${props.onClick ? 'clickable' : ''} ${props.muted ? 'muted' : ''} ${isDragging ? 'dragging' : ''}`}
+    <div className={`tile ${tileClasses(s)} ${exists ? '' : 'deleted'} ${props.onClick ? 'clickable' : ''} ${props.muted ? 'muted' : ''} ${props.drag ? 'draggable' : ''}`}
       title={s && exists ? [s.title, ...s.subs].join('\n') : undefined} // Text der Darstellung als Tooltip (wichtig bei „nur Avatar“)
       onClick={props.onClick}
-      draggable={!!props.drag}
-      onDragStart={props.drag ? (e) => {
-        dragging = { slot: props.drag!.slot, targetRow: rowId, targetTable: props.drag!.targetTable }
-        e.dataTransfer.effectAllowed = 'copyMove'
-        e.dataTransfer.setData('text/plain', s?.title ?? '')
-        setIsDragging(true)
-      } : undefined}
-      onDragEnd={props.drag ? () => { dragging = null; setIsDragging(false) } : undefined}>
+      onPointerDown={props.drag ? (e) => beginTileDrag(e.nativeEvent, e.currentTarget, { slot: props.drag!.slot, targetRow: rowId, targetTable: props.drag!.targetTable }) : undefined}>
       {s ? <TileContent repr={s} /> : <div className="tile-body"><div className="tile-title">gelöscht</div></div>}
       {props.onRemove && (
         <button type="button" className="tile-x" title="Verknüpfung entfernen"
@@ -208,12 +197,12 @@ function RelationCell(props: {
   const slot: LinkSlot = { tableId: table.id, rowId, colId: col.id }
 
   // Ablageziel: Kacheln derselben Zieltabelle (auch aus dieser Zelle: dann wird umsortiert)
-  const accepts = () => !!dragging && !!col.target && dragging.targetTable === col.target
-  const sameSlot = () => !!dragging && dragging.slot.tableId === table.id && dragging.slot.rowId === rowId && dragging.slot.colId === col.id
+  const sameSlot = (p: DragPayload) => p.slot.tableId === table.id && p.slot.rowId === rowId && p.slot.colId === col.id
+  const cellRef = useRef<HTMLDivElement>(null)
   const tilesEl = useRef<HTMLDivElement>(null)
   const [ins, setIns] = useState<{ left: number; top: number; height: number } | null>(null)
   /** Einfügestelle unter dem Mauszeiger: Index unter den angezeigten Kacheln und die Zeile, vor der eingefügt wird (null = ans Ende). */
-  const dropSpot = (x: number, y: number) => {
+  const dropSpot = (x: number, y: number, p: DragPayload) => {
     const box = tilesEl.current
     if (!box) return null
     const items = Array.from(box.children).filter((el) => !el.classList.contains('add-tile') && !el.classList.contains('drop-line')) as HTMLElement[]
@@ -223,10 +212,10 @@ function RelationCell(props: {
       const r = rects[k]
       if (y < r.top || (y <= r.bottom && x < r.left + r.width / 2)) { i = k; break }
     }
-    const dragged = dragging?.targetRow
+    const dragged = p.targetRow
     const entries = anim.entries
     let before: string | null = null
-    for (let k = i; k < entries.length; k++) if (entries[k].phase !== 'exit' && !(sameSlot() && entries[k].item === dragged)) { before = entries[k].item; break }
+    for (let k = i; k < entries.length; k++) if (entries[k].phase !== 'exit' && !(sameSlot(p) && entries[k].item === dragged)) { before = entries[k].item; break }
     const c = box.getBoundingClientRect()
     let line = null
     if (rects.length) {
@@ -236,26 +225,22 @@ function RelationCell(props: {
     return { before, line }
   }
 
+  // Ablageziel für gezogene Kacheln (Umschalt oder Alt/Option beim Loslassen = kopieren statt verschieben); die Funktionen
+  // greifen auf den aktuellen Stand zu, darum wird bei jedem Zeichnen neu angemeldet.
+  useEffect(() => cellRef.current ? registerDropTarget(cellRef.current, {
+    accepts: (p) => !!col.target && p.targetTable === col.target,
+    hover: (x, y, _copy, p) => { setOver(!sameSlot(p)); setIns(dropSpot(x, y, p)?.line ?? null) },
+    leave: () => { setOver(false); setIns(null) },
+    drop: (x, y, copy, p) => {
+      setOver(false)
+      setIns(null)
+      const spot = dropSpot(x, y, p)
+      moveLink(doc, p.slot, slot, p.targetRow, copy, spot ? spot.before : undefined)
+    },
+  }) : undefined)
+
   return (
-    <div className={`c rel ${over ? 'drop-over' : ''}`}
-      onDragOver={(e) => {
-        if (!accepts()) return
-        e.preventDefault()
-        e.dataTransfer.dropEffect = sameSlot() ? 'move' : e.altKey ? 'copy' : 'move'
-        if (!sameSlot()) setOver(true)
-        setIns(dropSpot(e.clientX, e.clientY)?.line ?? null)
-      }}
-      onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) { setOver(false); setIns(null) } }}
-      onDrop={(e) => {
-        setOver(false)
-        setIns(null)
-        if (!accepts()) return
-        e.preventDefault()
-        const d = dragging!
-        dragging = null
-        const spot = dropSpot(e.clientX, e.clientY)
-        moveLink(doc, d.slot, slot, d.targetRow, e.altKey, spot ? spot.before : undefined) // Alt/Option = kopieren statt verschieben
-      }}>
+    <div ref={cellRef} className={`c rel ${over ? 'drop-over' : ''}`}>
       <div className="tiles" ref={tilesEl}>
         {ins && <i className="drop-line" style={ins} />}
         {anim.entries.map((e) => (
