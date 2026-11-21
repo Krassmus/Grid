@@ -493,3 +493,16 @@ body.tile-dragging.tile-copy, body.tile-dragging.tile-copy * { cursor: copy !imp
 .datepop-actions { display: flex; justify-content: space-between; }
 .datepop-actions button { padding: 6px 12px; border: 1px solid #d5dce0; border-radius: 8px; background: #fff; font: inherit; cursor: pointer; }
 .datepop-actions button:disabled { opacity: .45; cursor: default; }
+
+/* Rückverweis bearbeiten (Klick auf eine Kachel in der Zieltabelle): Auswahl eines Datensatzes, runde Markierung für die aktuelle Wahl */
+.pick-item { display: flex; align-items: center; gap: 10px; }
+.pick-item > .tile { flex: 1; min-width: 0; max-width: none; }
+.pick-mark { flex: none; width: 20px; height: 20px; box-sizing: border-box; border: 2px solid #b9c4ca; border-radius: 50%; background: #fff; }
+.pick-item.on .pick-mark { border-color: #1456c8; background: radial-gradient(#1456c8 0 45%, #fff 50%); }
+.pick-item.on > .tile { border-color: #1456c8; }
+.pick-item { cursor: pointer; }
+.pick-item:focus-visible { outline: 2px solid #0a84ff55; outline-offset: 2px; border-radius: 10px; }
+.pick-item > .tile { pointer-events: none; }
+.pick-none { flex: 1; min-width: 0; box-sizing: border-box; padding: 12px; border: 1px dashed #b9c4ca; border-radius: 10px; background: #fff; color: #556; }
+.pick-item:hover .pick-none { border-color: #0a84ff; }
+.pick-item.on .pick-none { border-color: #1456c8; border-style: solid; }

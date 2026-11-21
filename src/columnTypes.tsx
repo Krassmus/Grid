@@ -104,17 +104,20 @@ class NumberColumn extends ColumnType<NumberConfig> {
   }
 }
 
-export interface RelationConfig { single: boolean; backlink: boolean; display: 'default' | 'avatar' }
+export interface RelationConfig { single: boolean; backlink: boolean; display: 'default' | 'avatar'; multiTarget: boolean }
 class RelationColumn extends ColumnType<RelationConfig> {
   readonly type = 'relation'
   readonly label = 'Relation'
-  readonly defaults: RelationConfig = { single: false, backlink: true, display: 'default' }
+  readonly defaults: RelationConfig = { single: false, backlink: true, display: 'default', multiTarget: false }
   renderConfig({ config, set, column, tables }: ConfigContext<RelationConfig>) {
     return (
       <>
         <p className="cfg-static">Zieltabelle: <strong>{tables.find((t) => t.id === column.target)?.name ?? '?'}</strong></p>
         <Check checked={config.single} onChange={(single) => set({ single })} hint="Bereits vorhandene weitere Verknüpfungen bleiben bestehen.">
           Höchstens eine Verknüpfung pro Zeile
+        </Check>
+        <Check checked={config.multiTarget} onChange={(multiTarget) => set({ multiTarget })} hint="Aus: jeder Zieldatensatz gehört zu höchstens einer Zeile dieser Tabelle, im Rückverweis steht dann höchstens ein Datensatz. Bereits vorhandene Mehrfach-Verknüpfungen bleiben bestehen.">
+          Zieldatensatz darf mehrfach verknüpft werden
         </Check>
         <Check checked={config.backlink} onChange={(backlink) => set({ backlink })}>Rückverweis in der Zieltabelle anzeigen</Check>
         <Field label="Darstellung der verknüpften Datensätze">

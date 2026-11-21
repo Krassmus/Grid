@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent as ReactMouseEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode, type MouseEvent as ReactMouseEvent } from 'react'
 import * as Y from 'yjs'
 import { IndexeddbPersistence } from 'y-indexeddb'
 import {
@@ -12,6 +12,7 @@ import { ColumnDialog } from './ColumnDialog'
 import { DatePicker } from './DatePicker'
 import { SheetIcon } from './icons'
 import { useVirtualRows } from './virtualRows'
+import { allowsMultiTarget, targetAvailable } from './relationRules'
 import { beginTileDrag, registerDropTarget, type DragPayload } from './tileDrag'
 import { computeView } from './viewEngine'
 import { FooterCell } from './Footer'
@@ -84,6 +85,8 @@ function Picker(props: {
   allowCreate?: boolean
   target: TableInfo
   linked: string[]
+  /** Nicht wählbar (z. B. Ziel, das schon zu einer anderen Zeile gehört). */
+  unavailable?: string[]
   onPick: (rowId: string) => void
   onClose: () => void
 }) {
@@ -91,7 +94,7 @@ function Picker(props: {
   const [creating, setCreating] = useState(false)
   const reprs = useReprs()
   const rows = props.target.rowIds
-    .filter((id) => !props.linked.includes(id))
+    .filter((id) => !props.linked.includes(id) && !props.unavailable?.includes(id))
     .filter((id) => {
       const s = reprs(props.target.id)?.get(id) ?? summarize(props.doc, props.target, id)
       return [s.title, ...s.subs].join(' ').toLowerCase().includes(q.toLowerCase())
@@ -150,7 +153,7 @@ function EditRecordDialog(props: { doc: Y.Doc; tables: TableInfo[]; table: Table
   return (
     <RecordForm table={table} title={`„${title}“ bearbeiten`} submitLabel="Speichern" initial={snap.values} existing={snap.existing}
       onClose={props.onClose}
-      relationField={(col, ids, update) => <RelationDraftField doc={doc} tables={tables} col={col} ids={ids} update={update} />}
+      relationField={(col, ids, update) => <RelationDraftField doc={doc} tables={tables} col={col} ids={ids} update={update} rowId={rowId} />}
       onSubmit={async (values, extras) => {
         await updateRecord(doc, table.id, rowId, values, snap.values, extras, snap.existing.relations)
         props.onClose()
@@ -159,9 +162,12 @@ function EditRecordDialog(props: { doc: Y.Doc; tables: TableInfo[]; table: Table
 }
 
 /** Relationsfeld im Formular: gewählte Zielzeilen als Kacheln, „+“ öffnet die Auswahl. Gespeichert wird erst beim Anlegen. */
-function RelationDraftField(props: { doc: Y.Doc; tables: TableInfo[]; col: ColumnInfo; ids: string[]; update: (f: (prev: string[]) => string[]) => void }) {
+function RelationDraftField(props: { doc: Y.Doc; tables: TableInfo[]; col: ColumnInfo; ids: string[]; update: (f: (prev: string[]) => string[]) => void; /** Der Datensatz, der bearbeitet wird (nicht beim Anlegen). */ rowId?: string }) {
   const { doc, tables, col, ids, update } = props
   const target = tables.find((t) => t.id === col.target)
+  const owner = tables.find((t) => t.columns.some((c) => c.id === col.id))
+  const index = useLinkIndex(doc)
+  const unavailable = target ? target.rowIds.filter((id) => !targetAvailable(index, col, id, props.rowId ? [props.rowId] : [], (r) => !!owner && rowExists(doc, owner.id, r))) : []
   const [picking, setPicking] = useState(false)
   const single = RELATION.config(col).single
   return (
@@ -171,7 +177,7 @@ function RelationDraftField(props: { doc: Y.Doc; tables: TableInfo[]; col: Colum
         <button type="button" className="add-tile" onClick={() => setPicking(true)} disabled={!target} title={target ? 'Datensatz verknüpfen' : 'Zieltabelle fehlt'}>+</button>
       )}
       {picking && target && (
-        <Picker doc={doc} tables={tables} target={target} linked={ids} allowCreate={false}
+        <Picker doc={doc} tables={tables} target={target} linked={ids} unavailable={unavailable} allowCreate={false}
           onPick={(id) => update((p) => (p.includes(id) ? p : [...p, id]))}
           onClose={() => setPicking(false)} />
       )}
@@ -225,17 +231,23 @@ function RelationCell(props: {
     return { before, line }
   }
 
+  // Ohne „Zieldatensatz darf mehrfach verknüpft werden“ gehört ein Ziel zu höchstens einer Zeile: Ablegen nur, wenn es frei ist
+  // (oder von der Quelle einer Verschiebung innerhalb derselben Spalte kommt)
+  const exists = (r: string) => rowExists(doc, table.id, r)
+  const sameCol = (p: DragPayload) => p.slot.tableId === table.id && p.slot.colId === col.id
+  const ignoreFor = (p: DragPayload) => (sameCol(p) ? [rowId, p.slot.rowId] : [rowId])
   // Ablageziel für gezogene Kacheln (Umschalt oder Alt/Option beim Loslassen = kopieren statt verschieben); die Funktionen
   // greifen auf den aktuellen Stand zu, darum wird bei jedem Zeichnen neu angemeldet.
   useEffect(() => cellRef.current ? registerDropTarget(cellRef.current, {
-    accepts: (p) => !!col.target && p.targetTable === col.target,
+    accepts: (p) => !!col.target && p.targetTable === col.target && (sameSlot(p) || targetAvailable(index, col, p.targetRow, ignoreFor(p), exists)),
     hover: (x, y, _copy, p) => { setOver(!sameSlot(p)); setIns(dropSpot(x, y, p)?.line ?? null) },
     leave: () => { setOver(false); setIns(null) },
     drop: (x, y, copy, p) => {
       setOver(false)
       setIns(null)
       const spot = dropSpot(x, y, p)
-      moveLink(doc, p.slot, slot, p.targetRow, copy, spot ? spot.before : undefined)
+      // Kopieren innerhalb derselben Spalte würde das Ziel doppelt verknüpfen: dort wird verschoben
+      moveLink(doc, p.slot, slot, p.targetRow, copy && (allowsMultiTarget(col) || !sameCol(p)), spot ? spot.before : undefined)
     },
   }) : undefined)
 
@@ -257,6 +269,7 @@ function RelationCell(props: {
       </div>
       {picking && target && (
         <Picker doc={doc} tables={tables} target={target} linked={ids}
+          unavailable={target.rowIds.filter((id) => !targetAvailable(index, col, id, [rowId], exists))}
           onPick={(id) => addLink(doc, table.id, rowId, col.id, id)}
           onClose={() => setPicking(false)} />
       )}
@@ -279,21 +292,84 @@ function BacklinkCell(props: {
   const ids = (props.index.backward.get(`${props.rowId}|${props.col.id}`) ?? [])
     .filter((id) => rowExists(props.doc, props.source.id, id))
   const anim = useAnimatedList(ids, (id) => id)
-  const [editingRow, setEditingRow] = useState<string | null>(null)
+  const [linking, setLinking] = useState<{ current: string | null } | null>(null) // Rückverweis ändern (current) oder neu hinzufügen (null)
+  const target = props.tables.find((t) => t.id === props.col.target)
+  const multi = allowsMultiTarget(props.col) // sonst steht im Rückverweis höchstens ein Datensatz
   return (
     <div className="c rel backlink">
       <div className="tiles">
         {anim.entries.map((e) => (
           <AnimItem key={e.key} phase={e.phase} onExited={() => anim.done(e.key)}>
-            <Tile doc={props.doc} table={props.source} rowId={e.item} muted onClick={() => setEditingRow(e.item)} />
+            <Tile doc={props.doc} table={props.source} rowId={e.item} muted onClick={() => setLinking({ current: e.item })} />
           </AnimItem>
         ))}
         {anim.entries.length === 0 && <span className="empty">–</span>}
+        {target && (multi || ids.length === 0) && <button type="button" className="add-tile" onClick={() => setLinking({ current: null })} title={`Datensatz aus „${props.source.name}“ verknüpfen`}>+</button>}
       </div>
-      {editingRow && rowExists(props.doc, props.source.id, editingRow) && (
-        <EditRecordDialog doc={props.doc} tables={props.tables} table={props.source} rowId={editingRow} onClose={() => setEditingRow(null)} />
+      {linking && target && (
+        <BacklinkPicker doc={props.doc} source={props.source} col={props.col} target={target} rowId={props.rowId} current={linking.current} linked={ids} multi={multi} onClose={() => setLinking(null)} />
       )}
     </div>
+  )
+}
+
+/**
+ * Rückverweis bearbeiten (Klick auf eine Kachel in der Zieltabelle): aus Sicht des Datensatzes, den man gerade sieht, wird
+ * gewählt, welcher Datensatz der Quelltabelle hier stehen soll – oder keiner. `current` ist der bisherige (null = neu hinzufügen).
+ * Die Wahl ersetzt `current` sofort; bei Spalten mit „höchstens eine Verknüpfung“ verliert der gewählte Datensatz seine
+ * bisherige Verknüpfung.
+ */
+function BacklinkPicker(props: { doc: Y.Doc; source: TableInfo; col: ColumnInfo; target: TableInfo; rowId: string; current: string | null; linked: string[]; multi: boolean; onClose: () => void }) {
+  const { doc, source, col, target, rowId } = props
+  const reprs = useReprs()
+  const [q, setQ] = useState('')
+  const [current, setCurrent] = useState(props.current) // bleibt offen: die Wahl gilt sofort, man kann weiter ändern
+  const single = RELATION.config(col).single
+  const titleOf = (t: TableInfo, id: string) => reprs(t.id)?.get(id)?.title ?? summarize(doc, t, id).title
+  // Datensätze, die schon an anderer Stelle in diesem Feld stehen, sind nicht noch einmal wählbar
+  const rows = source.rowIds
+    .filter((id) => id === current || !props.linked.includes(id))
+    .filter((id) => {
+      const s = reprs(source.id)?.get(id) ?? summarize(doc, source, id)
+      return [s.title, ...s.subs].join(' ').toLowerCase().includes(q.toLowerCase())
+    })
+  const choose = (id: string | null) => {
+    if (id === current) return
+    doc.transact(() => {
+      if (current) removeLink(doc, source.id, current, col.id, rowId)
+      if (id) {
+        if (single) for (const x of buildLinkIndex(doc).forward.get(`${id}|${col.id}`) ?? []) removeLink(doc, source.id, id, col.id, x)
+        // ohne Mehrfach-Verknüpfung steht hier höchstens ein Datensatz: andere Verweise auf diesen entfallen
+        if (!props.multi) for (const r of buildLinkIndex(doc).backward.get(`${rowId}|${col.id}`) ?? []) removeLink(doc, source.id, r, col.id, rowId)
+        addLink(doc, source.id, id, col.id, rowId)
+      }
+    })
+    setCurrent(id)
+  }
+  const radio = (id: string | null, label: string, content: ReactNode) => {
+    const on = id === current
+    return (
+      <div key={id ?? 'none'} className={`pick-item radio${on ? ' on' : ''}`} role="radio" aria-checked={on} aria-label={label} tabIndex={0}
+        onClick={() => choose(id)} onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); choose(id) } }}>
+        <span className="pick-mark" aria-hidden />
+        {content}
+      </div>
+    )
+  }
+  return (
+    <Modal onClose={props.onClose}>
+      <div className="dialog picker" onMouseDown={(e) => e.stopPropagation()} onKeyDown={(e) => e.key === 'Escape' && props.onClose()}>
+        <h3>Datensatz aus „{source.name}“ für „{titleOf(target, rowId)}“</h3>
+        <p className="hint">Spalte „{col.name}“ in „{source.name}“ verweist auf diesen Datensatz.</p>
+        <input autoFocus placeholder="Suchen …" value={q} onChange={(e) => setQ(e.target.value)} />
+        <div className="picker-list" role="radiogroup" aria-label={`Datensatz aus ${source.name}`}>
+          {radio(null, 'Keine Verknüpfung', <span className="pick-none">Keine Verknüpfung</span>)}
+          {rows.map((id) => radio(id, titleOf(source, id), <Tile doc={doc} table={source} rowId={id} display="full" />))}
+          {rows.length === 0 && <p className="hint">Keine passenden Datensätze.</p>}
+        </div>
+        <div className="actions"><button type="button" className="primary" onClick={props.onClose}>Fertig</button></div>
+      </div>
+    </Modal>
   )
 }
 
