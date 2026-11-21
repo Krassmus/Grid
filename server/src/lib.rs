@@ -49,11 +49,23 @@ enum Event {
     Members,
 }
 
+/// Einstellungen des Servers.
+#[derive(Clone, Default)]
+pub struct Config {
+    /// Neue Konten werden gleich freigegeben (z. B. im eigenen Netz); sonst warten sie auf `accounts approve`.
+    pub open_registration: bool,
+    /// Abo und Speicherkontingent erzwingen (Cloud). Ohne: alles frei, wie im eigenen Netz.
+    pub billing: bool,
+    /// Schlüssel für die Verwaltungsschnittstelle `/admin/…` (z. B. für einen Webshop); ohne ist sie abgeschaltet.
+    pub admin_key: Option<String>,
+    /// Adresse, unter der Benutzer ihr Abo verwalten (wird in Grid verlinkt).
+    pub manage_url: Option<String>,
+}
+
 pub struct AppState {
     store: Store,
     secret: Vec<u8>,
-    /// Neue Konten werden gleich freigegeben (z. B. im eigenen Netz); sonst warten sie auf `accounts approve`.
-    open_registration: bool,
+    cfg: Config,
     rooms: Mutex<HashMap<String, Arc<Room>>>,
     /// Abgespielte Admin-Protokolle (fällt bei jedem neuen Eintrag weg)
     members: Mutex<HashMap<String, Arc<adminlog::State>>>,
@@ -62,12 +74,23 @@ pub struct AppState {
 
 pub type Shared = Arc<AppState>;
 
+struct Writable { ok: bool, code: &'static str, reason: String }
+
+fn human(b: i64) -> String {
+    let b = b.max(0) as f64;
+    if b >= 1e9 { format!("{:.1} GB", b / 1e9) } else if b >= 1e6 { format!("{:.0} MB", b / 1e6) } else { format!("{:.0} KB", b / 1e3) }
+}
+
 pub fn app(data: &std::path::Path, open_registration: bool) -> rusqlite::Result<Router> {
+    app_with(data, Config { open_registration, ..Config::default() })
+}
+
+pub fn app_with(data: &std::path::Path, cfg: Config) -> rusqlite::Result<Router> {
     let store = Store::open(data)?;
     let state = Arc::new(AppState {
         secret: store.secret()?,
         store,
-        open_registration,
+        cfg,
         rooms: Mutex::new(HashMap::new()),
         members: Mutex::new(HashMap::new()),
         next_client: Mutex::new(0),
@@ -76,6 +99,9 @@ pub fn app(data: &std::path::Path, open_registration: bool) -> rusqlite::Result<
         .route("/health", get(|| async { "ok" }))
         .route("/challenge", get(challenge))
         .route("/login", post(login))
+        .route("/me", get(me))
+        .route("/admin/accounts", get(admin_accounts))
+        .route("/admin/accounts/{id}/plan", axum::routing::put(admin_plan))
         .route("/docs", get(list_docs))
         .route("/docs/{doc}/members", get(members))
         .route("/docs/{doc}/admin", post(post_admin))
@@ -131,7 +157,7 @@ async fn login(State(s): State<Shared>, Json(l): Json<Login>) -> Response {
     let account = match s.store.account(&l.id) {
         Ok(Some(a)) => a,
         Ok(None) => {
-            if s.store.add_account(&l.id, &pubkey, s.open_registration).is_err() { return reply(StatusCode::INTERNAL_SERVER_ERROR, "error", "Speicherfehler"); }
+            if s.store.add_account(&l.id, &pubkey, s.cfg.open_registration).is_err() { return reply(StatusCode::INTERNAL_SERVER_ERROR, "error", "Speicherfehler"); }
             match s.store.account(&l.id) { Ok(Some(a)) => a, _ => return reply(StatusCode::INTERNAL_SERVER_ERROR, "error", "Speicherfehler") }
         }
         Err(_) => return reply(StatusCode::INTERNAL_SERVER_ERROR, "error", "Speicherfehler"),
@@ -187,8 +213,103 @@ impl AppState {
         self.store.access(doc, account).map_err(|e| e.to_string())
     }
 
+    /// Admins des Dokuments (nach Kennung sortiert).
+    fn admins_of(&self, doc: &str) -> Result<Vec<String>, String> {
+        if let Some(st) = self.log_state(doc)? {
+            return Ok(st.members.iter().filter(|(_, m)| m.role == "admin").map(|(id, _)| id.clone()).collect());
+        }
+        let mut v: Vec<String> = self.store.legacy_members(doc).map_err(|e| e.to_string())?.into_iter().filter(|(_, r)| r == "admin").map(|(a, _)| a).collect();
+        v.sort();
+        Ok(v)
+    }
+
+    /// Besitzer: wem der Speicher des Dokuments zugerechnet wird. Wird beim ersten Bedarf aus dem Protokoll abgeleitet und gemerkt.
+    fn owner_of(&self, doc: &str) -> Result<Option<String>, String> {
+        if let Some(o) = self.store.owner(doc).map_err(|e| e.to_string())? { return Ok(Some(o)); }
+        let first = match self.entries(doc)?.first() {
+            Some(e) => Some(e.actor.clone()),
+            None => self.admins_of(doc)?.into_iter().next(),
+        };
+        if let Some(o) = &first { self.store.set_owner(doc, o).map_err(|e| e.to_string())?; }
+        Ok(first)
+    }
+
+    /// Wer das Dokument bezahlt: der Besitzer, solange sein Abo läuft, sonst der erste Admin mit laufendem Abo.
+    fn payer_of(&self, doc: &str) -> Result<Option<store::Account>, String> {
+        let owner = self.owner_of(doc)?;
+        let paying = |id: &str| -> Result<Option<store::Account>, String> {
+            Ok(self.store.account(id).map_err(|e| e.to_string())?.filter(|a| a.approved() && a.paid_now()))
+        };
+        if let Some(o) = &owner { if let Some(a) = paying(o)? { return Ok(Some(a)); } }
+        for id in self.admins_of(doc)? { if let Some(a) = paying(&id)? { return Ok(Some(a)); } }
+        Ok(None)
+    }
+
+    /// Darf in das Dokument geschrieben werden? Lesen geht immer; Schreiben braucht (bei eingeschaltetem Abo) einen
+    /// zahlenden Admin und freien Speicher. Die Grenze ist weich: der Schreibvorgang, der sie überschreitet, geht noch durch.
+    fn writable(&self, doc: &str) -> Writable {
+        let ok = Writable { ok: true, code: "", reason: String::new() };
+        if !self.cfg.billing { return ok; }
+        let deny = |code: &'static str, reason: String| Writable { ok: false, code, reason };
+        let payer = match self.payer_of(doc) {
+            Ok(Some(p)) => p,
+            Ok(None) => return deny("no-plan", "Kein Admin dieses Dokuments hat ein aktives Abo. Das Dokument ist nur lesbar.".into()),
+            Err(e) => return deny("error", e),
+        };
+        let used = if self.owner_of(doc).ok().flatten().as_deref() == Some(payer.id.as_str()) { self.store.owned_bytes(&payer.id) } else { self.store.doc_bytes(doc) }.unwrap_or(0);
+        if used > payer.quota {
+            return deny("quota", format!("Der Speicher ist voll ({} von {}). Das Dokument ist nur lesbar.", human(used), human(payer.quota)));
+        }
+        ok
+    }
+
     fn notify(&self, doc: &str) {
         if let Some(r) = self.rooms.lock().unwrap_or_else(|e| e.into_inner()).get(doc) { let _ = r.tx.send(Event::Members); }
+    }
+}
+
+/// Abo und Speicher des angemeldeten Kontos.
+async fn me(State(s): State<Shared>, h: HeaderMap) -> Response {
+    let Some(id) = current(&s, &h) else { return StatusCode::UNAUTHORIZED.into_response() };
+    let Ok(Some(a)) = s.store.account(&id) else { return StatusCode::UNAUTHORIZED.into_response() };
+    Json(serde_json::json!({
+        "id": a.id, "plan": a.plan, "active": a.paid_now(), "paidUntil": a.paid_until, "quota": a.quota,
+        "used": s.store.owned_bytes(&a.id).unwrap_or(0), "billing": s.cfg.billing, "manageUrl": s.cfg.manage_url,
+    })).into_response()
+}
+
+fn is_admin_key(s: &AppState, h: &HeaderMap) -> bool {
+    let Some(key) = &s.cfg.admin_key else { return false };
+    let given = h.get(header::AUTHORIZATION).and_then(|v| v.to_str().ok()).and_then(|v| v.strip_prefix("Bearer ")).unwrap_or("");
+    given.len() == key.len() && given.bytes().zip(key.bytes()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+/// Verwaltung (für Webshop, Zahlungsabwickler): alle Konten mit Abo und Verbrauch.
+async fn admin_accounts(State(s): State<Shared>, h: HeaderMap) -> Response {
+    if s.cfg.admin_key.is_none() { return StatusCode::NOT_FOUND.into_response(); }
+    if !is_admin_key(&s, &h) { return StatusCode::UNAUTHORIZED.into_response(); }
+    match s.store.accounts() {
+        Ok(list) => Json(list.into_iter().map(|a| serde_json::json!({
+            "id": a.id, "status": a.status, "plan": a.plan, "active": a.paid_now(), "paidUntil": a.paid_until, "quota": a.quota,
+            "used": s.store.owned_bytes(&a.id).unwrap_or(0),
+        })).collect::<Vec<_>>()).into_response(),
+        Err(e) => fail(e),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct PlanBody { plan: String, #[serde(rename = "paidUntil")] paid_until: Option<i64>, quota: Option<i64> }
+
+/// Abo eines Kontos setzen (`paid` mit Ablaufzeit und Speicher, oder `free`).
+async fn admin_plan(State(s): State<Shared>, h: HeaderMap, Path(id): Path<String>, Json(b): Json<PlanBody>) -> Response {
+    if s.cfg.admin_key.is_none() { return StatusCode::NOT_FOUND.into_response(); }
+    if !is_admin_key(&s, &h) { return StatusCode::UNAUTHORIZED.into_response(); }
+    if !matches!(b.plan.as_str(), "paid" | "free") { return (StatusCode::BAD_REQUEST, "plan: paid oder free").into_response(); }
+    match s.store.account(&id) { Ok(Some(_)) => {} Ok(None) => return StatusCode::NOT_FOUND.into_response(), Err(e) => return fail(e) }
+    let quota = if b.plan == "free" { 0 } else { b.quota.unwrap_or(5_000_000_000).max(0) };
+    match s.store.set_plan(&id, &b.plan, if b.plan == "free" { None } else { b.paid_until }, quota) {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => fail(e),
     }
 }
 
@@ -218,6 +339,8 @@ async fn get_blob(State(s): State<Shared>, h: HeaderMap, Path((doc, key)): Path<
 async fn put_blob(State(s): State<Shared>, h: HeaderMap, Path((doc, key)): Path<(String, String)>, body: Bytes) -> Response {
     if let Err(r) = doc_access(&s, &h, &doc) { return r; }
     if !valid_key(&key) { return StatusCode::BAD_REQUEST.into_response(); }
+    let w = s.writable(&doc);
+    if !w.ok { return (StatusCode::PAYMENT_REQUIRED, w.reason).into_response(); }
     // Originale sind inhaltsadressiert: der Name muss zu den Bytes passen.
     if !key.ends_with(".thumb") {
         let hex = auth::hex(&Sha256::digest(&body));
@@ -233,7 +356,8 @@ async fn members(State(s): State<Shared>, h: HeaderMap, Path(doc): Path<String>)
     let role = match s.role(&doc, &id) { Ok(Some(r)) => r, Ok(None) => return StatusCode::FORBIDDEN.into_response(), Err(e) => return fail(e) };
     let entries = match s.entries(&doc) { Ok(e) => e, Err(e) => return fail(e) };
     let requests = if role == "admin" { s.store.requests(&doc).unwrap_or_default() } else { Vec::new() };
-    Json(serde_json::json!({ "role": role, "entries": entries, "requests": requests })).into_response()
+    let w = s.writable(&doc);
+    Json(serde_json::json!({ "role": role, "entries": entries, "requests": requests, "writable": { "ok": w.ok, "code": w.code, "reason": w.reason } })).into_response()
 }
 
 /// Neuer Eintrag im Admin-Protokoll (vom Aufrufer unterschrieben).
@@ -357,6 +481,11 @@ async fn session(state: Shared, id: String, mut socket: WebSocket) {
     };
     if state.store.touch_doc(&id, hello.name.as_deref()).is_err() { return deny(&mut socket, "error", "Speicherfehler").await; }
     if socket.send(Message::Text("{\"t\":\"ok\"}".into())).await.is_err() { return; }
+    let readonly = |w: &Writable| Message::Text(serde_json::json!({ "t": "readonly", "code": w.code, "reason": w.reason }).to_string().into());
+    {
+        let w = state.writable(&id);
+        if !w.ok && socket.send(readonly(&w)).await.is_err() { return; }
+    }
 
     let me = {
         let mut n = state.next_client.lock().unwrap_or_else(|e| e.into_inner());
@@ -364,6 +493,7 @@ async fn session(state: Shared, id: String, mut socket: WebSocket) {
         *n
     };
     let mut rx = room.tx.subscribe();
+    let mut was_readonly = false;
 
     // 2. Eigenen Zustandsvektor anbieten
     let sv = room.doc.lock().unwrap_or_else(|e| e.into_inner()).transact().state_vector().encode_v1();
@@ -381,12 +511,34 @@ async fn session(state: Shared, id: String, mut socket: WebSocket) {
                 match kind {
                     MSG_STEP1 => {
                         let Ok(sv) = StateVector::decode_v1(body) else { continue };
-                        let diff = room.doc.lock().unwrap_or_else(|e| e.into_inner()).transact().encode_diff_v1(&sv);
+                        let (diff, mine) = {
+                            let doc = room.doc.lock().unwrap_or_else(|e| e.into_inner());
+                            let txn = doc.transact();
+                            (txn.encode_diff_v1(&sv), txn.state_vector().encode_v1())
+                        };
                         if socket.send(frame(MSG_UPDATE, &diff)).await.is_err() { break }
+                        // und umgekehrt: der Client schickt, was dem Server fehlt (z. B. nach einer Zeit ohne Schreibrecht)
+                        if socket.send(frame(MSG_STEP1, &mine)).await.is_err() { break }
+                        // Stand der Schreibberechtigung (so erfährt der Client auch, wenn ein Abo inzwischen aktiv ist)
+                        let w = state.writable(&id);
+                        let m = if w.ok { Message::Text("{\"t\":\"writable\"}".into()) } else { readonly(&w) };
+                        if socket.send(m).await.is_err() { break }
                     }
                     MSG_UPDATE => {
                         if body.len() <= 2 { continue } // leere Differenz
                         if !state.access(&id, &account.id).unwrap_or(false) { break } // inzwischen entfernt
+                        let w = state.writable(&id);
+                        if !w.ok { // kein Abo oder Speicher voll: nicht übernehmen, Absender erfährt den Grund
+                            was_readonly = true;
+                            if socket.send(readonly(&w)).await.is_err() { break }
+                            continue
+                        }
+                        if was_readonly { // zwischendurch Abgelehntes fehlt: Zustand neu abgleichen
+                            was_readonly = false;
+                            let sv = room.doc.lock().unwrap_or_else(|e| e.into_inner()).transact().state_vector().encode_v1();
+                            if socket.send(frame(MSG_STEP1, &sv)).await.is_err() { break }
+                            if socket.send(Message::Text("{\"t\":\"writable\"}".into())).await.is_err() { break }
+                        }
                         let Ok(update) = Update::decode_v1(body) else { continue };
                         let full = {
                             let doc = room.doc.lock().unwrap_or_else(|e| e.into_inner());

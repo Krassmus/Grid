@@ -551,3 +551,9 @@ body.tile-dragging.tile-copy, body.tile-dragging.tile-copy * { cursor: copy !imp
 .invite-info small { color: var(--c-666677); font-size: 12px; word-break: break-all; }
 .members-dialog textarea, .sync-dialog textarea { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--c-d5dce0); border-radius: 8px; background: var(--c-ffffff); color: inherit; font: 12px ui-monospace, Menlo, monospace; resize: vertical; word-break: break-all; }
 .member-row small { white-space: nowrap; }
+.sync-btn.readonly .dot { background: #ff9f0a; }
+.sync-status.online .dot { background: #1a7f37; }
+.plan-line { margin: 10px 0 0; font-size: 13px; }
+.plan-line p { margin: 4px 0; }
+.plan-line code { font-family: ui-monospace, Menlo, monospace; font-size: 12px; background: var(--c-e9edef); padding: 1px 5px; border-radius: 5px; word-break: break-all; }
+.sync-status.readonly .dot { background: #ff9f0a; }

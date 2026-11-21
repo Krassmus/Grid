@@ -15,7 +15,7 @@ pub struct DocInfo {
 /// Ab so vielen Einträgen ersetzt ein Gesamtzustand das Protokoll eines Dokuments.
 pub const COMPACT_AT: i64 = 200;
 
-fn now() -> i64 {
+pub fn now() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
 }
 
@@ -34,6 +34,16 @@ impl Store {
              CREATE TABLE IF NOT EXISTS admin_log (doc TEXT NOT NULL, seq INTEGER NOT NULL, entry TEXT NOT NULL, PRIMARY KEY (doc, seq));
              CREATE TABLE IF NOT EXISTS join_requests (doc TEXT NOT NULL, account TEXT NOT NULL, pub TEXT NOT NULL, name TEXT NOT NULL, time INTEGER NOT NULL, PRIMARY KEY (doc, account));",
         )?;
+        // Spalten, die erst später dazukamen (bestehende Datenbanken werden erweitert)
+        for (table, column, ddl) in [
+            ("accounts", "plan", "TEXT NOT NULL DEFAULT 'free'"),
+            ("accounts", "paid_until", "INTEGER"),
+            ("accounts", "quota", "INTEGER NOT NULL DEFAULT 0"),
+            ("docs", "owner", "TEXT"),
+        ] {
+            let have: i64 = c.query_row(&format!("SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = '{column}'"), [], |r| r.get(0))?;
+            if have == 0 { c.execute(&format!("ALTER TABLE {table} ADD COLUMN {column} {ddl}"), [])?; }
+        }
         Ok(Store(Mutex::new(c)))
     }
 
@@ -118,7 +128,7 @@ impl Store {
 
     pub fn account(&self, id: &str) -> rusqlite::Result<Option<Account>> {
         self.conn()
-            .query_row("SELECT id, pub, status, created FROM accounts WHERE id = ?1", [id], Account::from_row)
+            .query_row("SELECT id, pub, status, created, plan, paid_until, quota FROM accounts WHERE id = ?1", [id], Account::from_row)
             .optional()
     }
 
@@ -133,7 +143,7 @@ impl Store {
 
     pub fn accounts(&self) -> rusqlite::Result<Vec<Account>> {
         let c = self.conn();
-        let mut s = c.prepare("SELECT id, pub, status, created FROM accounts ORDER BY created")?;
+        let mut s = c.prepare("SELECT id, pub, status, created, plan, paid_until, quota FROM accounts ORDER BY created")?;
         let rows = s.query_map([], Account::from_row)?;
         rows.collect()
     }
@@ -145,6 +155,11 @@ impl Store {
 
     pub fn set_status(&self, id: &str, status: &str) -> rusqlite::Result<()> {
         self.conn().execute("UPDATE accounts SET status = ?2 WHERE id = ?1", params![id, status])?;
+        Ok(())
+    }
+
+    pub fn set_plan(&self, id: &str, plan: &str, paid_until: Option<i64>, quota: i64) -> rusqlite::Result<()> {
+        self.conn().execute("UPDATE accounts SET plan = ?2, paid_until = ?3, quota = ?4 WHERE id = ?1", params![id, plan, paid_until, quota])?;
         Ok(())
     }
 
@@ -165,6 +180,40 @@ impl Store {
             params![doc, account],
         )?;
         c.query_row("SELECT 1 FROM members WHERE doc = ?1 AND account = ?2", params![doc, account], |_| Ok(())).optional().map(|r| r.is_some())
+    }
+
+    // ---------- Besitzer und Speicherverbrauch ----------
+
+    pub fn owner(&self, doc: &str) -> rusqlite::Result<Option<String>> {
+        Ok(self.conn().query_row("SELECT owner FROM docs WHERE id = ?1", [doc], |r| r.get::<_, Option<String>>(0)).optional()?.flatten().filter(|o| !o.is_empty()))
+    }
+
+    /// Hält den Besitzer fest (legt die Zeile des Dokuments bei Bedarf an); ein vorhandener bleibt.
+    pub fn set_owner(&self, doc: &str, account: &str) -> rusqlite::Result<()> {
+        self.conn().execute(
+            "INSERT INTO docs (id, name, updated, owner) VALUES (?1, '', ?3, ?2)
+             ON CONFLICT(id) DO UPDATE SET owner = COALESCE(NULLIF(owner, ''), ?2)",
+            params![doc, account, now()],
+        )?;
+        Ok(())
+    }
+
+    /// Belegter Speicher eines Dokuments (Protokoll plus Dateien) in Bytes.
+    pub fn doc_bytes(&self, doc: &str) -> rusqlite::Result<i64> {
+        self.conn().query_row(
+            "SELECT (SELECT COALESCE(SUM(LENGTH(data)), 0) FROM log WHERE doc = ?1) + (SELECT COALESCE(SUM(LENGTH(data)), 0) FROM blobs WHERE doc = ?1)",
+            [doc], |r| r.get(0),
+        )
+    }
+
+    /// Belegter Speicher aller Dokumente, die dem Konto gehören.
+    pub fn owned_bytes(&self, account: &str) -> rusqlite::Result<i64> {
+        self.conn().query_row(
+            "SELECT COALESCE(SUM((SELECT COALESCE(SUM(LENGTH(data)), 0) FROM log WHERE log.doc = docs.id)
+                               + (SELECT COALESCE(SUM(LENGTH(data)), 0) FROM blobs WHERE blobs.doc = docs.id)), 0)
+             FROM docs WHERE owner = ?1",
+            [account], |r| r.get(0),
+        )
     }
 
     // ---------- Admin-Protokoll und Beitrittsanfragen ----------
@@ -234,11 +283,19 @@ pub struct Account {
     pub pubkey: String,
     pub status: String,
     pub created: i64,
+    /// `free` oder `paid`
+    pub plan: String,
+    /// Ende des bezahlten Zeitraums (Unix-Sekunden); `None` = unbefristet
+    pub paid_until: Option<i64>,
+    /// Speicher in Bytes, den das Abo umfasst
+    pub quota: i64,
 }
 
 impl Account {
     fn from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Account> {
-        Ok(Account { id: r.get(0)?, pubkey: r.get(1)?, status: r.get(2)?, created: r.get(3)? })
+        Ok(Account { id: r.get(0)?, pubkey: r.get(1)?, status: r.get(2)?, created: r.get(3)?, plan: r.get(4)?, paid_until: r.get(5)?, quota: r.get(6)? })
     }
     pub fn approved(&self) -> bool { self.status == "approved" }
+    /// Bezahltes Abo, das gerade läuft?
+    pub fn paid_now(&self) -> bool { self.plan == "paid" && self.paid_until.is_none_or(|t| t > now()) }
 }

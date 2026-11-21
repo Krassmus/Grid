@@ -1,6 +1,6 @@
 # Grid: Synchronisation, Konten und Mitglieder
 
-Stand: Phase 1 (Sync), Phase 2 (Konten) und Phase 3 (Mitglieder) sind gebaut; Phase 4 und 5 sind Entwurf. Dieses Dokument ist die gemeinsame Grundlage; Abweichungen im Code gehören hier nachgetragen.
+Stand: Phase 1 (Sync), Phase 2 (Konten), Phase 3 (Mitglieder) und der Kern von Phase 4 (Abo und Speicher, ohne Zahlungsabwicklung) sind gebaut; der Rest von Phase 4 und Phase 5 sind Entwurf. Dieses Dokument ist die gemeinsame Grundlage; Abweichungen im Code gehören hier nachgetragen.
 
 ## Ziele
 
@@ -70,10 +70,22 @@ Der Zugriff auf Dokumente richtet sich nach dem Konto (Abschnitt 2): Ein Dokumen
 
 Voraussetzung: Das Konto der Person ist auf dem Server freigegeben (bei offener Registrierung automatisch). Name und Prüfnummer-Wörter statt Hex sind denkbare Verbesserungen.
 
-### 4. Cloud townwork.eu (Phase 4)
+### 4. Cloud townwork.eu (Phase 4: Abo und Speicher gebaut, Zahlung offen)
 
-- Server-Modul für Konten, Abo und Speicherkontingent: Zugriff nur, wenn mindestens ein Admin des Dokuments ein bezahltes Zusatzkonto hat und das Kontingent nicht überschritten ist.
-- Bezahlen: In-App-Kauf über die Stores (Apple/Google); Belege prüft der Server. Ein Konto kann zusätzlich über das Web aktiviert werden, damit niemand doppelt zahlt.
+**Grundsatz:** Lesen geht immer, Schreiben braucht ein Abo. Nie werden Daten als Geisel gehalten.
+
+- Der Server hat zwei Betriebsarten: ohne `--billing` (eigenes Netz, Intranet) ist alles frei; mit `--billing` (Cloud) gilt das Folgende.
+- Jedes Konto hat ein **Abo**: `free` oder `paid` mit Ablaufzeit (`paid_until`, leer = unbefristet) und **Speicher** (`quota`, Bytes). Kostenlose Konten dürfen Mitglied in Dokumenten anderer sein, besitzen aber selbst keinen Speicher.
+- Jedes Dokument hat einen **Besitzer** (der Ersteller, aus dem Anfang des Admin-Protokolls abgeleitet) und einen **Zahler**: der Besitzer, solange sein Abo läuft, sonst der erste Admin mit laufendem Abo. Gibt es keinen, ist das Dokument für alle nur lesbar.
+- Speicher = Update-Protokoll plus Dateien. Der Verbrauch aller Dokumente eines Besitzers zählt gegen dessen Speicher; die Grenze ist weich (der Schreibvorgang, der sie überschreitet, geht noch durch).
+- Schreiben wird abgelehnt, wenn kein Zahler da ist oder der Speicher voll ist: WebSocket-Updates werden nicht übernommen (der Server meldet `{"t":"readonly","code":"no-plan|quota","reason":"…"}`), Datei-Uploads bekommen `402`. Der Client behält alle Änderungen lokal und gleicht ab, sobald es wieder geht (`{"t":"writable"}`; der Abgleich passiert beim nächsten Schreiben, beim Neuverbinden und alle 60 Sekunden).
+- `GET /me`: Abo, Ablauf, Speicher, Verbrauch, Abrechnung an/aus, Link „Abo verwalten“ (`GRID_MANAGE_URL`). Grid zeigt das im Dialog „Cloud-Synchronisation“.
+- Abo setzen (bis die Zahlungsabwicklung steht): `grid-server accounts plan <Kennung> paid --until 2027-12-31 --quota 5GB` bzw. `free`. Für einen Webshop oder Zahlungsabwickler gibt es dieselbe Funktion per HTTP: `PUT /admin/accounts/<Kennung>/plan {"plan":"paid","paidUntil":<Unix-Sekunden>,"quota":<Bytes>}` und `GET /admin/accounts`, geschützt durch `Authorization: Bearer <GRID_ADMIN_KEY>` (ohne diese Umgebungsvariable ist die Schnittstelle abgeschaltet).
+
+**Noch offen (braucht eigene Konten bei den Anbietern und die rechtliche Klärung):**
+- **Web-Zahlung** (z. B. Stripe): ein kleiner Dienst auf townwork.eu nimmt die Zahlung entgegen und ruft bei Kauf, Verlängerung und Kündigung `PUT /admin/accounts/…/plan` auf. Das Konto ordnet der Kunde zu, indem Grid dem Webshop die Kontokennung nennt (Schaltfläche „Abo verwalten“).
+- **In-App-Kauf** (Apple/Google): die App kauft über den Store, schickt den Beleg an den Server, der ihn beim Store prüft und dann dasselbe Abo setzt. Ein Konto, egal über welchen Weg bezahlt wurde; die Store-Gebühr trägt der Preis.
+- **E-Mail zum Konto** (Wiederherstellung bei Geräteverlust, Beglaubigung des öffentlichen Schlüssels durch townwork.eu) und eine Einstellung „Konto auf diesem Server nur mit Abo anlegen“ gehören ebenfalls hierher.
 
 ### 5. Betrieb
 

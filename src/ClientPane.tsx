@@ -456,7 +456,7 @@ function TextInput({ doc, table, rowId, col, value }: { doc: Y.Doc; table: strin
 /** Wolke unten rechts: zeigt den Stand der Synchronisation, ein Klick öffnet die Einstellungen. */
 function SyncButton(props: { control: SyncControl; onClick: () => void }) {
   const { control } = props
-  const status = control.server ? control.state?.status ?? 'connecting' : 'none'
+  const status = control.server ? (control.state?.status === 'online' && control.state.readonly ? 'readonly' : control.state?.status ?? 'connecting') : 'none'
   const requests = control.members?.requests.length ?? 0
   const title = requests > 0 ? `${syncLabel(control)} – ${requests} Beitrittsanfrage${requests === 1 ? '' : 'n'}` : syncLabel(control)
   return (

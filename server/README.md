@@ -27,6 +27,24 @@ Die Befehle arbeiten direkt auf der Datenbank und gehen auch bei laufendem Serve
 
 **Umstellung vom alten Zugangsschlüssel:** `GRID_TOKEN` gibt es nicht mehr. Die Zeile `Environment=GRID_TOKEN=…` in der Service-Datei kann gelöscht werden. Bereits vorhandene Dokumente gehören dem ersten Konto, das sie öffnet.
 
+## Abo und Speicher (Cloud)
+
+Ohne weitere Angaben ist der Server frei nutzbar (Intranet). Für die Cloud schaltest du die Abo-Pflicht ein:
+
+```bash
+grid-server --billing --open-registration --listen 127.0.0.1:8787 --data /var/lib/grid
+```
+
+Dann dürfen nur Konten mit laufendem Abo schreiben (Lesen geht immer); Mitglieder eines Dokuments schreiben auf Kosten eines zahlenden Admins. Abo setzen und prüfen:
+
+```bash
+grid-server accounts plan 6366823a paid --until 2027-12-31 --quota 5GB --data /var/lib/grid
+grid-server accounts plan 6366823a free --data /var/lib/grid
+grid-server accounts list --data /var/lib/grid        # zeigt auch das Abo
+```
+
+Weitere Umgebungsvariablen: `GRID_BILLING=1` (wie `--billing`), `GRID_ADMIN_KEY` (mindestens 16 Zeichen; schaltet die HTTP-Verwaltung `/admin/…` für einen Webshop ein), `GRID_MANAGE_URL` (Adresse, die Grid als „Abo verwalten“ anzeigt). Hintergrund und Pläne für Zahlung: `docs/SYNC.md`, Abschnitt 4.
+
 ## Hinter Apache (townwork.eu)
 
 Der Server lauscht nur lokal; Apache nimmt HTTPS entgegen und leitet unter `/grid/` weiter (WebSocket eingeschlossen).

@@ -11,7 +11,11 @@ import { getIdentity, onIdentityChanged, signMessage } from './identity'
 
 export type SyncStatus = 'connecting' | 'online' | 'offline' | 'pending' | 'denied'
 /** `pending` kann zweierlei heißen: `account` (Konto noch nicht freigegeben) oder `join` (ein Admin muss die Aufnahme ins Dokument bestätigen). */
-export interface SyncState { status: SyncStatus; reason?: string; kind?: 'account' | 'join' }
+export interface SyncState {
+  status: SyncStatus; reason?: string; kind?: 'account' | 'join'
+  /** Verbunden, aber der Server nimmt keine Änderungen an (kein Abo oder Speicher voll); lokal geht alles weiter. */
+  readonly?: { code: string; reason: string }
+}
 
 const REMOTE = Symbol('remote')
 const STEP1 = 0
@@ -73,6 +77,15 @@ export async function authedFetch(server: string, path: string, init: RequestIni
   return r.status === 401 ? go(true) : r
 }
 
+/** Abo und Speicher des Kontos auf einem Server. */
+export interface AccountInfo { id: string; plan: 'free' | 'paid'; active: boolean; paidUntil: number | null; quota: number; used: number; billing: boolean; manageUrl: string | null }
+
+export async function fetchAccountInfo(server: string): Promise<AccountInfo> {
+  const r = await authedFetch(server, '/me')
+  if (!r.ok) throw new Error(`Server antwortet mit ${r.status}`)
+  return r.json()
+}
+
 export interface CloudDoc { id: string; name: string; updated: number }
 
 export async function listCloudDocs(server: string): Promise<CloudDoc[]> {
@@ -92,6 +105,8 @@ export class SyncConnection {
   private relogin = false
   private offIdentity: () => void
   private expired = 0
+  private readonly: { code: string; reason: string } | null = null
+  private resync: ReturnType<typeof setTimeout> | undefined
 
   constructor(
     private doc: Y.Doc,
@@ -160,10 +175,19 @@ export class SyncConnection {
           this.online = true
           this.attempt = 0
           this.expired = 0
+          this.readonly = null
           this.onState({ status: 'online' })
           this.onNotice()
           ws.send(frame(STEP1, Y.encodeStateVector(this.doc)))
           void this.syncBlobs()
+        } else if (m.t === 'readonly') {
+          this.readonly = { code: m.code, reason: m.reason }
+          this.onState({ status: 'online', readonly: this.readonly })
+          // später noch einmal abgleichen: vielleicht ist das Abo inzwischen da, dann geht der aufgelaufene Stand hoch
+          clearTimeout(this.resync)
+          this.resync = setTimeout(() => { if (this.online) ws.send(frame(STEP1, Y.encodeStateVector(this.doc))) }, 60_000)
+        } else if (m.t === 'writable') {
+          if (this.readonly) { this.readonly = null; this.onState({ status: 'online' }) }
         } else if (m.t === 'members') {
           this.onNotice()
         } else if (m.t === 'denied') {
@@ -227,6 +251,7 @@ export class SyncConnection {
     this.online = false
     clearTimeout(this.retry)
     clearTimeout(this.blobTimer)
+    clearTimeout(this.resync)
     this.doc.off('update', this.onLocal)
     filesOf(this.doc).unobserve(this.onFilesChanged)
     const ws = this.ws

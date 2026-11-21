@@ -327,3 +327,123 @@ async fn members_survive_restart() {
     assert_eq!(get_members(&addr, &tb).await.1["role"], "member");
     assert!(join(&addr, &tb, &Doc::new()).await.is_ok());
 }
+
+// ---------- Abo und Speicherkontingent ----------
+
+async fn serve_with(dir: &std::path::Path, cfg: grid_server::Config) -> String {
+    let app = grid_server::app_with(&dir.join("t.db"), cfg).unwrap();
+    let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = l.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(l, app).await.unwrap() });
+    format!("127.0.0.1:{}", addr.port())
+}
+
+/// Sammelt eine Weile lang alle Textnachrichten der Verbindung.
+async fn texts(ws: &mut Ws, ms: u64) -> Vec<String> {
+    let mut out = Vec::new();
+    while let Ok(Some(Ok(m))) = tokio::time::timeout(std::time::Duration::from_millis(ms), ws.next()).await {
+        if let Message::Text(t) = m { out.push(t.to_string()); }
+    }
+    out
+}
+
+#[tokio::test]
+async fn writing_needs_a_plan_and_free_storage() {
+    let dir = tmp("billing");
+    let addr = serve_with(&dir, grid_server::Config { open_registration: true, billing: true, ..Default::default() }).await;
+    let a = acct(1);
+    let ta = token(&addr, &a).await;
+    let store = grid_server::Store::open(&dir.join("t.db")).unwrap();
+
+    // Ohne Abo: Verbindung geht, Schreiben wird abgelehnt und gemeldet, nichts wird gespeichert
+    let doc = Doc::new();
+    let t = doc.get_or_insert_text("t");
+    let mut ws = join(&addr, &ta, &doc).await.unwrap();
+    t.insert(&mut doc.transact_mut(), 0, "x");
+    ws.send(frame(1, &doc.transact().encode_state_as_update_v1(&StateVector::default()))).await.unwrap();
+    let got = texts(&mut ws, 400).await;
+    assert!(got.iter().any(|m| m.contains("readonly") && m.contains("no-plan")), "{got:?}");
+    let fresh = Doc::new();
+    let tf = fresh.get_or_insert_text("t");
+    let mut w2 = join(&addr, &ta, &fresh).await.unwrap();
+    pump(&mut w2, &fresh, |_| false).await;
+    assert_eq!(tf.get_string(&fresh.transact()), "", "abgelehnte Änderung darf nicht gespeichert sein");
+    let key = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824";
+    assert_eq!(status(&http("PUT", &addr, &format!("/blob/{DOC}/{key}"), Some(&ta), b"hello").await), 402);
+    let me = http("GET", &addr, "/me", Some(&ta), b"").await;
+    let me: serde_json::Value = serde_json::from_str(&me.1).unwrap();
+    assert_eq!((me["plan"].as_str(), me["active"].as_bool(), me["billing"].as_bool()), (Some("free"), Some(false), Some(true)));
+
+    // Mit Abo (kleines Kontingent): Schreiben geht, bis der Speicher voll ist (weiche Grenze)
+    store.set_plan(&a.id, "paid", None, 4000).unwrap();
+    let big = |n: usize| vec![b'a'; n];
+    let hash = |b: &[u8]| { use sha2::{Digest, Sha256}; Sha256::digest(b).iter().map(|x| format!("{x:02x}")).collect::<String>() };
+    let (b1, b2, b3) = (big(3000), big(3001), big(3002));
+    for (b, want) in [(&b1, 204), (&b2, 204), (&b3, 402)] {
+        let r = http("PUT", &addr, &format!("/blob/{DOC}/{}", hash(b)), Some(&ta), b).await;
+        assert_eq!(status(&r), want, "{}", r.1);
+    }
+    let me: serde_json::Value = serde_json::from_str(&http("GET", &addr, "/me", Some(&ta), b"").await.1).unwrap();
+    assert!(me["used"].as_i64().unwrap() >= 6000 && me["active"] == true);
+    // Lesen geht trotzdem immer
+    assert_eq!(status(&http("GET", &addr, &format!("/blob/{DOC}/{}", hash(&b1)), Some(&ta), b"").await), 200);
+
+    // Abgelaufenes Abo: wieder nur lesbar
+    store.set_plan(&a.id, "paid", Some(1), 4000).unwrap();
+    assert_eq!(status(&http("PUT", &addr, &format!("/blob/{DOC}/{key}"), Some(&ta), b"hello").await), 402);
+}
+
+#[tokio::test]
+async fn members_write_when_an_admin_pays_and_server_without_billing_is_free() {
+    // Ohne Abo-Pflicht (eigenes Netz) ist alles frei
+    let free_dir = tmp("nobilling");
+    let addr = serve(&free_dir, true).await;
+    let a = acct(1);
+    let ta = token(&addr, &a).await;
+    let key = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824";
+    assert_eq!(status(&http("PUT", &addr, &format!("/blob/{DOC}/{key}"), Some(&ta), b"hello").await), 204);
+    let me: serde_json::Value = serde_json::from_str(&http("GET", &addr, "/me", Some(&ta), b"").await.1).unwrap();
+    assert_eq!(me["billing"], false);
+
+    // Mit Abo-Pflicht: Ein kostenloses Mitglied darf schreiben, solange ein Admin des Dokuments bezahlt
+    let dir = tmp("billing-members");
+    let addr = serve_with(&dir, grid_server::Config { open_registration: true, billing: true, ..Default::default() }).await;
+    let (a, b) = (acct(1), acct(2));
+    let (ta, tb) = (token(&addr, &a).await, token(&addr, &b).await);
+    let store = grid_server::Store::open(&dir.join("t.db")).unwrap();
+    store.set_plan(&a.id, "paid", None, 1_000_000).unwrap();
+    join(&addr, &ta, &Doc::new()).await.unwrap(); // A legt das Dokument an
+    let mut chain = Chain::new();
+    let (g, h) = chain.entry(&a, "genesis", &a, "admin", "Anna");
+    assert_eq!(status(&post_entry(&addr, &ta, &g).await), 204);
+    chain.accept(h);
+    let (s, _) = chain.entry(&a, "set", &b, "member", "Ben");
+    assert_eq!(status(&post_entry(&addr, &ta, &s).await), 204);
+    assert_eq!(status(&http("PUT", &addr, &format!("/blob/{DOC}/{key}"), Some(&tb), b"hello").await), 204, "B schreibt auf Kosten von A");
+    // Endet As Abo, ist das Dokument für alle nur lesbar
+    store.set_plan(&a.id, "free", None, 0).unwrap();
+    assert_eq!(status(&http("PUT", &addr, &format!("/blob/{DOC}/{}", "0".repeat(64)), Some(&tb), b"x").await), 402);
+    let m = get_members(&addr, &tb).await.1;
+    assert_eq!(m["writable"]["ok"], false);
+}
+
+#[tokio::test]
+async fn admin_interface_sets_plans() {
+    let dir = tmp("adminapi");
+    let key = "ein-langer-verwaltungsschluessel";
+    let addr = serve_with(&dir, grid_server::Config { open_registration: true, billing: true, admin_key: Some(key.into()), ..Default::default() }).await;
+    let a = acct(1);
+    let ta = token(&addr, &a).await;
+    let body = br#"{"plan":"paid","quota":123456,"paidUntil":4102444800}"#;
+    let path = format!("/admin/accounts/{}/plan", a.id);
+    assert_eq!(status(&http("PUT", &addr, &path, Some("falsch"), body).await), 401);
+    assert_eq!(status(&http("PUT", &addr, &path, Some(&ta), body).await), 401, "Sitzungsschlüssel ersetzt den Verwaltungsschlüssel nicht");
+    assert_eq!(status(&http("PUT", &addr, &path, Some(key), body).await), 204);
+    let me: serde_json::Value = serde_json::from_str(&http("GET", &addr, "/me", Some(&ta), b"").await.1).unwrap();
+    assert_eq!((me["active"].as_bool(), me["quota"].as_i64(), me["paidUntil"].as_i64()), (Some(true), Some(123456), Some(4102444800)));
+    let list = http("GET", &addr, "/admin/accounts", Some(key), b"").await;
+    assert!(list.1.contains(&a.id));
+    // Ohne Verwaltungsschlüssel in der Einstellung gibt es die Schnittstelle gar nicht
+    let addr2 = serve(&tmp("adminapi-off"), true).await;
+    assert_eq!(status(&http("GET", &addr2, "/admin/accounts", Some(key), b"").await), 404);
+}

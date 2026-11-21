@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Modal } from './Modal'
 import { exportAccount, fingerprint, getIdentity, importAccount, onIdentityChanged, type Identity } from './identity'
-import { AuthError, listCloudDocs, normalizeServer, type CloudDoc, type SyncState } from './syncClient'
+import { AuthError, fetchAccountInfo, listCloudDocs, normalizeServer, type AccountInfo, type CloudDoc, type SyncState } from './syncClient'
 import { MembersDialog, type MembersControl } from './MembersDialog'
 
 const LAST = 'grid-sync-last-server'
@@ -19,7 +19,7 @@ export interface SyncControl extends MembersControl {
 export const syncLabel = (c: SyncControl) => {
   if (!c.server) return 'Nicht synchronisiert'
   switch (c.state?.status) {
-    case 'online': return 'Synchronisiert'
+    case 'online': return c.state.readonly ? 'Nur lesen' : 'Synchronisiert'
     case 'offline': return 'Offline – wird später abgeglichen'
     case 'pending': return c.state.kind === 'join' ? 'Wartet auf Zustimmung eines Admins' : 'Wartet auf Freigabe des Kontos'
     case 'denied': return `Abgelehnt: ${c.state.reason ?? 'kein Zugriff'}`
@@ -40,12 +40,36 @@ function useAccount(): Identity | null {
   return me
 }
 
+const GB = 1e9
+const fmtSize = (b: number) => (b >= GB ? `${(b / GB).toFixed(1)} GB` : b >= 1e6 ? `${Math.round(b / 1e6)} MB` : `${Math.round(b / 1e3)} KB`).replace('.', ',')
+
+/** Abo und Speicher des Kontos (nur auf Servern mit Abo-Pflicht). */
+function PlanLine(props: { server: string; refresh: unknown }) {
+  const [info, setInfo] = useState<AccountInfo | null>(null)
+  useEffect(() => {
+    let alive = true
+    fetchAccountInfo(props.server).then((i) => alive && setInfo(i)).catch(() => alive && setInfo(null))
+    return () => { alive = false }
+  }, [props.server, props.refresh])
+  if (!info?.billing) return null
+  const until = info.paidUntil ? new Date(info.paidUntil * 1000).toLocaleDateString('de-DE') : null
+  return (
+    <div className="plan-line">
+      {info.active
+        ? <p><strong>Abo aktiv</strong>{until && <> bis {until}</>} · {fmtSize(info.used)} von {fmtSize(info.quota)} belegt</p>
+        : <p><strong>Kein Abo</strong> – Dokumente, die dir gehören, sind nur lesbar.</p>}
+      {info.manageUrl && <p className="hint">Abo verwalten: <code>{info.manageUrl}</code></p>}
+    </div>
+  )
+}
+
 function Field(props: { label: string; value: string; onChange: (v: string) => void; type?: string; placeholder?: string; autoFocus?: boolean }) {
   return (
     <label className="sync-field">
       <span>{props.label}</span>
       <input type={props.type ?? 'text'} value={props.value} placeholder={props.placeholder} autoFocus={props.autoFocus}
         autoCapitalize="off" autoCorrect="off" spellCheck={false}
+        onFocus={(e) => e.target.select()}
         onChange={(e) => props.onChange(e.target.value)} />
     </label>
   )
@@ -86,7 +110,7 @@ export function SyncDialog(props: { control: SyncControl; onClose: () => void })
         <h3>Cloud-Synchronisation</h3>
         {connected ? (
           <>
-            <p className={`sync-status ${c.state?.status ?? 'connecting'}`}><span className="dot" />{syncLabel(c)}</p>
+            <p className={`sync-status ${c.state?.readonly ? 'readonly' : c.state?.status ?? 'connecting'}`}><span className="dot" />{syncLabel(c)}</p>
             <p className="sync-server">{c.server}</p>
             {c.state?.status === 'pending' && c.state.kind === 'join'
               ? <p className="hint">Ein Admin des Dokuments muss deine Anfrage zulassen. Nenne ihm deine Prüfnummer <code>{me ? fingerprint(me.publicKey) : ''}</code>; danach verbindet sich Grid von selbst.</p>
@@ -94,7 +118,9 @@ export function SyncDialog(props: { control: SyncControl; onClose: () => void })
               ? <p className="hint">Der Betreiber des Servers muss dein Konto freigeben. Nenne ihm die Kennung <code>{me?.id.slice(0, 8)}</code>
                   ({me ? fingerprint(me.publicKey) : ''}); danach verbindet sich Grid von selbst.</p>
               : <p className="hint">Änderungen werden laufend abgeglichen. Ohne Verbindung arbeitest du lokal weiter; beim nächsten Verbinden werden beide Seiten zusammengeführt.</p>}
+            {c.state?.readonly && <p className="sync-error" role="status">{c.state.readonly.reason} Änderungen bleiben hier gespeichert und werden hochgeladen, sobald es wieder geht.</p>}
             <AccountLine me={me} onManage={() => setAccount(true)} />
+            {c.server && c.state?.status === 'online' && <PlanLine server={c.server} refresh={c.state.readonly?.code ?? ''} />}
             {c.state?.status === 'online' && (
               <p className="sync-account">
                 <span>Mitglieder{c.members?.state ? ` (${c.members.state.members.size})` : ''}</span>
