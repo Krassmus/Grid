@@ -55,3 +55,21 @@ describe('Zeitstempel und Person', () => {
     expect(footerText([...cells.values()], col, 'avg')).toBe('1:00')
   })
 })
+
+describe('Standardsortierung', () => {
+  it('wird im Dokument gespeichert und fällt weg, wenn die Spalte gelöscht wird', async () => {
+    const { setTableSort, deleteColumn } = await import('./model')
+    const doc = new Y.Doc()
+    const t = addTable(doc, 'T')
+    const c = addColumn(doc, t, 'Zahl', 'number')
+    expect(readTables(doc)[0].sort).toBeUndefined()
+    setTableSort(doc, t, c, 'desc')
+    expect(readTables(doc)[0].sort).toEqual({ colId: c, dir: 'desc' })
+    setTableSort(doc, t, c, 'asc')
+    expect(readTables(doc)[0].sort).toEqual({ colId: c, dir: 'asc' })
+    deleteColumn(doc, t, c)
+    expect(readTables(doc)[0].sort).toBeUndefined()
+    setTableSort(doc, t, '', 'asc')
+    expect(readTables(doc)[0].sort).toBeUndefined()
+  })
+})

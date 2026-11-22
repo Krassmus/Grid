@@ -710,11 +710,12 @@ export function ClientPane(props: {
   // Sortierung ist nur eine Ansicht (pro Tabelle, nur auf diesem Gerät); die gespeicherte Reihenfolge bleibt unverändert.
   // Klick 1: aufsteigend, Klick 2: absteigend, Klick 3: wieder die gespeicherte Reihenfolge.
   const [sorts, setSorts] = useState<Record<string, { colId: string; dir: SortDir }>>({})
-  const sort = table ? sorts[table.id] : undefined
+  // Ohne eigene Wahl gilt die Standardsortierung der Tabelle (Tabelleneinstellungen); nach dem dritten Klick kehrt man dorthin zurück.
+  const sort = table ? sorts[table.id] ?? table.sort : undefined
   const cycleSort = (colId: string) => {
     if (!table) return
     setSorts((all) => {
-      const cur = all[table.id]
+      const cur = all[table.id] ?? table.sort
       const next = !cur || cur.colId !== colId ? { colId, dir: 'asc' as const } : cur.dir === 'asc' ? { colId, dir: 'desc' as const } : null
       const { [table.id]: _, ...rest } = all
       return next ? { ...rest, [table.id]: next } : rest

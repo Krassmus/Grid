@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import * as Y from 'yjs'
-import { renameTable, setColumnHidden, setTableIcon, setTableRepr, type TableInfo } from './model'
+import { renameTable, setColumnHidden, setTableIcon, setTableRepr, setTableSort, type TableInfo } from './model'
 import { IconPicker } from './icons'
 import { Modal } from './Modal'
 import { newCtx } from './cells'
@@ -56,6 +56,21 @@ export function TableDialog(props: {
           <input autoFocus value={name} onFocus={(e) => e.target.select()} onChange={(e) => setName(e.target.value)} />
         </label>
         <IconPicker value={table.icon ?? ''} kind="table" onChange={(i) => setTableIcon(doc, table.id, i)} />
+
+        <section className="vd-section">
+          <h4>Standardsortierung</h4>
+          <p className="hint">So ist die Tabelle sortiert, wenn niemand selbst über die Pfeile in der Spaltenüberschrift sortiert hat. Die gespeicherte Reihenfolge der Zeilen ändert sich dadurch nicht.</p>
+          <div className="geo-inputs">
+            <select aria-label="Sortieren nach" value={table.sort?.colId ?? ''} onChange={(e) => setTableSort(doc, table.id, e.target.value, table.sort?.dir ?? 'asc')}>
+              <option value="">Keine (gespeicherte Reihenfolge)</option>
+              {table.columns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            <select aria-label="Richtung" value={table.sort?.dir ?? 'asc'} disabled={!table.sort} onChange={(e) => setTableSort(doc, table.id, table.sort!.colId, e.target.value as 'asc' | 'desc')}>
+              <option value="asc">Aufsteigend</option>
+              <option value="desc">Absteigend</option>
+            </select>
+          </div>
+        </section>
 
         <section className="vd-section">
           <h4>Darstellung eines Datensatzes</h4>

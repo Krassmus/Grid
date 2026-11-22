@@ -47,6 +47,8 @@ export interface TableInfo {
   repr: Record<string, unknown>
   /** Symbol im Reiter (siehe icons.tsx); leer = Standard. */
   icon?: string
+  /** Standardsortierung (nur Ansicht; die gespeicherte Reihenfolge bleibt); fehlt = gespeicherte Reihenfolge. */
+  sort?: { colId: string; dir: 'asc' | 'desc' }
 }
 
 // ---------- Abgeleitete Tabellen (Views) ----------
@@ -237,7 +239,9 @@ export function readTables(doc: Y.Doc): TableInfo[] {
     const rowIds = [...new Set<string>(t.get('rowOrder').toArray())].filter((rid) => rows.has(rid))
     const repr: Record<string, unknown> = {}
     t.forEach((v, k) => { if (k.startsWith(REPR)) repr[k.slice(REPR.length)] = v })
-    out.push({ id, name: t.get('name'), columns, rowIds, repr, icon: (t.get('icon') as string | undefined) || undefined })
+    const sortCol = t.get('sortCol') as string | undefined
+    const sort = sortCol && columns.some((c) => c.id === sortCol) ? { colId: sortCol, dir: t.get('sortDir') === 'desc' ? 'desc' as const : 'asc' as const } : undefined
+    out.push({ id, name: t.get('name'), columns, rowIds, repr, icon: (t.get('icon') as string | undefined) || undefined, sort })
   })
   // Reihenfolge laut tableOrder (dedupliziert); unbekannte Tabellen (Altdaten, parallel angelegt) danach nach ID.
   const rank = new Map<string, number>()
@@ -565,6 +569,16 @@ const setOrDelete = (m: Y.Map<any>, key: string, value: string) => { if (value) 
 export function setTableIcon(doc: Y.Doc, tableId: string, icon: string) {
   const t = tablesOf(doc).get(tableId)
   if (t) setOrDelete(t, 'icon', icon)
+}
+
+/** Standardsortierung einer Tabelle; `colId` leer = keine (gespeicherte Reihenfolge). */
+export function setTableSort(doc: Y.Doc, tableId: string, colId: string, dir: 'asc' | 'desc') {
+  const t = tablesOf(doc).get(tableId)
+  if (!t) return
+  doc.transact(() => {
+    setOrDelete(t, 'sortCol', colId)
+    if (colId && dir === 'desc') t.set('sortDir', 'desc'); else t.delete('sortDir')
+  })
 }
 
 export function renameTable(doc: Y.Doc, tableId: string, name: string) {
