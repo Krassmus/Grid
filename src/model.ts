@@ -650,3 +650,15 @@ export function moveColumn(doc: Y.Doc, tableId: string, colId: string, toIndex: 
   const next = reorder(info.columns.map((c) => c.id), colId, toIndex)
   if (next) doc.transact(() => rewriteOrder(t.get('colOrder'), next))
 }
+
+// ---------- Profile der Mitglieder (Name und Avatar, im Dokument selbst und daher mitverschlüsselt) ----------
+
+export interface MemberProfile { name: string; avatar: string }
+export const profilesOf = (doc: Y.Doc) => doc.getMap<MemberProfile>('profiles')
+
+/** Trägt das eigene Profil im Dokument ein (nur wenn es sich geändert hat, damit keine überflüssigen Änderungen entstehen). */
+export function publishProfile(doc: Y.Doc, account: string, p: MemberProfile) {
+  const cur = profilesOf(doc).get(account)
+  if (cur && cur.name === p.name && cur.avatar === p.avatar) return
+  profilesOf(doc).set(account, { name: p.name, avatar: p.avatar })
+}

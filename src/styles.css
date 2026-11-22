@@ -546,6 +546,7 @@ body.tile-dragging.tile-copy, body.tile-dragging.tile-copy * { cursor: copy !imp
 .members-dialog h4 { margin: 14px 0 6px; font-size: 13px; }
 .member-row { display: flex; justify-content: space-between; align-items: center; gap: 14px; padding: 8px 0; border-bottom: 1px solid var(--c-e1e7ea); }
 .member-row:last-of-type { border-bottom: none; }
+.member-row > div.member-who { flex: 1; }
 .member-row > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .member-row small { color: var(--c-666677); font-size: 12px; }
 .member-row code { font-family: ui-monospace, Menlo, monospace; font-size: 12px; }

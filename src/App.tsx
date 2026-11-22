@@ -9,6 +9,7 @@ import { FileSession } from './fileSession'
 import { isThemeChoice, setTheme } from './theme'
 import { CloudOpenDialog, type SyncControl } from './SyncDialog'
 import { ProfileDialog } from './ProfileDialog'
+import { useProfiles } from './useTables'
 import { JoinDialog } from './MembersDialog'
 import type { MembersInfo } from './members'
 import type { Invite } from './invite'
@@ -31,6 +32,8 @@ const remember = (p: string | null) => {
   if (p) noteRecent(p)
 }
 
+const NO_DOC = new Y.Doc() // Platzhalter, solange kein Dokument offen ist
+
 function Single() {
   const [session, setSession] = useState<FileSession | null>(null)
   const current = useRef<FileSession | null>(null)
@@ -44,6 +47,7 @@ function Single() {
   const [joinOpen, setJoinOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
   const [members, setMembers] = useState<MembersInfo | null>(null)
+  const profiles = useProfiles(session?.doc ?? NO_DOC)
   const [listVersion, setListVersion] = useState(0)
 
   const unsaved = () => new FileSession(++counter.current, new Y.Doc(), null, newMeta(), new Set(), setError)
@@ -232,6 +236,7 @@ function Single() {
   const control: SyncControl = {
     state: syncState,
     members,
+    profiles,
     accept: session.accept, reject: session.reject, remove: session.remove, changeRole: session.changeRole, invite: () => session.invite(),
     server: session.meta.sync?.server ?? null,
     enc: !!session.meta.sync?.enc,

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Modal } from './Modal'
+import { Avatar } from './Avatar'
 import { fingerprint, getAccountName, getIdentity, setAccountName } from './identity'
 import { Field as ProfileField } from './SyncDialog'
 import { parseInvite, type Invite } from './invite'
@@ -11,6 +12,8 @@ import type { JoinRequest, MembersInfo } from './members'
 /** Was die Oberfläche über die Mitglieder des Dokuments wissen und tun darf. */
 export interface MembersControl {
   members: MembersInfo | null
+  /** Namen und Avatare, die die Mitglieder in das Dokument eingetragen haben (Konto-ID → Profil) */
+  profiles?: Record<string, { name: string; avatar: string }>
   accept: (req: JoinRequest, role?: Role) => Promise<void>
   reject: (account: string) => Promise<void>
   remove: (account: string) => Promise<void>
@@ -66,7 +69,8 @@ export function MembersDialog(props: { control: MembersControl; onClose: () => v
         {list.length > 0 && <h4>Im Dokument</h4>}
         {list.map(([id, m]) => (
           <div key={id} className="member-row">
-            <div>
+            <Avatar name={m.name} avatar={props.control.profiles?.[id]?.avatar} size={34} />
+            <div className="member-who">
               <strong>{who(m.name)}{id === me && ' (du)'}</strong>
               <small><code>{fingerprint(m.pub)}</code> · {m.role === 'admin' ? 'Admin' : 'Mitglied'}</small>
             </div>

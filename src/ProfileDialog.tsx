@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { Modal } from './Modal'
+import { Avatar } from './Avatar'
 import { fingerprint, getIdentity, onIdentityChanged, type Identity } from './identity'
-import { avatarFromFile, getProfile, initialsOf, onProfileChange, setProfile, type Profile } from './profile'
+import { avatarFromFile, getProfile, onProfileChange, setProfile, type Profile } from './profile'
 import { importAccount } from './identity'
 import { confirmEmailCode, fetchRecoveryText, MIN_RECOVERY_PASSWORD, removeEmail, requestEmailCode, startRecovery, storeRecovery } from './recovery'
 import { fetchAccountInfo, normalizeServer, type AccountInfo } from './syncClient'
@@ -16,20 +17,12 @@ export function useProfile(): Profile {
   return p
 }
 
-/** Runder Avatar: das Bild, sonst die Anfangsbuchstaben. */
-export function Avatar(props: { profile: Profile; size?: number }) {
-  const { profile, size = 28 } = props
-  return profile.avatar
-    ? <img className="profile-avatar" src={profile.avatar} alt="" width={size} height={size} />
-    : <span className="profile-avatar initials" style={{ width: size, height: size, fontSize: size * 0.4 }} aria-hidden>{initialsOf(profile.name)}</span>
-}
-
 /** Knopf mit dem Avatar (öffnet das Konto). */
 export function AccountButton(props: { onClick: () => void }) {
   const profile = useProfile()
   return (
     <button type="button" className="account-btn" onClick={props.onClick} aria-label={`Konto${profile.name ? `: ${profile.name}` : ''}`} title={profile.name || 'Konto'}>
-      <Avatar profile={profile} size={30} />
+      <Avatar name={profile.name} avatar={profile.avatar} size={30} />
     </button>
   )
 }
@@ -70,7 +63,7 @@ export function ProfileDialog(props: { onClose: () => void }) {
         <h3>Konto</h3>
         <div className="profile-head">
           <button type="button" className="avatar-pick" onClick={() => file.current?.click()} aria-label="Avatar-Bild wählen" title="Bild wählen">
-            <Avatar profile={profile} size={64} />
+            <Avatar name={profile.name} avatar={profile.avatar} size={64} />
           </button>
           <input ref={file} type="file" accept="image/*" hidden onChange={(e) => {
             const f = e.target.files?.[0]

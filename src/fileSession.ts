@@ -6,6 +6,8 @@ import { acceptRequest, announceMove, claimDocument, ensureGenesis, fetchMembers
 import { fingerprint, getIdentity } from './identity'
 import { makeInvite } from './invite'
 import { DocKeys } from './docKeys'
+import { publishProfile } from './model'
+import { getProfile, onProfileChange } from './profile'
 import type { Role } from './adminLog'
 
 /** Ab so vielen Einträgen im Protokoll ersetzt ein Gesamtzustand die Updates. */
@@ -27,6 +29,7 @@ export class FileSession {
   /** Dokumentschlüssel (nur bei verschlüsselten Dokumenten) */
   private keys: DocKeys | null = null
   private attached = false
+  private publishProfile: (() => void) | null = null
   /** Zustand der Cloud-Verbindung für die Oberfläche (`null` = nicht verbunden). */
   syncState: SyncState | null = null
   onSyncState: ((s: SyncState | null) => void) | null = null
@@ -55,7 +58,12 @@ export class FileSession {
       const sync = this.meta.sync
       if (sync && sync.server === server && sync.key !== key) { sync.key = key; this.schedule() }
     })
-    const detachSync = () => { offKey(); this.attached = false; this.conn?.close(); this.conn = null }
+    // Eigenen Namen und Avatar im Dokument eintragen (so sehen es die anderen Mitglieder), auch nach Änderungen im Konto
+    const publish = () => { if (this.meta.sync) void getIdentity().then((me) => { const p = getProfile(); publishProfile(this.doc, me.id, { name: p.name, avatar: p.avatar }) }).catch(() => {}) }
+    publish()
+    this.publishProfile = publish
+    const offProfile = onProfileChange(publish)
+    const detachSync = () => { offKey(); offProfile(); this.publishProfile = null; this.attached = false; this.conn?.close(); this.conn = null }
     if (!this.path) return detachSync
     const onUpdate = (update: Uint8Array) => { this.pending.push(update); this.schedule() }
     this.tables = new Materializer(this.doc)
@@ -144,6 +152,7 @@ export class FileSession {
     this.meta.sync = { server: url, ...(key ? { key } : {}), ...(enc ? { enc: true } : {}) }
     this.schedule()
     if (this.attached) this.openConn()
+    this.publishProfile?.()
   }
 
   /**

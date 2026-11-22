@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import * as Y from 'yjs'
-import { buildFileIndex, buildLinkIndex, mapsOf, readMaps, readTables, readTabs, readViews, tableOrderOf, tablesOf, viewsOf, type FileRef, type LinkIndex, type MapInfo, type TabInfo, type TableInfo, type ViewInfo } from './model'
+import { profilesOf, type MemberProfile, buildFileIndex, buildLinkIndex, mapsOf, readMaps, readTables, readTabs, readViews, tableOrderOf, tablesOf, viewsOf, type FileRef, type LinkIndex, type MapInfo, type TabInfo, type TableInfo, type ViewInfo } from './model'
 
 /** Liest die Tabellenstruktur reaktiv; Zellwerte werden in der Zelle selbst beobachtet. */
 export function useTables(doc: Y.Doc): TableInfo[] {
@@ -80,4 +80,18 @@ export function useTabs(doc: Y.Doc): { tables: TableInfo[]; views: ViewInfo[]; m
     return () => { for (const t of targets) t.unobserveDeep(update); order.unobserve(update) }
   }, [doc])
   return state
+}
+
+/** Name und Avatar der Mitglieder, wie sie im Dokument stehen (jeder Client trägt sein eigenes Profil ein). */
+export function useProfiles(doc: Y.Doc): Record<string, MemberProfile> {
+  const read = () => Object.fromEntries(profilesOf(doc).entries())
+  const [profiles, setProfiles] = useState(read)
+  useEffect(() => {
+    const m = profilesOf(doc)
+    const update = () => setProfiles(Object.fromEntries(m.entries()))
+    update()
+    m.observe(update)
+    return () => m.unobserve(update)
+  }, [doc])
+  return profiles
 }
