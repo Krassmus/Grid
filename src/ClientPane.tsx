@@ -1,3 +1,4 @@
+import { currentTracking, stopTracking, useTracking } from './tracking'
 import { useCallback, useLayoutEffect, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import * as Y from 'yjs'
 import { IndexeddbPersistence } from 'y-indexeddb'
@@ -533,6 +534,35 @@ function SortIcon({ dir }: { dir: SortDir | null }) {
   )
 }
 
+/** Hinweis „GPS-Tracking aktiv“ neben der Wolke: zeigt Ziel und Beginn, und beendet die Verfolgung. */
+function TrackingChip({ doc }: { doc: Y.Doc }) {
+  const tr = useTracking()
+  const [open, setOpen] = useState(false)
+  useEffect(() => { if (!tr) setOpen(false) }, [tr])
+  if (!tr || tr.target.doc !== doc) return null
+  const since = new Date(tr.since)
+  const sinceText = since.toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+  const t = tr.target
+  return (
+    <span className="track-wrap">
+      <button type="button" className={`track-chip${tr.error ? ' err' : ''}`} onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+        <i className="track-dot" />{tr.error ? 'GPS-Tracking gestoppt' : 'GPS-Tracking aktiv'}
+      </button>
+      {open && (
+        <div className="track-pop" role="dialog" aria-label="GPS-Tracking">
+          <dl>
+            <dt>Gespeichert in</dt><dd>Tabelle „{t.tableName}“, {t.rowLabel}, Spalte „{t.colName}“</dd>
+            <dt>Seit</dt><dd>{sinceText}</dd>
+            <dt>Letzte Position</dt><dd>{tr.last ? `${tr.last.point.lat.toFixed(5)}, ${tr.last.point.lon.toFixed(5)} (${new Date(tr.last.at).toLocaleTimeString('de-DE')})` : 'noch keine'}</dd>
+          </dl>
+          {tr.error && <p className="formula-error">{tr.error}</p>}
+          <div className="actions"><button type="button" onClick={() => setOpen(false)}>Schließen</button><button type="button" className="danger-outline" onClick={() => stopTracking()}>Tracking beenden</button></div>
+        </div>
+      )}
+    </span>
+  )
+}
+
 /** Wolke unten rechts: zeigt den Stand der Synchronisation, ein Klick öffnet die Einstellungen. */
 function SyncButton(props: { control: SyncControl; onClick: () => void }) {
   const { control } = props
@@ -568,6 +598,8 @@ export function ClientPane(props: {
   online?: boolean
   onToggle?: () => void
 }) {
+  // Wird das Dokument geschlossen, endet auch seine GPS-Verfolgung (sonst schriebe sie ins Leere).
+  useEffect(() => () => { if (currentTracking()?.target.doc === props.doc) stopTracking() }, [props.doc])
   const { doc } = props
   const { tables, views, maps, tabs } = useTabs(doc)
   const index = useLinkIndex(doc)
@@ -1013,6 +1045,7 @@ export function ClientPane(props: {
               onKeyDown={(e) => { if (e.key === 'Escape') { setSearches((s) => ({ ...s, [table.id]: '' })); e.currentTarget.blur() } }} />
             {matching && <small>{visibleIds.length} von {table.rowIds.length}</small>}
           </span>
+          <TrackingChip doc={doc} />
           {props.sync && <SyncButton control={props.sync} onClick={() => setSyncOpen(true)} />}
         </div>
       )}

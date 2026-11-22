@@ -327,6 +327,8 @@ textarea.cell { resize: none; line-height: 1.35; overflow: hidden; display: bloc
 .geo-pin-wrap .geo-pin { left: 0; top: 0; margin: 3px 0 0 3px; }
 .geodialog { width: min(640px, 94vw); }
 .geomap { width: 100%; height: min(380px, 50vh); border-radius: 10px; border: 1px solid var(--c-d5dce0); overflow: hidden; z-index: 0; }
+.geo-locate { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.geo-follow { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
 .geo-inputs { display: grid; grid-template-columns: 1fr 1.3fr; gap: 8px; }
 .geo-inputs input, .geo-inputs select { font: inherit; padding: 8px; border: 1px solid var(--c-d2d2d7); border-radius: 8px; min-width: 0; }
 
@@ -757,3 +759,17 @@ button.invite-row:hover .plus-avatar { border-color: #0a84ff; color: #0a84ff; }
 .product-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--c-e1e7ea); border-radius: 14px; background: var(--c-ffffff); }
 .paywall-terms { margin: 0; font-size: 12px; line-height: 1.5; color: var(--c-666677); }
 .paywall .actions { justify-content: flex-start; }
+
+/* GPS-Tracking-Hinweis neben der Wolke */
+.addrow-bar .track-wrap { margin-left: auto; position: relative; }
+.addrow-bar .track-wrap + .sync-btn { margin-left: 0; }
+.track-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; border: 1px solid color-mix(in srgb, #1a7f37 40%, transparent); background: color-mix(in srgb, #1a7f37 12%, transparent); color: inherit; font: inherit; font-size: 12px; cursor: pointer; }
+.track-chip.err { border-color: color-mix(in srgb, #c0392b 45%, transparent); background: color-mix(in srgb, #c0392b 12%, transparent); }
+.track-dot { width: 8px; height: 8px; border-radius: 50%; background: #1a7f37; animation: track-pulse 1.6s ease-in-out infinite; }
+.track-chip.err .track-dot { background: #c0392b; animation: none; }
+@keyframes track-pulse { 50% { opacity: .35; } }
+.track-pop { position: absolute; right: 0; bottom: calc(100% + 10px); width: min(320px, 90vw); padding: 12px 14px; border-radius: 12px; background: var(--c-ffffff); border: 1px solid var(--c-e1e7ea); box-shadow: 0 8px 28px rgba(0,0,0,.18); z-index: 20; font-size: 13px; }
+.track-pop dl { margin: 0 0 10px; display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; }
+.track-pop dt { color: var(--c-7b8890); }
+.track-pop dd { margin: 0; }
+.track-pop .actions { display: flex; justify-content: flex-end; gap: 8px; }

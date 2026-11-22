@@ -2,6 +2,13 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Grid trägt auf Wunsch Ihren aktuellen Standort in eine Geokoordinate ein.</string>
+	<!-- GPS-Tracking läuft weiter, wenn die App im Hintergrund ist. -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+	</array>
 	<!-- Der Ordner „Dokumente“ der App erscheint in der Dateien-App (Auf meinem iPad → Grid). -->
 	<key>UIFileSharingEnabled</key>
 	<true/>

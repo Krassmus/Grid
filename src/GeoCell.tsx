@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import * as Y from 'yjs'
 import 'leaflet/dist/leaflet.css'
-import { setCell, type ColumnInfo } from './model'
+import { readTables, setCell, type ColumnInfo } from './model'
+import { startTracking, stopTracking, useTracking } from './tracking'
 import { GEO } from './columnTypes'
 import { GEO_FORMATS, decodeGeo, encodeGeo, formatGeo, parseGeo, tilesAround, type GeoFormat, type LatLon } from './geo'
 import { Modal } from './Modal'
@@ -50,7 +51,7 @@ export function GeoCell(props: { doc: Y.Doc; tableId: string; rowId: string; col
           : <span className="geo-text">{formatGeo(point, format)}</span>}
       </button>
       {open && (
-        <GeoDialog title={col.name} initial={point} format={format} repr={repr}
+        <GeoDialog doc={doc} tableId={tableId} rowId={rowId} colId={col.id} tableName={readTables(doc).find((t) => t.id === tableId)?.name ?? ''} rowLabel={repr?.title || 'Zeile'} title={col.name} initial={point} format={format} repr={repr}
           onSave={(p) => { setCell(doc, tableId, rowId, col.id, p ? encodeGeo(p) : null); setOpen(false) }}
           onClose={() => setOpen(false)} />
       )}
@@ -62,7 +63,7 @@ const normLon = (lon: number) => ((((lon + 180) % 360) + 360) % 360) - 180
 const round7 = (p: LatLon): LatLon => ({ lat: Math.round(p.lat * 1e7) / 1e7, lon: Math.round(p.lon * 1e7) / 1e7 })
 
 /** Position auf einer Karte ansehen und ändern (klicken oder Markierung ziehen) oder in einem der Formate eintippen. */
-function GeoDialog(props: { title: string; initial: LatLon | null; format: GeoFormat; repr?: Repr; onSave: (p: LatLon | null) => void; onClose: () => void }) {
+function GeoDialog(props: { doc: Y.Doc; tableId: string; rowId: string; colId: string; tableName: string; rowLabel: string; title: string; initial: LatLon | null; format: GeoFormat; repr?: Repr; onSave: (p: LatLon | null) => void; onClose: () => void }) {
   const [inputFormat, setInputFormat] = useState<Exclude<GeoFormat, 'map'>>(props.format === 'map' ? 'dd' : props.format)
   const [pos, setPos] = useState<LatLon | null>(props.initial)
   const [text, setText] = useState(props.initial ? formatGeo(props.initial, inputFormat) : '')
@@ -138,6 +139,30 @@ function GeoDialog(props: { title: string; initial: LatLon | null; format: GeoFo
   }
   const example = GEO_FORMATS.find((f) => f.id === inputFormat)?.example
 
+  // Aktueller Standort des Geräts: einmal übernehmen oder die Zelle dauerhaft nachführen (siehe tracking.ts).
+  const [locating, setLocating] = useState(false)
+  const [locError, setLocError] = useState<string | null>(null)
+  const tracking = useTracking()
+  const trackedHere = !!tracking && tracking.target.doc === props.doc && tracking.target.tableId === props.tableId && tracking.target.rowId === props.rowId && tracking.target.colId === props.colId
+  const locate = () => {
+    setLocError(null)
+    if (!navigator.geolocation) { setLocError('Dieses Gerät kann den Standort nicht ermitteln.'); return }
+    setLocating(true)
+    navigator.geolocation.getCurrentPosition((g) => {
+      const p = round7({ lat: g.coords.latitude, lon: g.coords.longitude })
+      setPos(p); setText(formatGeo(p, inputFormat)); setError(null); showOnMap(p); setLocating(false)
+    }, (e) => {
+      setLocating(false)
+      setLocError(e.code === e.PERMISSION_DENIED ? 'Der Zugriff auf den Standort ist nicht erlaubt (Einstellungen des Geräts).' : 'Der Standort konnte nicht ermittelt werden.')
+    }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 })
+  }
+  const track = () => {
+    try {
+      startTracking({ doc: props.doc, tableId: props.tableId, rowId: props.rowId, colId: props.colId, tableName: props.tableName, colName: props.title, rowLabel: props.rowLabel })
+      props.onClose()
+    } catch (e) { setLocError((e as Error).message) }
+  }
+
   return (
     <Modal onClose={props.onClose}>
       <form className="dialog geodialog" onMouseDown={(e) => e.stopPropagation()}
@@ -155,6 +180,13 @@ function GeoDialog(props: { title: string; initial: LatLon | null; format: GeoFo
           <input autoFocus value={text} placeholder={example} spellCheck={false} aria-label="Koordinaten" onChange={(e) => onText(e.target.value)} />
         </div>
         {error && <p className="formula-error" role="alert">{error}</p>}
+        <div className="geo-locate">
+          <button type="button" disabled={locating} onClick={locate}>◎ Aktueller Standort</button>
+          {trackedHere
+            ? <button type="button" onClick={() => stopTracking()}>GPS-Tracking beenden</button>
+            : <button type="button" onClick={track} title="Die Zelle folgt dem Gerät, bis du es beendest – auch wenn dieser Dialog geschlossen ist.">Dauerhaft verfolgen</button>}
+        </div>
+        {locError && <p className="formula-error" role="alert">{locError}</p>}
         <div className="actions split">
           {props.initial
             ? <button type="button" className="danger-outline" onClick={() => props.onSave(null)}>Position entfernen</button>
