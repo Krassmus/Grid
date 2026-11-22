@@ -4,11 +4,11 @@ Stand: Phase 1 (Server), Phase 2 (Client-Kern) und Phase 3 (Verteilung, Oberflä
 
 ## Entscheidungen
 
-- **Pro Dokument, beim Verbinden festgelegt.** Neue Cloud-Dokumente sind standardmäßig verschlüsselt (Häkchen im Dialog). Die Wahl lässt sich später nicht ändern; ein unverschlüsseltes Dokument wird durch „in ein neues, verschlüsseltes Dokument kopieren“ umgestellt. Das Merkmal steht in der Dokumentdatei (`meta.sync.enc`) und in Einladungen, **nicht** nur auf dem Server: Ein Client, der ein verschlüsseltes Dokument kennt, verweigert den Klartext-Weg. So kann ein Server ihn nicht zum Klartext zwingen.
+- **Neue Cloud-Dokumente sind immer verschlüsselt.** Der Server verlangt das standardmäßig (`--allow-plaintext` / `GRID_ALLOW_PLAINTEXT=1` erlaubt auch unverschlüsselte, z. B. für Firmen, die serverseitig lesen oder sichern wollen). Bestehende unverschlüsselte Dokumente laufen weiter, bis ein Admin sie umstellt (siehe „Umstellen“). Das Merkmal steht als signierter Eintrag `encrypt` im Admin-Protokoll, in der Dokumentdatei (`meta.sync.enc`) und in Einladungen, **nicht** nur auf dem Server: Ein Client, der ein verschlüsseltes Dokument kennt, verweigert den Klartext-Weg. So kann ein Server ihn nicht zum Klartext zwingen.
 - **Was verschlüsselt ist:** Zellen, Spalten, Tabellen, Sichten, Karten (alles im Yjs-Dokument), Dateien und Vorschaubilder.
 - **Was der Server weiter sieht:** Dokument-ID, Dokumentname, Größe und Zeitpunkt der Änderungen, Zahl der Dateien und deren Größe, Mitglieder (Konto-Kennungen, Namen, Rollen im Admin-Protokoll). Das Admin-Protokoll bleibt lesbar, damit der Server Zugriffe prüfen kann.
 - **Schlüsselverlust:** Die Wiederherstellung des Kontos über „Sichern oder übertragen“ ist zugleich die Schlüssel-Sicherung. Ein anderes Mitglied kann Zugang neu verteilen. Ohne Konto-Sicherung und ohne anderes Mitglied sind die Daten des Servers unlesbar. Das ist der Preis.
-- **Nicht unterstützt (zunächst):** Serverumzug (`/import`) eines verschlüsselten Dokuments, serverseitige Auswertung jeder Art.
+- **Nicht unterstützt:** serverseitige Auswertung jeder Art (dafür der spätere Brückenrechner).
 
 ## Schlüssel
 
@@ -28,6 +28,14 @@ Der Server hält keinen Yjs-Zustand mehr, sondern ein nummeriertes Protokoll und
 - Der Client hält einen Schatten-Zustand (nur, was der Server schon kennt). Daraus bildet er nach dem Verbinden die Differenz zu seinem lokalen Stand und schickt sie als Typ `4`. So gehen Änderungen aus der Offline-Zeit nicht verloren, ohne dass der Server Zustandsvektoren versteht.
 - Dateien: `PUT /blob/<doc>/<key>` mit `epoche | Nonce | AES-GCM(Bytes)`; der Server prüft den Hash nicht mehr (der Client prüft nach dem Entschlüsseln, dass SHA-256 stimmt).
 
+## Umstellen eines bestehenden Dokuments
+
+Ein Admin wählt „Dokument verschlüsseln“. Das trägt den signierten Eintrag `encrypt` ins Admin-Protokoll ein (nur Admins, einmalig, `subject` = Unterzeichner). Der Server markiert das Dokument, **löscht Protokoll und Dateien** und schließt die Klartext-Verbindungen. Jeder Client, der den Eintrag sieht, schaltet seine Datei von selbst auf verschlüsselt um; der Admin legt den ersten Schlüssel an und verteilt ihn, danach lädt jeder seinen Stand und seine Dateien verschlüsselt hoch. Grenzen: Sicherungen des Servers aus der Zeit davor enthalten den Klartext weiter; bis ein Admin online war, warten die anderen Mitglieder auf ihren Schlüssel.
+
+## Umzug auf einen anderen Server
+
+Das Admin-Protokoll (mit dem Eintrag `encrypt`) zieht wie bisher um und markiert das Dokument auf dem neuen Server als verschlüsselt. Schlüssel und Daten gehen **nicht** mit: Der Admin legt auf dem neuen Server einen neuen ersten Schlüssel an, und alle Clients laden ihren Stand neu hoch.
+
 ## Endpunkte
 
 | Aufruf | Zweck |
@@ -45,6 +53,7 @@ Der Server hält keinen Yjs-Zustand mehr, sondern ein nummeriertes Protokoll und
 
 ## Phasen
 
+0. (später dazugekommen) Pflicht für neue Dokumente, Umstellen, Umzug: gebaut und geprüft (zwei Server, zwei Clients).
 1. **Server:** `enc`-Merkmal, Protokoll Typ 4/5/6, Kisten-Endpunkte, verschlüsselte Blobs; Tests.
 2. **Client-Kern:** `src/e2e.ts` (Schlüssel, Kisten, Einträge, Dateien), Sync-Verbindung im verschlüsselten Modus; Tests.
 3. **Verteilung und Oberfläche:** Dokument verschlüsselt anlegen, Zulassen/Entfernen mit Schlüsselverteilung, Einladung mit Merkmal, Anzeige (Schloss), Hinweis bei fehlenden Schlüsseln.

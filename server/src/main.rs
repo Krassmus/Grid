@@ -3,6 +3,7 @@
 //!                      grid-server accounts plan <Kennung> paid [--until 2027-12-31] [--quota 5GB]
 //!                      grid-server accounts plan <Kennung> free
 //! Ohne `--open-registration` (oder GRID_OPEN_REGISTRATION=1) warten neue Konten auf `approve`.
+//! Neue Dokumente müssen Ende-zu-Ende-verschlüsselt sein (docs/E2E.md); `--allow-plaintext` (GRID_ALLOW_PLAINTEXT=1) erlaubt auch unverschlüsselte.
 //! Mit `--billing` (GRID_BILLING=1) braucht das Schreiben ein Abo und freien Speicher (Cloud); ohne ist alles frei.
 //! Weitere Umgebungsvariablen: GRID_NAME (Anzeigename des Servers), GRID_CHECKOUT_URL / GRID_STRIPE_WEBHOOK_SECRET / GRID_STRIPE_QUOTA (Stripe), GRID_ADMIN_KEY (schaltet /admin/… ein), GRID_MANAGE_URL (Link „Abo verwalten“).
 
@@ -112,6 +113,7 @@ async fn main() {
     let cfg = grid_server::Config {
         open_registration: open,
         billing,
+        require_enc: !flag("--allow-plaintext", "GRID_ALLOW_PLAINTEXT"),
         admin_key: std::env::var("GRID_ADMIN_KEY").ok().filter(|k| k.len() >= 16),
         manage_url: std::env::var("GRID_MANAGE_URL").ok().filter(|u| !u.is_empty()),
         name: std::env::var("GRID_NAME").ok().filter(|n| !n.is_empty()),

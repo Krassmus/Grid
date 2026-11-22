@@ -49,6 +49,8 @@ struct Room {
 enum Event {
     /// Yjs-Update von Client `from`
     Update(u64, Arc<Vec<u8>>),
+    /// Das Dokument wurde auf Verschlüsselung umgestellt: Klartext-Verbindungen schließen, die Clients verbinden neu
+    Reset,
     /// Neuer verschlüsselter Eintrag (Nummer, Bytes)
     Enc(i64, Arc<Vec<u8>>),
     /// Mitglieder oder Beitrittsanfragen haben sich geändert: Berechtigung neu prüfen, Clients benachrichtigen
@@ -68,6 +70,8 @@ pub struct Config {
     pub manage_url: Option<String>,
     /// Name des Servers, den Grid anzeigt (z. B. „Firmenserver“).
     pub name: Option<String>,
+    /// Neue Dokumente müssen Ende-zu-Ende-verschlüsselt sein (docs/E2E.md); bestehende unverschlüsselte laufen weiter, bis ein Admin sie verschlüsselt.
+    pub require_enc: bool,
     /// Signaturgeheimnis des Stripe-Webhooks (`whsec_…`); ohne ist `POST /billing/stripe` abgeschaltet.
     pub stripe_webhook_secret: Option<String>,
     /// Adresse des Stripe-Zahlungslinks (Payment Link); Grid hängt `client_reference_id=<Konto>` an.
@@ -164,7 +168,7 @@ fn server_pub(s: &AppState) -> String { auth::hex(&s.server_key.verifying_key().
 
 /// Wer bin ich: Name, öffentlicher Schlüssel (daran erkennt Grid den Server wieder), Abo-Pflicht.
 async fn server_info(State(s): State<Shared>) -> Response {
-    Json(serde_json::json!({ "name": s.cfg.name, "pub": server_pub(&s), "billing": s.cfg.billing, "version": env!("CARGO_PKG_VERSION") })).into_response()
+    Json(serde_json::json!({ "name": s.cfg.name, "pub": server_pub(&s), "billing": s.cfg.billing, "requireEnc": s.cfg.require_enc, "version": env!("CARGO_PKG_VERSION") })).into_response()
 }
 
 /// Rätsel für die Anmeldung. Der Server unterschreibt es mit seinem Schlüssel und beweist so, dass er der erwartete ist.
@@ -458,6 +462,10 @@ async fn post_admin(State(s): State<Shared>, h: HeaderMap, Path(doc): Path<Strin
             adminlog::State::default()
         }
     };
+    let want_enc = h.get("x-grid-enc").is_some_and(|v| v == "1");
+    if entry.kind == "genesis" && s.cfg.require_enc && !want_enc {
+        return (StatusCode::BAD_REQUEST, "Dieser Server verlangt verschlüsselte Dokumente").into_response();
+    }
     let next = match before.apply(&doc, &entry) { Ok(n) => n, Err(e) => return (StatusCode::BAD_REQUEST, e).into_response() };
     let json = match serde_json::to_string(&entry) { Ok(j) => j, Err(e) => return fail(e) };
     if s.store.append_admin(&doc, entry.seq, &json).is_err() {
@@ -466,7 +474,13 @@ async fn post_admin(State(s): State<Shared>, h: HeaderMap, Path(doc): Path<Strin
     s.members.lock().unwrap_or_else(|e| e.into_inner()).insert(doc.clone(), Arc::new(next));
     if entry.kind == "genesis" {
         let _ = s.store.set_owner(&doc, &entry.actor);
-        if h.get("x-grid-enc").is_some_and(|v| v == "1") { let _ = s.store.set_enc(&doc); } // verschlüsselt: unveränderlich ab dem Anlegen
+        if want_enc { let _ = s.store.set_enc(&doc); } // verschlüsselt: unveränderlich ab dem Anlegen
+    }
+    if entry.kind == "encrypt" && !s.store.is_enc(&doc) {
+        // Umstellung eines bestehenden Dokuments: Klartext löschen; die Clients laden ihren Stand verschlüsselt neu hoch
+        let _ = s.store.set_enc(&doc);
+        let _ = s.store.wipe_data(&doc);
+        if let Some(r) = s.rooms.lock().unwrap_or_else(|e| e.into_inner()).remove(&doc) { let _ = r.tx.send(Event::Reset); }
     }
     if entry.kind == "set" { let _ = s.store.remove_request(&doc, &entry.subject); }
     s.notify(&doc);
@@ -485,11 +499,14 @@ async fn import_log(State(s): State<Shared>, h: HeaderMap, Path(doc): Path<Strin
     if b.entries.is_empty() || b.entries.len() > 10_000 { return StatusCode::BAD_REQUEST.into_response(); }
     let state = match adminlog::replay(&doc, &b.entries) { Ok(st) => st, Err(e) => return (StatusCode::BAD_REQUEST, e).into_response() };
     if state.role(&id) != Some("admin") { return (StatusCode::FORBIDDEN, "Nur ein Admin des Dokuments darf es umziehen").into_response(); }
+    let state_enc = state.enc;
+    if s.cfg.require_enc && !state_enc { return (StatusCode::BAD_REQUEST, "Dieser Server verlangt verschlüsselte Dokumente").into_response(); }
     let rows: Result<Vec<(u64, String)>, _> = b.entries.iter().map(|e| serde_json::to_string(e).map(|j| (e.seq, j))).collect();
     let Ok(rows) = rows else { return StatusCode::BAD_REQUEST.into_response() };
     if s.store.append_admin_all(&doc, &rows).is_err() { return (StatusCode::CONFLICT, "Das Dokument gibt es hier schon").into_response(); }
     s.members.lock().unwrap_or_else(|e| e.into_inner()).insert(doc.clone(), Arc::new(state));
     let _ = s.store.set_owner(&doc, &b.entries[0].actor);
+    if state_enc { let _ = s.store.set_enc(&doc); } // der signierte Eintrag `encrypt` bestimmt auch auf dem neuen Server
     s.notify(&doc);
     StatusCode::NO_CONTENT.into_response()
 }
@@ -709,6 +726,7 @@ async fn session(state: Shared, id: String, mut socket: WebSocket) {
                         if socket.send(frame(MSG_UPDATE, &body)).await.is_err() { break }
                     }
                     Ok(Event::Update(..)) | Ok(Event::Enc(..)) => {}
+                    Ok(Event::Reset) => break,
                     Ok(Event::Members) => {
                         // Wer nicht mehr Mitglied ist, wird getrennt; alle anderen erfahren von der Änderung
                         if !state.access(&id, &account.id).unwrap_or(false) { break }
@@ -790,7 +808,7 @@ async fn session_enc(state: Shared, id: String, account: String, mut socket: Web
                         if !state.access(&id, &account).unwrap_or(false) { break }
                         if socket.send(Message::Text("{\"t\":\"members\"}".into())).await.is_err() { break }
                     }
-                    Ok(Event::Update(..)) => {}
+                    Ok(Event::Update(..)) | Ok(Event::Reset) => {}
                     // Verteiler übergelaufen: der Client holt sich per Neuverbinden, was fehlt
                     Err(broadcast::error::RecvError::Lagged(_)) => break,
                     Err(_) => break,

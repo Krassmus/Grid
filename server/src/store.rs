@@ -126,6 +126,15 @@ impl Store {
         Ok(())
     }
 
+    /// Löscht Protokoll und Dateien eines Dokuments (beim Umstellen auf Verschlüsselung: der Klartext soll nicht bleiben).
+    pub fn wipe_data(&self, doc: &str) -> rusqlite::Result<()> {
+        let mut c = self.conn();
+        let t = c.transaction()?;
+        t.execute("DELETE FROM log WHERE doc = ?1", [doc])?;
+        t.execute("DELETE FROM blobs WHERE doc = ?1", [doc])?;
+        t.commit()
+    }
+
     /// Einträge mit Nummer größer als `since`.
     pub fn log_since(&self, doc: &str, since: i64) -> rusqlite::Result<Vec<(i64, Vec<u8>)>> {
         let c = self.conn();

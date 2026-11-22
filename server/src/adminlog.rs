@@ -17,7 +17,7 @@ pub struct Entry {
     pub seq: u64,
     /// Hash des vorigen Eintrags (leer beim ersten)
     pub prev: String,
-    /// `genesis`, `set` (Mitglied hinzufügen oder Rolle/Namen ändern), `remove` oder `move`
+    /// `genesis`, `set` (Mitglied hinzufügen oder Rolle/Namen ändern), `remove`, `encrypt` (Dokument verschlüsseln, `subject` = `actor`) oder `move`
     /// (Umzug ankündigen: `name` = neue Server-Adresse, `subjectPub` = Schlüssel des neuen Servers, `subject` = `actor`)
     #[serde(rename = "type")]
     pub kind: String,
@@ -63,6 +63,8 @@ pub struct State {
     pub members: BTreeMap<String, Member>,
     /// Zuletzt angekündigter Umzug: (Server-Adresse, Server-Schlüssel)
     pub moved: Option<(String, String)>,
+    /// Ein Admin hat das Dokument als Ende-zu-Ende-verschlüsselt festgelegt (Eintrag `encrypt`, docs/E2E.md)
+    pub enc: bool,
     /// Anzahl der Einträge und Hash des letzten
     pub len: u64,
     pub head: String,
@@ -91,13 +93,17 @@ impl State {
                 next.members.insert(e.subject.clone(), Member { pubkey: e.subject_pub.clone(), role: "admin".into(), name: e.name.clone() });
                 e.subject_pub.clone()
             }
-            "set" | "remove" | "move" => {
+            "set" | "remove" | "move" | "encrypt" => {
                 let actor = self.members.get(&e.actor).ok_or("Nur Mitglieder dürfen das")?;
                 if actor.role != "admin" { return Err("Nur Admins dürfen das"); }
                 if e.kind == "move" {
                     if e.subject != e.actor { return Err("Umzug: subject muss der Unterzeichner sein"); }
                     if !(e.name.starts_with("https://") || e.name.starts_with("http://")) { return Err("Umzug: Server-Adresse ungültig"); }
                     next.moved = Some((e.name.clone(), e.subject_pub.clone()));
+                } else if e.kind == "encrypt" {
+                    if e.subject != e.actor || e.subject_pub != actor.pubkey { return Err("Verschlüsseln: subject muss der Unterzeichner sein"); }
+                    if self.enc { return Err("Das Dokument ist schon verschlüsselt"); }
+                    next.enc = true;
                 } else if e.kind == "set" {
                     if let Some(old) = self.members.get(&e.subject) {
                         if old.pubkey != e.subject_pub { return Err("Schlüssel passt nicht zum Mitglied"); }

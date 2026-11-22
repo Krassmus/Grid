@@ -696,3 +696,76 @@ async fn encrypted_documents_store_opaque_entries_and_keys() {
     let r = http("PUT", &addr, &format!("/blob/{DOC}/{key}"), Some(&ta), &enc_entry(3)).await;
     assert_eq!(status(&r), 204);
 }
+
+#[tokio::test]
+async fn plaintext_document_is_encrypted_in_place_by_a_signed_entry() {
+    let dir = tmp("migrate");
+    let addr = serve(&dir, true).await;
+    let (a, b) = (acct(1), acct(2));
+    let (ta, tb) = (token(&addr, &a).await, token(&addr, &b).await);
+    let mut c = make_doc(&addr, &ta, &a).await;
+    let (set, h) = c.entry(&a, "set", &b, "member", "Ben");
+    assert_eq!(status(&post_entry(&addr, &ta, &set).await), 204);
+    c.accept(h);
+
+    // Klartext-Daten und eine Datei liegen auf dem Server
+    let doc = Doc::new();
+    doc.get_or_insert_text("t").insert(&mut doc.transact_mut(), 0, "Klartext");
+    let mut ws = join(&addr, &ta, &doc).await.unwrap();
+    ws.send(frame(1, &doc.transact().encode_state_as_update_v1(&StateVector::default()))).await.unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    let body = b"datei";
+    let hash = { use sha2::{Digest, Sha256}; Sha256::digest(body).iter().map(|x| format!("{x:02x}")).collect::<String>() };
+    assert_eq!(status(&http("PUT", &addr, &format!("/blob/{DOC}/{hash}"), Some(&ta), body).await), 204);
+
+    // Nur Admins dürfen verschlüsseln
+    let (bad, _) = c.entry(&b, "encrypt", &b, "member", "");
+    assert_ne!(status(&post_entry(&addr, &tb, &bad).await), 204);
+    // Ein Admin darf: der Server stellt um und löscht den Klartext
+    let (enc, h) = c.entry(&a, "encrypt", &a, "admin", "");
+    assert_eq!(status(&post_entry(&addr, &ta, &enc).await), 204);
+    c.accept(h);
+    assert_eq!(get_members(&addr, &ta).await.1["enc"], true);
+    let (_w, entries, synced) = open_enc(&addr, &ta, 0).await;
+    assert!(entries.is_empty());
+    assert_eq!(synced["count"], 0);
+    assert_eq!(http("GET", &addr, &format!("/blobs/{DOC}"), Some(&ta), b"").await.1, "[]");
+    // die alte Klartext-Verbindung wurde geschlossen
+    let closed = tokio::time::timeout(std::time::Duration::from_secs(2), async { loop { match ws.next().await { None | Some(Err(_)) | Some(Ok(Message::Close(_))) => return true, _ => {} } } }).await;
+    assert!(closed.is_ok());
+    // ein zweites Mal geht nicht
+    let (again, _) = c.entry(&a, "encrypt", &a, "admin", "");
+    assert_ne!(status(&post_entry(&addr, &ta, &again).await), 204);
+}
+
+#[tokio::test]
+async fn server_can_require_encrypted_documents() {
+    let dir = tmp("require");
+    let addr = serve_with(&dir, grid_server::Config { open_registration: true, require_enc: true, ..Default::default() }).await;
+    let a = acct(1);
+    let ta = token(&addr, &a).await;
+    let c = Chain::new();
+    let (g, _) = c.entry(&a, "genesis", &a, "admin", "Anna");
+    // ohne Verschlüsselung abgelehnt, mit Verschlüsselung angelegt
+    assert_eq!(status(&post_entry(&addr, &ta, &g).await), 400);
+    assert_eq!(status(&http_hdr("POST", &addr, &format!("/docs/{DOC}/admin"), Some(&ta), "X-Grid-Enc: 1\r\n", g.to_string().as_bytes()).await), 204);
+    let info = http("GET", &addr, "/server", None, b"").await.1;
+    assert!(info.contains("\"requireEnc\":true"));
+
+    // Umzug: ein unverschlüsseltes Protokoll nimmt der Server nicht, eines mit `encrypt` schon (und markiert das Dokument)
+    let other = "22222222-3333-4444-5555-666666666666";
+    let entry = |kind: &str, seq: u64, prev: &str, doc: &str| {
+        let text = ["grid-admin-v1", doc, &seq.to_string(), prev, kind, &a.id, &a.id, &pub_hex(&a), "admin", "Anna", "1700000000"].join("\n");
+        let sig: String = a.key.sign(text.as_bytes()).to_bytes().iter().map(|b| format!("{b:02x}")).collect();
+        let hash = { use sha2::{Digest, Sha256}; Sha256::digest(format!("{text}\n{sig}")).iter().map(|b| format!("{b:02x}")).collect::<String>() };
+        (serde_json::json!({ "v": 1, "doc": doc, "seq": seq, "prev": prev, "type": kind, "actor": a.id, "subject": a.id, "subjectPub": pub_hex(&a), "role": "admin", "name": "Anna", "time": 1_700_000_000i64, "sig": sig }), hash)
+    };
+    let (g2, h2) = entry("genesis", 1, "", other);
+    let plain = serde_json::json!({ "entries": [g2.clone()] }).to_string();
+    assert_eq!(status(&http("POST", &addr, &format!("/docs/{other}/import"), Some(&ta), plain.as_bytes()).await), 400);
+    let (e2, _) = entry("encrypt", 2, &h2, other);
+    let encrypted = serde_json::json!({ "entries": [g2, e2] }).to_string();
+    assert_eq!(status(&http("POST", &addr, &format!("/docs/{other}/import"), Some(&ta), encrypted.as_bytes()).await), 204);
+    let store = grid_server::Store::open(&dir.join("t.db")).unwrap();
+    assert!(store.is_enc(other));
+}

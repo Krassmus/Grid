@@ -2,7 +2,7 @@ import * as Y from 'yjs'
 import { appendGrid, writeGrid, type GridMeta } from './gridFile'
 import { Materializer } from './tableSync'
 import { SyncConnection, fetchServerInfo, normalizeServer, onServerKey, pinServer, pinnedKey, type SyncState } from './syncClient'
-import { acceptRequest, announceMove, claimDocument, ensureGenesis, fetchMembers, rejectRequest, removeMember, setRole, type JoinRequest, type MembersInfo } from './members'
+import { acceptRequest, announceMove, claimDocument, ensureGenesis, fetchMembers, markEncrypted, rejectRequest, removeMember, setRole, type JoinRequest, type MembersInfo } from './members'
 import { fingerprint, getIdentity } from './identity'
 import { makeInvite } from './invite'
 import { DocKeys } from './docKeys'
@@ -96,6 +96,13 @@ export class FileSession {
         if (await ensureGenesis(server, this.meta.docId, info)) info = await fetchMembers(server, this.meta.docId)
         if (info.entries.length !== (this.meta.adminLog?.length ?? 0)) { this.meta.adminLog = info.entries; this.schedule() }
         this.setMembers(info)
+        // Ein Admin hat das Dokument verschlüsselt (signierter Eintrag): diese Datei folgt, ohne dass jemand etwas tun muss
+        if (info.state?.enc && this.meta.sync && !this.meta.sync.enc) {
+          this.meta.sync.enc = true
+          this.schedule()
+          this.openConn()
+          return
+        }
         // Verschlüsselung muss auf beiden Seiten gleich sein; sonst würde Klartext dort landen, wo er nicht hingehört
         if (info.entries.length > 0 && !!this.meta.sync?.enc !== info.enc) {
           this.conn?.close(); this.conn = null
@@ -117,6 +124,8 @@ export class FileSession {
   accept = (req: JoinRequest, role: Role = 'member') => this.change((s, d) => acceptRequest(s, d, req, role))
   reject = (account: string) => this.change((s, d) => rejectRequest(s, d, account))
   remove = (account: string) => this.change(async (s, d) => { await removeMember(s, d, account); await this.keys?.rotate() }) // neuer Schlüssel: das entfernte Mitglied bekommt ihn nicht
+  /** Als Admin ein unverschlüsseltes Dokument auf Ende-zu-Ende-Verschlüsselung umstellen (der Server löscht dabei den Klartext). */
+  encryptDocument = () => this.change((s, d) => markEncrypted(s, d))
   changeRole = (account: string, role: Role) => this.change((s, d) => setRole(s, d, account, role))
 
   /** Einladungstext für dieses Dokument (der Empfänger klopft damit an). */
@@ -147,8 +156,7 @@ export class FileSession {
     if (this.meta.sync && this.members?.role === 'admin') {
       try { await this.change((s, d) => announceMove(s, d, url, info.pub)) } catch { /* alter Server nicht erreichbar: trotzdem umziehen */ }
     }
-    if (this.meta.sync?.enc) throw new Error('Verschlüsselte Dokumente lassen sich noch nicht auf einen anderen Server umziehen.')
-    this.connect(url, info.pub)
+    this.connect(url, info.pub, !!this.meta.sync?.enc)
   }
 
   /** Umzug, den ein Admin angekündigt hat und dem dieses Gerät noch nicht gefolgt ist. */

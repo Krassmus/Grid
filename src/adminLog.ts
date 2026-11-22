@@ -8,8 +8,9 @@ import { sha256 } from '@noble/hashes/sha2.js'
 import { fromHex, signMessage, toHex, type Identity } from './identity'
 
 export type Role = 'admin' | 'member'
-/** `move`: Umzug ankündigen (`name` = neue Server-Adresse, `subjectPub` = Schlüssel des neuen Servers, `subject` = `actor`) */
-export type EntryType = 'genesis' | 'set' | 'remove' | 'move'
+/** `encrypt`: Dokument als Ende-zu-Ende-verschlüsselt festlegen (`subject` = `actor`, einmalig; docs/E2E.md).
+ * `move`: Umzug ankündigen (`name` = neue Server-Adresse, `subjectPub` = Schlüssel des neuen Servers, `subject` = `actor`) */
+export type EntryType = 'genesis' | 'set' | 'remove' | 'move' | 'encrypt'
 
 export interface AdminEntry {
   v: 1
@@ -31,11 +32,13 @@ export interface AdminState {
   members: Map<string, Member>
   /** zuletzt angekündigter Umzug */
   moved: { server: string; key: string } | null
+  /** Ein Admin hat das Dokument als verschlüsselt festgelegt */
+  enc: boolean
   len: number
   head: string
 }
 
-export const emptyState = (): AdminState => ({ members: new Map(), moved: null, len: 0, head: '' })
+export const emptyState = (): AdminState => ({ members: new Map(), moved: null, enc: false, len: 0, head: '' })
 
 export const signingText = (e: Omit<AdminEntry, 'sig'>) =>
   ['grid-admin-v1', e.doc, String(e.seq), e.prev, e.type, e.actor, e.subject, e.subjectPub, e.role, e.name, String(e.time)].join('\n')
@@ -56,13 +59,14 @@ export function applyEntry(state: AdminState, doc: string, e: AdminEntry): Admin
 
   const members = new Map(state.members)
   let moved = state.moved
+  let enc = state.enc
   let signer: string
   if (e.type === 'genesis') {
     if (state.len !== 0) throw new Error('Dokument hat schon einen Anfang')
     if (e.actor !== e.subject || e.role !== 'admin') throw new Error('Der Anfang gehört dem Ersteller als Admin')
     members.set(e.subject, { pub: e.subjectPub, role: 'admin', name: e.name })
     signer = e.subjectPub
-  } else if (e.type === 'set' || e.type === 'remove' || e.type === 'move') {
+  } else if (e.type === 'set' || e.type === 'remove' || e.type === 'move' || e.type === 'encrypt') {
     const actor = state.members.get(e.actor)
     if (!actor) throw new Error('Nur Mitglieder dürfen das')
     if (actor.role !== 'admin') throw new Error('Nur Admins dürfen das')
@@ -70,6 +74,10 @@ export function applyEntry(state: AdminState, doc: string, e: AdminEntry): Admin
       if (e.subject !== e.actor) throw new Error('Umzug: subject muss der Unterzeichner sein')
       if (!/^https?:\/\//.test(e.name)) throw new Error('Umzug: Server-Adresse ungültig')
       moved = { server: e.name, key: e.subjectPub }
+    } else if (e.type === 'encrypt') {
+      if (e.subject !== e.actor || e.subjectPub !== actor.pub) throw new Error('Verschlüsseln: subject muss der Unterzeichner sein')
+      if (state.enc) throw new Error('Das Dokument ist schon verschlüsselt')
+      enc = true
     } else if (e.type === 'set') {
       const old = state.members.get(e.subject)
       if (old && old.pub !== e.subjectPub) throw new Error('Schlüssel passt nicht zum Mitglied')
@@ -82,7 +90,7 @@ export function applyEntry(state: AdminState, doc: string, e: AdminEntry): Admin
   if (!/^[0-9a-f]{128}$/.test(e.sig) || !ed25519.verify(fromHex(e.sig), new TextEncoder().encode(signingText(e)), fromHex(signer))) {
     throw new Error('Signatur falsch')
   }
-  return { members, moved, len: e.seq, head: entryHash(e) }
+  return { members, moved, enc, len: e.seq, head: entryHash(e) }
 }
 
 /** Spielt eine ganze Kette ab (wirft beim ersten ungültigen Eintrag). */

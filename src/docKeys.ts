@@ -61,7 +61,9 @@ export class DocKeys {
     if ((await this.fetch()).epoch > 0) return false
     const key = newDocKey()
     await this.put(await this.boxesFor(info.state, 1, key))
-    this.keys.set(1, key)
+    // Haben zwei Admins gleichzeitig angelegt, gilt, was der Server behalten hat: noch einmal von dort lesen
+    this.keys.clear()
+    if (!(await this.load())) this.keys.set(1, key)
     this.serverEpoch = 1
     return true
   }

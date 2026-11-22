@@ -111,6 +111,13 @@ export async function claimDocument(server: string, doc: string, localLog?: Admi
   }
   const genesis = buildEntry(me, emptyState(), doc, 'genesis', { id: me.id, pub: me.publicKey }, 'admin', getAccountName())
   if (!(await post(server, doc, genesis, enc))) throw new Error('Das Dokument konnte nicht angelegt werden')
+  if (enc) await markEncrypted(server, doc) // der Beschluss steht auch signiert im Protokoll (Umzug, Mitglieder)
+}
+
+/** Hält im Admin-Protokoll fest, dass das Dokument Ende-zu-Ende-verschlüsselt ist (einmalig; ein Server kann das nicht fälschen). */
+export async function markEncrypted(server: string, doc: string): Promise<void> {
+  const me = await getIdentity()
+  await append(server, doc, (state) => (state.enc ? null : buildEntry(me, state, doc, 'encrypt', { id: me.id, pub: me.publicKey }, 'admin', '')))
 }
 
 /** Umzug auf einen anderen Server ankündigen (Eintrag im Admin-Protokoll, damit alle Mitglieder es sehen und prüfen können). */

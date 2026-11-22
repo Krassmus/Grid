@@ -16,6 +16,8 @@ export interface SyncControl extends MembersControl {
   /** Dokument ist Ende-zu-Ende-verschlüsselt (steht fest, solange es besteht) */
   enc: boolean
   connect: (server: string, enc?: boolean) => void
+  /** Als Admin ein unverschlüsseltes Dokument verschlüsseln (siehe docs/E2E.md) */
+  encryptDocument: () => Promise<void>
   disconnect: () => void
   /** Dem Schlüssel vertrauen, den der Server jetzt zeigt (nach einer Warnung) */
   trustServer: () => void
@@ -133,7 +135,8 @@ export function SyncDialog(props: { control: SyncControl; onClose: () => void })
   const c = props.control
   const me = useAccount()
   const [server, setServer] = useState(c.server ?? lastServer())
-  const [encrypt, setEncrypt] = useState(true)
+  const [encrypting, setEncrypting] = useState(false)
+  const [encError, setEncError] = useState<string | null>(null)
   const [account, setAccount] = useState(false)
   const [membersOpen, setMembersOpen] = useState(false)
   const [switching, setSwitching] = useState(false)
@@ -145,7 +148,7 @@ export function SyncDialog(props: { control: SyncControl; onClose: () => void })
     const url = normalizeServer(server)
     if (!url) return
     rememberServer(url)
-    c.connect(url, encrypt)
+    c.connect(url, true) // neue Cloud-Dokumente sind immer verschlüsselt
   }
   if (account) return <AccountDialog onClose={() => setAccount(false)} />
   if (membersOpen) return <MembersDialog control={c} onClose={() => setMembersOpen(false)} />
@@ -160,6 +163,22 @@ export function SyncDialog(props: { control: SyncControl; onClose: () => void })
             <p className={`sync-status ${c.state?.readonly ? 'readonly' : c.state?.status ?? 'connecting'}`}><span className="dot" />{syncLabel(c)}</p>
             <ServerLine server={c.server!} onSwitch={() => { setSwitching(true); setTarget('') }} />
             {c.enc && <p className="sync-account"><span>🔒 Ende-zu-Ende verschlüsselt</span></p>}
+            {!c.enc && c.state?.status === 'online' && (
+              <div className="switch-box">
+                <p><strong>Nicht verschlüsselt</strong><br /><span className="hint">Der Server kann dieses Dokument lesen.</span></p>
+                {c.members?.role === 'admin' && !encrypting && <div className="actions"><button type="button" onClick={() => { setEncrypting(true); setEncError(null) }}>Dokument verschlüsseln …</button></div>}
+                {encrypting && (
+                  <>
+                    <p className="hint">Der Server löscht den lesbaren Stand und die Dateien; alle Mitglieder laden ihren Stand verschlüsselt neu hoch. Dafür muss ein Admin online sein, bis alle ihren Schlüssel haben. Frühere Sicherungen des Servers enthalten den Klartext weiter. Das lässt sich nicht rückgängig machen.</p>
+                    <div className="actions">
+                      <button type="button" onClick={() => setEncrypting(false)}>Abbrechen</button>
+                      <button type="button" className="primary" onClick={() => c.encryptDocument().then(() => setEncrypting(false), (e: Error) => setEncError(e.message))}>Jetzt verschlüsseln</button>
+                    </div>
+                    {encError && <p className="sync-error" role="alert">{encError}</p>}
+                  </>
+                )}
+              </div>
+            )}
             {c.moved && (
               <div className="switch-box moved">
                 <p><strong>Dieses Dokument ist umgezogen</strong><br /><span className="sync-server">{c.moved.server}</span></p>
@@ -215,10 +234,7 @@ export function SyncDialog(props: { control: SyncControl; onClose: () => void })
           <>
             <Field label="Server" value={server} onChange={setServer} placeholder="https://townwork.eu/grid" autoFocus />
             <p className="hint">Du meldest dich mit deinem Grid-Konto an, ein Passwort gibt es nicht. Das Dokument bleibt auch lokal vollständig erhalten.</p>
-            <label className="cfg-check">
-              <input type="checkbox" checked={encrypt} onChange={(e) => setEncrypt(e.target.checked)} />
-              <span>Ende-zu-Ende verschlüsseln<small>Der Server speichert nur unlesbare Daten. Später nicht mehr änderbar. Geht dein Konto verloren (und hat niemand sonst Zugang), sind die Daten auf dem Server nicht mehr lesbar; sichere das Konto unter „Sichern oder übertragen“.</small></span>
-            </label>
+            <p className="hint">🔒 Das Dokument wird Ende-zu-Ende verschlüsselt: Der Server speichert nur unlesbare Daten. Geht dein Konto verloren und hat niemand sonst Zugang, sind die Daten auf dem Server nicht mehr lesbar; sichere das Konto unter „Sichern oder übertragen“.</p>
             <AccountLine me={me} onManage={() => setAccount(true)} />
             <div className="actions">
               <button type="button" onClick={props.onClose}>Abbrechen</button>

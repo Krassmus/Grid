@@ -66,4 +66,20 @@ describe('Admin-Protokoll', () => {
     expect(() => applyEntry(s3, DOC, buildEntry(b, s3, DOC, 'move', { id: b.id, pub: key }, 'member', 'https://evil.example', T))).toThrow('Nur Admins')
     expect(() => applyEntry(s3, DOC, buildEntry(a, s3, DOC, 'move', { id: a.id, pub: key }, 'admin', 'ftp://x', T))).toThrow('Server-Adresse')
   })
+
+  it('hält die Verschlüsselung fest: nur Admins, nur einmal, nur für sich selbst', () => {
+    const [a, b] = [person(1), person(2)]
+    let s = replay(DOC, [])
+    const g = buildEntry(a, s, DOC, 'genesis', sub(a), 'admin', 'Anna', T)
+    s = applyEntry(s, DOC, g)
+    const m = buildEntry(a, s, DOC, 'set', sub(b), 'member', 'Ben', T)
+    s = applyEntry(s, DOC, m)
+    expect(s.enc).toBe(false)
+    expect(() => applyEntry(s, DOC, buildEntry(b, s, DOC, 'encrypt', sub(b), 'admin', '', T))).toThrow() // kein Admin
+    expect(() => applyEntry(s, DOC, buildEntry(a, s, DOC, 'encrypt', sub(b), 'admin', '', T))).toThrow() // fremdes subject
+    s = applyEntry(s, DOC, buildEntry(a, s, DOC, 'encrypt', sub(a), 'admin', '', T))
+    expect(s.enc).toBe(true)
+    expect(s.members.size).toBe(2) // Mitglieder unverändert
+    expect(() => applyEntry(s, DOC, buildEntry(a, s, DOC, 'encrypt', sub(a), 'admin', '', T))).toThrow() // schon verschlüsselt
+  })
 })

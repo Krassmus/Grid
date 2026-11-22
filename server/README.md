@@ -23,6 +23,8 @@ grid-server accounts remove 6366823a --data /var/lib/grid
 ```
 
 Die Kennung zeigt Grid im Dialog „Cloud-Synchronisation“ an, solange das Konto wartet. Im eigenen Netz kannst du den Server mit `--open-registration` starten, dann werden neue Konten sofort freigegeben.
+
+Neue Dokumente müssen **Ende-zu-Ende-verschlüsselt** sein (der Server sieht nur unlesbare Daten, siehe `docs/E2E.md`). Bestehende unverschlüsselte Dokumente laufen weiter, bis ein Admin sie in Grid unter „Cloud-Synchronisation“ verschlüsselt. Mit `--allow-plaintext` (oder `GRID_ALLOW_PLAINTEXT=1`) erlaubt der Server auch neue unverschlüsselte Dokumente, z. B. wenn eine Firma serverseitig lesen oder sichern will.
 Die Befehle arbeiten direkt auf der Datenbank und gehen auch bei laufendem Server (als Benutzer `grid`, falls die Datei ihm gehört: `sudo -u grid …`).
 
 **Umstellung vom alten Zugangsschlüssel:** `GRID_TOKEN` gibt es nicht mehr. Die Zeile `Environment=GRID_TOKEN=…` in der Service-Datei kann gelöscht werden. Bereits vorhandene Dokumente gehören dem ersten Konto, das sie öffnet.

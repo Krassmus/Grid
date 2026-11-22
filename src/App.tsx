@@ -232,6 +232,7 @@ function Single() {
     accept: session.accept, reject: session.reject, remove: session.remove, changeRole: session.changeRole, invite: () => session.invite(),
     server: session.meta.sync?.server ?? null,
     enc: !!session.meta.sync?.enc,
+    encryptDocument: async () => { await session.encryptDocument(); bump((n) => n + 1) },
     connect: (server, enc) => { session.connect(server, undefined, enc); bump((n) => n + 1) },
     disconnect: () => { session.disconnect(); bump((n) => n + 1) },
     trustServer: () => { session.trustServer(); bump((n) => n + 1) },
