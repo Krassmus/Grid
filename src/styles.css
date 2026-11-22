@@ -318,7 +318,7 @@ textarea.cell { resize: none; line-height: 1.35; overflow: hidden; display: bloc
 .cell-geo .geo-text { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .cell-geo.with-map { padding: 2px 0; }
 .minimap { position: relative; display: block; overflow: hidden; border-radius: 8px; border: 1px solid var(--c-d5dce0); background: var(--c-e9edef); max-width: 100%; }
-.minimap > img { position: absolute; width: 256px; height: 256px; max-width: none; user-select: none; }
+.minimap > img { filter: var(--map-filter); position: absolute; width: 256px; height: 256px; max-width: none; user-select: none; }
 .minimap small { position: absolute; left: 6px; bottom: 4px; padding: 1px 6px; border-radius: 6px; background: var(--c-ffffffcc); color: var(--c-4b5a62); font-size: 11px; }
 .geo-pin { position: absolute; left: 50%; top: 50%; width: 22px; height: 22px; margin: -22px 0 0 -11px; display: block; }
 .geo-pin span { position: absolute; inset: 0; background: #0a84ff; border: 3px solid var(--c-ffffff); border-radius: 50% 50% 50% 0; transform: rotate(-45deg); box-shadow: 0 1px 4px #0006; }
@@ -590,6 +590,9 @@ main.single { padding-top: env(safe-area-inset-top); padding-left: env(safe-area
 @media (hover: none) {
   .tile-x, .row-inner .del, .h-menu, .h-sort { opacity: .75; }
   .foot-hint { opacity: .55; }
+  /* Mit dem Finger gibt es kein Hovern: iOS lässt den Hover-Zustand sonst nach dem Tippen an der Zeile hängen */
+  .row-inner:hover { background: none; }
+  .row-inner:hover .del { opacity: .75; }
 }
 @media (pointer: coarse) {
   .tabs button, .addrow-bar button, .dialog button, .doclist button { min-height: 40px; }

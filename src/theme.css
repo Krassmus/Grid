@@ -6,6 +6,7 @@
  */
 :root {
   color-scheme: light;
+  --map-filter: none; /* Bildkacheln der Minikarte: im dunklen Erscheinungsbild umgefärbt */
   /* Hintergrund hinter Bildern mit Transparenz (Zeichen, Symbole): Die Bilder sind meist für hellen Grund gezeichnet, darum bleibt er auch im Dunkeln hell */
   --img-bg: #fafbfc;
   --c-0a58ca: #0a58ca;
@@ -94,6 +95,7 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
+    --map-filter: invert(1) hue-rotate(180deg) brightness(.85) contrast(.9) saturate(.7);
     --img-bg: #64686b;
     --c-0a58ca: #6ea3f0;
     --c-0a84ff: #8bc2f9;
@@ -181,6 +183,7 @@
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
+  --map-filter: invert(1) hue-rotate(180deg) brightness(.85) contrast(.9) saturate(.7);
   --img-bg: #64686b;
   --c-0a58ca: #6ea3f0;
   --c-0a84ff: #8bc2f9;
