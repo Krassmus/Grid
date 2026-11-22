@@ -255,17 +255,23 @@ function RelationCell(props: {
   }, [lifted])
   const placed = useRef(new Map<Element, { x: number; y: number }>())
   const wasIns = useRef(false)
+  const order = useRef<string[]>([])
   useLayoutEffect(() => {
     const box = tilesEl.current
     if (!box) return
     const next = new Map<Element, { x: number; y: number }>()
     const calm = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
+    // Reihenfolge der bleibenden Kacheln geändert (z. B. von jemand anderem umsortiert)? Dann gleiten sie an den neuen Platz.
+    const keys = anim.entries.filter((e) => e.phase !== 'exit').map((e) => e.key)
+    const before = order.current.filter((k) => keys.includes(k))
+    const reordered = before.join('|') !== keys.filter((k) => before.includes(k)).join('|')
+    order.current = keys
     for (const el of Array.from(box.children) as HTMLElement[]) {
       const at = { x: el.offsetLeft, y: el.offsetTop }
       next.set(el, at)
       const was = placed.current.get(el)
-      if (was && (ins || wasIns.current) && !calm && (Math.abs(was.x - at.x) > 1 || Math.abs(was.y - at.y) > 1))
-        el.animate([{ transform: `translate(${was.x - at.x}px, ${was.y - at.y}px)` }, { transform: 'none' }], { duration: 180, easing: 'ease-out' })
+      if (was && (ins || wasIns.current || reordered) && !calm && (Math.abs(was.x - at.x) > 1 || Math.abs(was.y - at.y) > 1))
+        el.animate([{ transform: `translate(${was.x - at.x}px, ${was.y - at.y}px)` }, { transform: 'none' }], { duration: reordered ? 300 : 180, easing: 'ease-out' })
     }
     placed.current = next
     wasIns.current = !!ins
