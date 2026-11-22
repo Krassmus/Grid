@@ -43,6 +43,15 @@ Der Zugriff auf Dokumente richtet sich nach dem Konto (Abschnitt 2): Ein Dokumen
 - Zweites Gerät: „Sichern oder übertragen“ erzeugt das Konto als Text, mit einem Passwort verschlüsselt (PBKDF2-SHA-256, AES-GCM); auf dem anderen Gerät wird er eingefügt. Gerätschlüssel mit Zertifikaten (verlorene Geräte sperren) kommen später; das Format ist dafür offen.
 - townwork.eu beglaubigt später öffentliche Schlüssel (E-Mail bestätigt, Abo-Status). Intranet-Server dürfen dem vertrauen oder eigene Freigabe nutzen.
 
+#### Konto, Profil und E-Mail-Wiederherstellung (gebaut)
+
+- **Profil** (Name, E-Mail-Adresse, Avatar) gilt für alle Dokumente und liegt nur auf dem Gerät. Der Name geht in Beitrittsanfragen und ins Mitgliederprotokoll ein; man gibt ihn nicht mehr je Dokument an. Mac: Menü „Grid → Konto …“; iPad: Knopf rechts in der Kopfzeile über den Blättern (links dort „‹ Dokumente“) und in der Dokumentenliste.
+- **Adresse bestätigen:** `POST /me/email {email}` schickt einen sechsstelligen Code (15 Minuten gültig, nur als Hash gespeichert, höchstens 5 Versuche); `POST /me/email/confirm {code}` bestätigt. Die Adresse gehört danach nur diesem Konto; `DELETE /me/email` entfernt sie samt Wiederherstellungsdaten. Höchstens 5 Codes je Konto und Adresse und Stunde.
+- **Wiederherstellung einrichten:** `PUT /me/recovery` legt den **mit einem Passwort verschlüsselten** Kontotext ab (derselbe wie „Sichern oder übertragen“, PBKDF2 + AES-GCM; Passwort mindestens 10 Zeichen). Der Server kennt das Passwort nie.
+- **Auf einem neuen Gerät:** `POST /recover/start {email}` (immer `204`, verrät nicht, ob es die Adresse gibt) schickt einen Code; `POST /recover/finish {email, code}` liefert `{id, account}` (der Code gilt einmal). Grid entschlüsselt den Text mit dem Passwort lokal; bei Tippfehler versucht es derselbe Text erneut.
+- **Grenze:** Wer das Postfach lesen kann, bekommt den verschlüsselten Text und kann das Passwort durchprobieren. Darum Mindestlänge, Begrenzung der Codes und der Hinweis, ein langes Passwort zu nehmen. Die E-Mail verleiht keinen Zugang zu Dokumenten: die Daten sind Ende-zu-Ende verschlüsselt, der Schlüssel steckt im Konto.
+- **Server einrichten:** `GRID_MAIL_FROM` (Absender, schaltet das Ganze ein) und optional `GRID_MAIL_COMMAND` (Programm, das die Nachricht samt Kopfzeilen von der Standardeingabe liest; Standard `/usr/sbin/sendmail -t -i`). Ohne `GRID_MAIL_FROM` sind die Endpunkte abgeschaltet (`404`).
+
 ### 3. Besitz und Mitglieder (Phase 3, gebaut)
 
 **Admin-Protokoll.** Mitglieder und Admins stehen **nicht** im Yjs-Dokument (jeder Schreibende könnte sie ändern), sondern in einer Kette signierter Einträge, je Dokument. Ein Eintrag:

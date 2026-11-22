@@ -769,3 +769,83 @@ async fn server_can_require_encrypted_documents() {
     let store = grid_server::Store::open(&dir.join("t.db")).unwrap();
     assert!(store.is_enc(other));
 }
+
+// ---------- E-Mail und Wiederherstellung ----------
+
+async fn read_code(mailbox: &std::path::Path) -> String {
+    for _ in 0..40 {
+        if let Ok(t) = std::fs::read_to_string(mailbox) {
+            if let Some(c) = t.split("Code").filter_map(|p| p.split(|ch: char| !ch.is_ascii_digit()).find(|d| d.len() == 6)).last() { return c.to_string(); }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    panic!("keine Mail angekommen");
+}
+
+#[tokio::test]
+async fn account_can_be_recovered_with_email_and_password_encrypted_blob() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tmp("mail");
+    let mailbox = dir.join("mail.txt");
+    let script = dir.join("sendmail.sh");
+    std::fs::write(&script, format!("#!/bin/sh\ncat > {}\n", mailbox.display())).unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let addr = serve_with(&dir, grid_server::Config {
+        open_registration: true, mail_from: Some("grid@example.org".into()), mail_command: Some(script.display().to_string()), ..Default::default()
+    }).await;
+    let a = acct(1);
+    let ta = token(&addr, &a).await;
+    let json = |s: &str| serde_json::from_str::<serde_json::Value>(s).unwrap();
+    let post = |path: &str, tok: Option<String>, body: serde_json::Value| { let (addr, path) = (addr.clone(), path.to_string()); async move { http("POST", &addr, &path, tok.as_deref(), body.to_string().as_bytes()).await } };
+
+    // Adresse ungültig oder Wiederherstellung vor der Bestätigung: abgelehnt
+    assert_eq!(status(&post("/me/email", Some(ta.clone()), serde_json::json!({ "email": "kein-mail" })).await), 400);
+    assert_eq!(status(&http("PUT", &addr, "/me/recovery", Some(&ta), b"grid-account:1:abc").await), 400);
+    // Code anfordern, falschen und richtigen eingeben
+    assert_eq!(status(&post("/me/email", Some(ta.clone()), serde_json::json!({ "email": "Anna@Example.org" })).await), 204);
+    let code = read_code(&mailbox).await;
+    assert_eq!(status(&post("/me/email/confirm", Some(ta.clone()), serde_json::json!({ "code": "000000" })).await), 400);
+    assert_eq!(status(&post("/me/email/confirm", Some(ta.clone()), serde_json::json!({ "code": code })).await), 204);
+    let me = json(&http("GET", &addr, "/me", Some(&ta), b"").await.1);
+    assert_eq!((me["email"].as_str(), me["emailVerified"].as_bool(), me["recovery"].as_bool()), (Some("Anna@Example.org"), Some(true), Some(false)));
+    // Kein Konto-Text → abgelehnt; mit Konto-Text gespeichert
+    assert_eq!(status(&http("PUT", &addr, "/me/recovery", Some(&ta), b"irgendwas").await), 400);
+    assert_eq!(status(&http("PUT", &addr, "/me/recovery", Some(&ta), b"grid-account:1:c2FsdA==:aXY=:Y3Q=").await), 204);
+
+    // Auf einem neuen Gerät: unbekannte Adresse verrät nichts (204, aber keine Mail), bekannte schickt einen Code
+    std::fs::remove_file(&mailbox).ok();
+    assert_eq!(status(&post("/recover/start", None, serde_json::json!({ "email": "niemand@example.org" })).await), 204);
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    assert!(!mailbox.exists());
+    assert_eq!(status(&post("/recover/start", None, serde_json::json!({ "email": "anna@example.org" })).await), 204);
+    let code = read_code(&mailbox).await;
+    // falscher Code, dann richtiger (Groß-/Kleinschreibung der Adresse egal)
+    assert_eq!(status(&post("/recover/finish", None, serde_json::json!({ "email": "anna@example.org", "code": "111111" })).await), 400);
+    let r = post("/recover/finish", None, serde_json::json!({ "email": "ANNA@example.org", "code": code })).await;
+    assert_eq!(status(&r), 200);
+    let v = json(&r.1);
+    assert_eq!((v["id"].as_str(), v["account"].as_str()), (Some(a.id.as_str()), Some("grid-account:1:c2FsdA==:aXY=:Y3Q=")));
+    // der Code ist verbraucht
+    assert_eq!(status(&post("/recover/finish", None, serde_json::json!({ "email": "anna@example.org", "code": code })).await), 400);
+
+    // Nach fünf Fehlversuchen ist der Code gesperrt, auch der richtige
+    std::fs::remove_file(&mailbox).ok();
+    assert_eq!(status(&post("/recover/start", None, serde_json::json!({ "email": "anna@example.org" })).await), 204);
+    let code = read_code(&mailbox).await;
+    for _ in 0..5 { post("/recover/finish", None, serde_json::json!({ "email": "anna@example.org", "code": "999999" })).await; }
+    assert_eq!(status(&post("/recover/finish", None, serde_json::json!({ "email": "anna@example.org", "code": code })).await), 400);
+
+    // Adresse entfernen löscht auch die Wiederherstellungsdaten
+    assert_eq!(status(&http("DELETE", &addr, "/me/email", Some(&ta), b"").await), 204);
+    let me = json(&http("GET", &addr, "/me", Some(&ta), b"").await.1);
+    assert_eq!((me["email"].is_null(), me["recovery"].as_bool()), (true, Some(false)));
+}
+
+#[tokio::test]
+async fn email_is_off_without_mail_settings() {
+    let dir = tmp("nomail");
+    let addr = serve(&dir, true).await;
+    let ta = token(&addr, &acct(1)).await;
+    assert_eq!(status(&http("POST", &addr, "/me/email", Some(&ta), b"{\"email\":\"a@example.org\"}").await), 404);
+    assert_eq!(status(&http("POST", &addr, "/recover/start", None, b"{\"email\":\"a@example.org\"}").await), 404);
+}

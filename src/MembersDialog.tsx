@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Modal } from './Modal'
 import { fingerprint, getAccountName, getIdentity, setAccountName } from './identity'
+import { Field as ProfileField } from './SyncDialog'
 import { parseInvite, type Invite } from './invite'
 import { requestJoin } from './members'
 import { AuthError, pinServer, pinnedKey } from './syncClient'
@@ -118,7 +119,7 @@ export function JoinDialog(props: { onJoined: (invite: Invite) => void; onClose:
     if (!invite) return
     setBusy(true); setError(null)
     try {
-      setAccountName(name)
+      if (name.trim() && !getAccountName()) setAccountName(name) // einmalig fürs Konto, nicht je Dokument
       // Der Schlüssel aus der Einladung legt fest, welcher Server der richtige ist (außer Grid kennt für die Adresse schon einen anderen)
       if (invite.key) {
         const known = pinnedKey(invite.server)
@@ -143,10 +144,9 @@ export function JoinDialog(props: { onJoined: (invite: Invite) => void; onClose:
         {invite && (
           <>
             <p className="invite-info">Du wirst zu <strong>„{invite.name || 'Dokument'}“</strong> eingeladen<br /><small>Server {invite.server}{invite.key && <> (Schlüssel <code>{fingerprint(invite.key)}</code>)</>}{invite.admin && <> · eingeladen von Konto <code>{invite.admin}</code></>}</small></p>
-            <label className="sync-field">
-              <span>Dein Name (sehen die Admins)</span>
-              <input value={name} maxLength={60} onChange={(e) => setName(e.target.value)} placeholder="z. B. Anna Beispiel" />
-            </label>
+            {getAccountName()
+              ? <p className="hint">Du trittst als <strong>{getAccountName()}</strong> bei (Name und Bild änderst du unter „Konto“).</p>
+              : <ProfileField label="Dein Name (sehen die Admins; gilt künftig für alle Dokumente)" value={name} onChange={setName} placeholder="z. B. Anna Beispiel" />}
             <p className="hint">Deine Prüfnummer: <code>{fp}</code><br />Nenne sie dem Admin, damit er dich erkennt. Er muss dich danach zulassen.</p>
           </>
         )}

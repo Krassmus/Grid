@@ -6,7 +6,7 @@ description = "Sync-Server für Grid-Dokumente"
 
 [dependencies]
 axum = { version = "0.8", features = ["ws"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "net", "signal"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "net", "signal", "process", "io-util"] }
 rusqlite = { version = "0.42.0", features = ["bundled"] }
 yrs = "0.24"
 serde = { version = "1", features = ["derive"] }

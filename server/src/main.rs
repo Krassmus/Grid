@@ -113,6 +113,8 @@ async fn main() {
     let cfg = grid_server::Config {
         open_registration: open,
         billing,
+        mail_from: std::env::var("GRID_MAIL_FROM").ok().filter(|m| m.contains('@')),
+        mail_command: std::env::var("GRID_MAIL_COMMAND").ok().filter(|m| !m.trim().is_empty()),
         require_enc: !flag("--allow-plaintext", "GRID_ALLOW_PLAINTEXT"),
         admin_key: std::env::var("GRID_ADMIN_KEY").ok().filter(|k| k.len() >= 16),
         manage_url: std::env::var("GRID_MANAGE_URL").ok().filter(|u| !u.is_empty()),

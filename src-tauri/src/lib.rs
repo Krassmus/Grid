@@ -199,7 +199,9 @@ fn build_menu<M: tauri::Manager<tauri::Wry>>(app: &M, recent: &[String], theme: 
     .undo().redo().separator().cut().copy().paste().select_all()
     .build()?;
   let app_menu = SubmenuBuilder::new(app, "Grid")
-    .about(None).separator().hide().hide_others().show_all().separator().quit()
+    .about(None).separator()
+    .item(&MenuItemBuilder::with_id("account", "Konto …").build(app)?)
+    .separator().hide().hide_others().show_all().separator().quit()
     .build()?;
   // Einstellungen: Erscheinungsbild (die Oberfläche wertet „theme:…“ aus und meldet den Stand über `set_theme` zurück)
   let choice = |id: &str, text: &str| CheckMenuItemBuilder::with_id(format!("theme:{id}"), text).checked(theme == id).build(app);

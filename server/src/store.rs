@@ -35,6 +35,7 @@ impl Store {
              CREATE TABLE IF NOT EXISTS stripe_customers (customer TEXT PRIMARY KEY, account TEXT NOT NULL);
              CREATE TABLE IF NOT EXISTS admin_log (doc TEXT NOT NULL, seq INTEGER NOT NULL, entry TEXT NOT NULL, PRIMARY KEY (doc, seq));
              CREATE TABLE IF NOT EXISTS keys (doc TEXT NOT NULL, epoch INTEGER NOT NULL, account TEXT NOT NULL, sender TEXT NOT NULL, box TEXT NOT NULL, PRIMARY KEY (doc, epoch, account));
+             CREATE TABLE IF NOT EXISTS codes (key TEXT PRIMARY KEY, hash TEXT NOT NULL, expires INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, data TEXT NOT NULL DEFAULT '');
              CREATE TABLE IF NOT EXISTS join_requests (doc TEXT NOT NULL, account TEXT NOT NULL, pub TEXT NOT NULL, name TEXT NOT NULL, time INTEGER NOT NULL, PRIMARY KEY (doc, account));",
         )?;
         // Spalten, die erst später dazukamen (bestehende Datenbanken werden erweitert)
@@ -44,6 +45,9 @@ impl Store {
             ("accounts", "quota", "INTEGER NOT NULL DEFAULT 0"),
             ("docs", "owner", "TEXT"),
             ("docs", "enc", "INTEGER NOT NULL DEFAULT 0"),
+            ("accounts", "email", "TEXT"),
+            ("accounts", "email_verified", "INTEGER NOT NULL DEFAULT 0"),
+            ("accounts", "recovery", "TEXT"),
         ] {
             let have: i64 = c.query_row(&format!("SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = '{column}'"), [], |r| r.get(0))?;
             if have == 0 { c.execute(&format!("ALTER TABLE {table} ADD COLUMN {column} {ddl}"), [])?; }
@@ -188,6 +192,57 @@ impl Store {
         let mut s = c.prepare("SELECT account FROM keys WHERE doc = ?1 AND epoch = ?2")?;
         let rows = s.query_map(params![doc, epoch], |r| r.get(0))?;
         rows.collect()
+    }
+
+    // ---------- E-Mail und Wiederherstellung des Kontos ----------
+
+    /// Merkt einen Code (nur als Hash) für `key`, überschreibt einen vorhandenen.
+    pub fn put_code(&self, key: &str, hash: &str, expires: i64, data: &str) -> rusqlite::Result<()> {
+        self.conn().execute("INSERT OR REPLACE INTO codes (key, hash, expires, attempts, data) VALUES (?1, ?2, ?3, 0, ?4)", params![key, hash, expires, data])?;
+        Ok(())
+    }
+
+    /// Zählt einen Versuch und liefert (Hash, Daten), solange der Code gilt und noch Versuche übrig sind (höchstens 5).
+    pub fn try_code(&self, key: &str) -> rusqlite::Result<Option<(String, String)>> {
+        let c = self.conn();
+        let row: Option<(String, i64, i64, String)> = c.query_row("SELECT hash, expires, attempts, data FROM codes WHERE key = ?1", [key], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))).optional()?;
+        let Some((hash, expires, attempts, data)) = row else { return Ok(None) };
+        if expires < now() || attempts >= 5 { c.execute("DELETE FROM codes WHERE key = ?1", [key])?; return Ok(None); }
+        c.execute("UPDATE codes SET attempts = attempts + 1 WHERE key = ?1", [key])?;
+        Ok(Some((hash, data)))
+    }
+
+    pub fn drop_code(&self, key: &str) -> rusqlite::Result<()> {
+        self.conn().execute("DELETE FROM codes WHERE key = ?1", [key])?;
+        Ok(())
+    }
+
+    /// E-Mail-Adresse des Kontos als bestätigt eintragen; sie gehört danach nur diesem Konto.
+    pub fn set_email(&self, account: &str, email: &str) -> rusqlite::Result<()> {
+        let c = self.conn();
+        c.execute("UPDATE accounts SET email = NULL, email_verified = 0, recovery = NULL WHERE lower(email) = lower(?1) AND id <> ?2", params![email, account])?;
+        c.execute("UPDATE accounts SET email = ?2, email_verified = 1 WHERE id = ?1", params![account, email])?;
+        Ok(())
+    }
+
+    pub fn clear_email(&self, account: &str) -> rusqlite::Result<()> {
+        self.conn().execute("UPDATE accounts SET email = NULL, email_verified = 0, recovery = NULL WHERE id = ?1", [account])?;
+        Ok(())
+    }
+
+    /// (E-Mail, bestätigt, hat Wiederherstellungsdaten)
+    pub fn email_of(&self, account: &str) -> rusqlite::Result<(Option<String>, bool, bool)> {
+        Ok(self.conn().query_row("SELECT email, email_verified, recovery IS NOT NULL FROM accounts WHERE id = ?1", [account], |r| Ok((r.get(0)?, r.get::<_, i64>(1)? != 0, r.get::<_, i64>(2)? != 0))).optional()?.unwrap_or((None, false, false)))
+    }
+
+    pub fn set_recovery(&self, account: &str, blob: &str) -> rusqlite::Result<()> {
+        self.conn().execute("UPDATE accounts SET recovery = ?2 WHERE id = ?1", params![account, blob])?;
+        Ok(())
+    }
+
+    /// Konto mit dieser bestätigten Adresse: (Kennung, Wiederherstellungsdaten)
+    pub fn recovery_for(&self, email: &str) -> rusqlite::Result<Option<(String, String)>> {
+        self.conn().query_row("SELECT id, recovery FROM accounts WHERE lower(email) = lower(?1) AND email_verified = 1 AND recovery IS NOT NULL", [email], |r| Ok((r.get(0)?, r.get(1)?))).optional()
     }
 
     // ---------- Identität des Servers ----------

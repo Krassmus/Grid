@@ -6,8 +6,8 @@ import { MembersDialog, type MembersControl } from './MembersDialog'
 import { openExternal } from './externalLink'
 
 const LAST = 'grid-sync-last-server'
-const lastServer = () => { try { return localStorage.getItem(LAST) ?? '' } catch { return '' } }
-const rememberServer = (s: string) => { try { localStorage.setItem(LAST, s) } catch { /* egal */ } }
+export const lastServer = () => { try { return localStorage.getItem(LAST) ?? '' } catch { return '' } }
+export const rememberServer = (s: string) => { try { localStorage.setItem(LAST, s) } catch { /* egal */ } }
 
 /** Was die Oberfläche über die Cloud-Anbindung des Dokuments wissen und tun darf. */
 export interface SyncControl extends MembersControl {
@@ -108,7 +108,7 @@ function PlanLine(props: { server: string; refresh: unknown; onActive: () => voi
   )
 }
 
-function Field(props: { label: string; value: string; onChange: (v: string) => void; type?: string; placeholder?: string; autoFocus?: boolean }) {
+export function Field(props: { label: string; value: string; onChange: (v: string) => void; type?: string; placeholder?: string; autoFocus?: boolean }) {
   return (
     <label className="sync-field">
       <span>{props.label}</span>

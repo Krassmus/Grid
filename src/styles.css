@@ -663,3 +663,17 @@ main.single { padding-top: env(safe-area-inset-top); padding-left: env(safe-area
 /* Erste Spalte (Kopf, Zellen, Fuß) mit etwas mehr Abstand zum linken Rand */
 .grid-head > :first-child, .row-inner > :first-child { padding-left: 12px; }
 .addrow-bar { padding-left: 13px; } /* die Tabelle beginnt 1 px weiter rechts als die Leiste */
+
+/* Konto: Avatar, Kopfzeile auf dem iPad, Dialog */
+.profile-avatar { display: block; border-radius: 50%; object-fit: cover; flex: none; }
+.profile-avatar.initials { display: inline-flex; align-items: center; justify-content: center; background: var(--c-dbe7fb); color: var(--c-1456c8); font-weight: 600; line-height: 1; }
+button.account-btn { border: none; background: none; box-shadow: none; padding: 2px; min-height: 0; border-radius: 50%; cursor: pointer; line-height: 0; }
+.account-btn:hover { box-shadow: 0 0 0 2px var(--c-e1e7ea); }
+.topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 16px 2px; }
+.doclist-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.profile-dialog h4 { margin: 14px 0 4px; }
+.profile-head { display: flex; align-items: center; gap: 14px; }
+.profile-fields { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+button.avatar-pick { border: none; background: none; box-shadow: none; padding: 0; min-height: 0; border-radius: 50%; cursor: pointer; line-height: 0; }
+.avatar-pick:hover { box-shadow: 0 0 0 3px var(--c-e1e7ea); }
+.profile-links { display: flex; flex-wrap: wrap; gap: 4px 14px; }

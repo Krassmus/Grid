@@ -34,6 +34,7 @@ import { RichPreview, RichTextDialog } from './richText'
 import { SyncDialog, syncLabel, type SyncControl } from './SyncDialog'
 import { isMobileUI } from './platform'
 import { ItemMenu, beginLongPress } from './ItemMenu'
+import { AccountButton } from './ProfileDialog'
 import { AnimItem, useAnimatedList } from './animatedList'
 import { ConfirmDialog, Modal } from './Modal'
 import { TableDialog } from './TableDialog'
@@ -560,6 +561,8 @@ export function ClientPane(props: {
   persist?: string | null
   /** Zurück zur Dokumentenliste (nur auf iPad/iPhone) */
   onHome?: () => void
+  /** Konto-Dialog öffnen (iPad: Knopf in der Kopfzeile über den Blättern) */
+  onAccount?: () => void
   /** Cloud-Anbindung des Dokuments (fehlt in der Simulation). */
   sync?: SyncControl
   online?: boolean
@@ -849,8 +852,13 @@ export function ClientPane(props: {
 
       {/* Alles bis zur Tabelle scrollt gemeinsam; der Tabellenkopf bleibt oben stehen, die Leiste „+ Zeile“ unten. */}
       <div className="gridscroll">
+      {(props.onHome || props.onAccount) && (
+        <div className="topbar">
+          {props.onHome ? <button type="button" className="home-btn" onClick={props.onHome} aria-label="Zurück zur Dokumentenliste">‹ Dokumente</button> : <span />}
+          {props.onAccount && <AccountButton onClick={props.onAccount} />}
+        </div>
+      )}
       <nav className="tabs">
-        {props.onHome && <button type="button" className="home-btn" onClick={props.onHome} aria-label="Zurück zur Dokumentenliste">‹ Dokumente</button>}
         {shownTabs.map((t) => {
           const current = t.id === tab?.id
           return (

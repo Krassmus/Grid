@@ -143,6 +143,12 @@ export interface AccountInfo {
   manageUrl: string | null
   /** Zahlungslink mit der Konto-Kennung (Stripe), falls der Server einen kennt */
   checkoutUrl: string | null
+  /** Der Server kann E-Mails schicken (Bestätigung, Wiederherstellung) */
+  mail?: boolean
+  email?: string | null
+  emailVerified?: boolean
+  /** Auf dem Server liegt ein mit Passwort verschlüsselter Kontotext zur Wiederherstellung */
+  recovery?: boolean
 }
 
 export async function fetchAccountInfo(server: string): Promise<AccountInfo> {

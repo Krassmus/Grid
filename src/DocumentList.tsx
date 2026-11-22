@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { isTauri } from './gridFile'
 import { ConfirmDialog } from './Modal'
 import { ago, uniqueName } from './documents'
+import { AccountButton } from './ProfileDialog'
 import { isThemeChoice, readTheme, setTheme, type ThemeChoice } from './theme'
 
 export interface DocFile { name: string; path: string; modified: number; size: number }
@@ -17,6 +18,8 @@ export function DocumentList(props: {
   onCreate: (name: string) => void
   onCloud: () => void
   onJoin: () => void
+  /** Konto-Dialog öffnen (Name, Avatar, E-Mail) */
+  onAccount?: () => void
   error?: string | null
 }) {
   const [files, setFiles] = useState<DocFile[] | null>(null)
@@ -45,7 +48,7 @@ export function DocumentList(props: {
   return (
     <div className="doclist">
       <header>
-        <h1>Dokumente</h1>
+        <div className="doclist-title"><h1>Dokumente</h1>{props.onAccount && <AccountButton onClick={props.onAccount} />}</div>
         <div className="doclist-actions">
           <button type="button" className="primary" onClick={() => setNaming(true)}>+ Neues Dokument</button>
           <button type="button" onClick={props.onCloud}>Aus Cloud …</button>

@@ -8,6 +8,7 @@ import { baseName, isTauri, newMeta, readGrid, writeGrid, type OpenedGrid } from
 import { FileSession } from './fileSession'
 import { isThemeChoice, setTheme } from './theme'
 import { CloudOpenDialog, type SyncControl } from './SyncDialog'
+import { ProfileDialog } from './ProfileDialog'
 import { JoinDialog } from './MembersDialog'
 import type { MembersInfo } from './members'
 import type { Invite } from './invite'
@@ -41,6 +42,7 @@ function Single() {
   const [, bump] = useState(0)
   const [cloudOpen, setCloudOpen] = useState(false)
   const [joinOpen, setJoinOpen] = useState(false)
+  const [profileOpen, setProfileOpen] = useState(false)
   const [members, setMembers] = useState<MembersInfo | null>(null)
   const [listVersion, setListVersion] = useState(0)
 
@@ -183,7 +185,7 @@ function Single() {
         await cur.flush()
       }
 
-      const actions: Record<string, () => Promise<void>> = { open, new: create, save, save_as: saveAs, open_cloud: async () => setCloudOpen(true), join: async () => setJoinOpen(true) }
+      const actions: Record<string, () => Promise<void>> = { open, new: create, save, save_as: saveAs, open_cloud: async () => setCloudOpen(true), join: async () => setJoinOpen(true), account: async () => setProfileOpen(true) }
       const unlisten = await listen<string>('menu', (e) => {
         if (e.payload === 'clear_recent') { writeRecent([]); return }
         const theme = /^theme:(.+)$/.exec(e.payload)
@@ -212,6 +214,7 @@ function Single() {
   const dialogs = (
     <>
       {joinOpen && <JoinDialog onClose={() => setJoinOpen(false)} onJoined={(i: Invite) => { setJoinOpen(false); void openFromCloud({ id: i.doc, name: i.name, updated: 0 }, i.server, i.key, !!i.enc) }} />}
+      {profileOpen && <ProfileDialog onClose={() => setProfileOpen(false)} />}
       {cloudOpen && <CloudOpenDialog onOpen={(d, server) => void openFromCloud(d, server)} onClose={() => setCloudOpen(false)} />}
       {error && !(isMobileUI && !session) && <div className="file-error" role="alert">{error}<button type="button" onClick={() => setError(null)}>✕</button></div>}
     </>
@@ -221,7 +224,7 @@ function Single() {
     return (
       <>
         <DocumentList version={listVersion} error={error} onOpen={(p) => { setError(null); void openPath(p) }} onCreate={(n) => { setError(null); void createHere(n) }}
-          onCloud={() => setCloudOpen(true)} onJoin={() => setJoinOpen(true)} />
+          onCloud={() => setCloudOpen(true)} onJoin={() => setJoinOpen(true)} onAccount={() => setProfileOpen(true)} />
         {dialogs}
       </>
     )
@@ -245,7 +248,7 @@ function Single() {
     <>
       <ClientPane key={session.key} title={UNSAVED_TITLE} doc={session.doc}
         persist={session.path ? null : `grid-proto-${UNSAVED_TITLE}`} sync={control}
-        onHome={isMobileUI ? () => void goHome() : undefined} />
+        onHome={isMobileUI ? () => void goHome() : undefined} onAccount={isMobileUI ? () => setProfileOpen(true) : undefined} />
       {dialogs}
     </>
   )

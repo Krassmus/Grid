@@ -3,6 +3,7 @@
 
 mod adminlog;
 mod auth;
+mod recovery;
 pub mod store;
 
 use axum::{
@@ -70,6 +71,10 @@ pub struct Config {
     pub manage_url: Option<String>,
     /// Name des Servers, den Grid anzeigt (z. B. „Firmenserver“).
     pub name: Option<String>,
+    /// Absender für E-Mails (aktiviert Bestätigung und Wiederherstellung per E-Mail); ohne ist beides abgeschaltet.
+    pub mail_from: Option<String>,
+    /// Programm zum Versenden (liest die Nachricht samt Kopfzeilen von der Standardeingabe); Standard `/usr/sbin/sendmail -t -i`.
+    pub mail_command: Option<String>,
     /// Neue Dokumente müssen Ende-zu-Ende-verschlüsselt sein (docs/E2E.md); bestehende unverschlüsselte laufen weiter, bis ein Admin sie verschlüsselt.
     pub require_enc: bool,
     /// Signaturgeheimnis des Stripe-Webhooks (`whsec_…`); ohne ist `POST /billing/stripe` abgeschaltet.
@@ -90,6 +95,8 @@ pub struct AppState {
     /// Abgespielte Admin-Protokolle (fällt bei jedem neuen Eintrag weg)
     members: Mutex<HashMap<String, Arc<adminlog::State>>>,
     next_client: Mutex<u64>,
+    /// Zeitpunkte versandter Codes je Konto bzw. Adresse (Begrenzung gegen Missbrauch)
+    mail_log: Mutex<HashMap<String, Vec<i64>>>,
 }
 
 pub type Shared = Arc<AppState>;
@@ -115,6 +122,7 @@ pub fn app_with(data: &std::path::Path, cfg: Config) -> rusqlite::Result<Router>
         rooms: Mutex::new(HashMap::new()),
         members: Mutex::new(HashMap::new()),
         next_client: Mutex::new(0),
+        mail_log: Mutex::new(HashMap::new()),
     });
     Ok(Router::new()
         .route("/health", get(|| async { "ok" }))
@@ -122,6 +130,11 @@ pub fn app_with(data: &std::path::Path, cfg: Config) -> rusqlite::Result<Router>
         .route("/challenge", get(challenge))
         .route("/login", post(login))
         .route("/me", get(me))
+        .route("/me/email", post(recovery::set_email).delete(recovery::remove_email))
+        .route("/me/email/confirm", post(recovery::confirm_email))
+        .route("/me/recovery", axum::routing::put(recovery::put_recovery))
+        .route("/recover/start", post(recovery::recover_start))
+        .route("/recover/finish", post(recovery::recover_finish))
         .route("/billing/stripe", post(stripe_webhook))
         .route("/admin/accounts", get(admin_accounts))
         .route("/admin/accounts/{id}/plan", axum::routing::put(admin_plan))
@@ -359,6 +372,7 @@ async fn me(State(s): State<Shared>, h: HeaderMap) -> Response {
     Json(serde_json::json!({
         "id": a.id, "plan": a.plan, "active": a.paid_now(), "paidUntil": a.paid_until, "quota": a.quota,
         "used": s.store.owned_bytes(&a.id).unwrap_or(0), "billing": s.cfg.billing, "manageUrl": s.cfg.manage_url,
+        "mail": s.cfg.mail_from.is_some(), "email": s.store.email_of(&a.id).ok().and_then(|e| e.0), "emailVerified": s.store.email_of(&a.id).map(|e| e.1).unwrap_or(false), "recovery": s.store.email_of(&a.id).map(|e| e.2).unwrap_or(false),
         "checkoutUrl": s.cfg.checkout_url.as_ref().map(|u| format!("{u}{}client_reference_id={}", if u.contains('?') { "&" } else { "?" }, a.id)),
     })).into_response()
 }
