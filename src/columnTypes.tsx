@@ -286,6 +286,17 @@ class GeoColumn extends ColumnType<GeoConfig> {
   }
 }
 
+/** Aufsteigende Zahl: nicht bearbeitbar, nummeriert die Zeilen der Reihe nach (siehe nextStamp in model.ts). */
+export type AutonumberConfig = Record<string, never>
+class AutonumberColumn extends ColumnType<AutonumberConfig> {
+  readonly type = 'autonumber'
+  readonly label = 'Aufsteigende Zahl'
+  readonly defaults: AutonumberConfig = {}
+  renderConfig() {
+    return <p className="hint">Nummeriert die Zeilen in der Reihenfolge ihres Anlegens und lässt sich nicht bearbeiten. Legen zwei Personen gleichzeitig eine Zeile an, entscheidet erst das Zusammenführen über die Reihenfolge: die Nummer kann sich dann ändern. Löscht man eine Zeile, rücken die folgenden nach.</p>
+  }
+}
+
 export const TEXT = new TextColumn()
 export const NUMBER = new NumberColumn()
 export const RELATION = new RelationColumn()
@@ -297,8 +308,9 @@ export const ROLLUP = new RollupColumn()
 export const FORMULA = new FormulaColumn()
 export const TEMPLATE = new TemplateColumn()
 export const GEO = new GeoColumn()
+export const AUTONUMBER = new AutonumberColumn()
 
-const REGISTRY: Record<ColType, ColumnType<any>> = { text: TEXT, number: NUMBER, relation: RELATION, file: FILE, select: SELECT, date: DATE, checkbox: CHECKBOX, rollup: ROLLUP, formula: FORMULA, template: TEMPLATE, geo: GEO }
+const REGISTRY: Record<ColType, ColumnType<any>> = { text: TEXT, number: NUMBER, relation: RELATION, file: FILE, select: SELECT, date: DATE, checkbox: CHECKBOX, rollup: ROLLUP, formula: FORMULA, template: TEMPLATE, geo: GEO, autonumber: AUTONUMBER }
 export const columnTypeOf = (type: ColType): ColumnType<any> => REGISTRY[type]
 
 /**
@@ -308,6 +320,7 @@ export const columnTypeOf = (type: ColType): ColumnType<any> => REGISTRY[type]
 export function effectiveType(col: ColumnInfo, tables: TableInfo[], depth = 0): ColType {
   if (col.type === 'formula') return formulaType(col, tables, depth)
   if (col.type === 'template') return 'text'
+  if (col.type === 'autonumber') return 'number'
   if (col.type !== 'rollup') return col.type
   if (depth > 4) return 'text'
   const cfg = ROLLUP.config(col)

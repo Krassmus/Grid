@@ -93,6 +93,12 @@ function plainCells(doc: Y.Doc, tables: TableInfo[], table: TableInfo, col: Colu
   const target = col.type === 'relation' ? tables.find((t) => t.id === col.target) : undefined
   const rich = col.type === 'text' && TEXT.config(col).mode === 'rich'
   const dateCfg = col.type === 'date' ? DATE.config(col) : null
+  // Aufsteigende Zahl: Rang der Zeitmarke unter allen Zeilen (bei gleicher Marke entscheidet die Zeilen-ID)
+  let rank: Map<string, number> | null = null
+  if (col.type === 'autonumber') {
+    const stamp = (id: string) => { const v = rows?.get(id)?.get(col.id); return typeof v === 'number' ? v : 0 }
+    rank = new Map([...table.rowIds].sort((a, b) => stamp(a) - stamp(b) || (a < b ? -1 : a > b ? 1 : 0)).map((id, i) => [id, i + 1]))
+  }
   for (const rid of table.rowIds) {
     const raw = rows?.get(rid)?.get(col.id)
     let text = ''
@@ -114,6 +120,7 @@ function plainCells(doc: Y.Doc, tables: TableInfo[], table: TableInfo, col: Colu
         if (g) { text = formatGeo(g, GEO.config(col).format); key = g.lat }
         break
       }
+      case 'autonumber': { const n = rank!.get(rid)!; out.set(rid, { raw: n, text: String(n), key: n }); continue }
       case 'checkbox': text = raw ? '✓' : ''; key = raw ? 1 : 0; break // nicht angehakt zählt als 0, nie als leer
       case 'relation': {
         const titles = (links?.get(`${rid}|${col.id}`) ?? []).map((x) => (target ? reprMap(doc, tables, target, ctx).get(x)?.title ?? '' : ''))

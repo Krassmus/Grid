@@ -23,6 +23,7 @@ export const OPS_BY_TYPE: Record<ColType, FilterOp[]> = {
   rollup: [], // berechnete Spalten zählen mit ihrem effektiven Typ (effectiveType)
   formula: [],
   template: [],
+  autonumber: [], // zählt mit dem effektiven Typ (Zahl)
   geo: ['contains', 'ncontains', 'empty', 'nempty'], // „contains“ sucht im angezeigten Text
 }
 

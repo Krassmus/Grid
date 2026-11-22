@@ -697,7 +697,7 @@ export function ClientPane(props: {
     const r = new Map<string, Map<string, Repr>>()
     if (!table) return { cellData: m, reprs: r }
     const ctx = newCtx() // gemeinsamer Zwischenspeicher: jede Spalte (auch von Formeln benutzte) wird nur einmal berechnet
-    for (const c of table.columns) if (isComputed(c) || c.footer) m.set(c.id, columnCells(doc, tables, table, c, ctx))
+    for (const c of table.columns) if (isComputed(c) || c.type === 'autonumber' || c.footer) m.set(c.id, columnCells(doc, tables, table, c, ctx))
     // Darstellung der Zeilen für alles, was hier als Kachel erscheint: Ziele der Relationen, Quellen der Rückverweise, die Tabelle selbst
     const wanted = new Set<string>([table.id])
     for (const c of table.columns) if (c.type === 'relation' && c.target) wanted.add(c.target)
@@ -812,7 +812,7 @@ export function ClientPane(props: {
   const template = table
     ? [
         ...shownColumns.map((c, i) =>
-          liveWidth?.id === c.id ? `${liveWidth.w}px` : c.width ? `${c.width}px` : i === 0 ? '200px' : c.type === 'relation' || c.type === 'file' ? '240px' : c.type === 'number' ? '120px' : c.type === 'date' ? '170px' : c.type === 'checkbox' ? '110px' : isComputed(c) ? '150px' : c.type === 'geo' ? (c.config?.format === 'map' ? '240px' : '210px') : c.type === 'select' ? '160px' : '180px'),
+          liveWidth?.id === c.id ? `${liveWidth.w}px` : c.width ? `${c.width}px` : i === 0 ? '200px' : c.type === 'relation' || c.type === 'file' ? '240px' : c.type === 'number' || c.type === 'autonumber' ? '120px' : c.type === 'date' ? '170px' : c.type === 'checkbox' ? '110px' : isComputed(c) ? '150px' : c.type === 'geo' ? (c.config?.format === 'map' ? '240px' : '210px') : c.type === 'select' ? '160px' : '180px'),
         ...backlinks.map(() => '220px'),
         'minmax(120px, 1fr)',
       ].join(' ')
@@ -924,7 +924,7 @@ export function ClientPane(props: {
                 <div key={rid} className="row-outer" data-row={rid}>
                   <div className="row-inner">
                     {shownColumns.map((c, i) =>
-                      isComputed(c)
+                      isComputed(c) || c.type === 'autonumber'
                         ? (() => {
                             const cell = cellData.get(c.id)?.get(rid)
                             return (
@@ -1147,6 +1147,7 @@ function Dialog(props: {
             <option value="checkbox">Checkbox</option>
             <option value="formula">Formel (Berechnung aus anderen Spalten)</option>
             <option value="geo">Geokoordinate</option>
+            <option value="autonumber">Aufsteigende Zahl (nicht bearbeitbar)</option>
             <option value="template">Text mit Platzhaltern {'({{…}})'}</option>
             <option value="rollup" disabled={!props.table || relations.length === 0}>Rollup (Summe u. a. über verknüpfte Zeilen)</option>
           </select>

@@ -26,7 +26,7 @@ import * as Y from 'yjs'
  *     (siehe blobStore.ts) und werden später separat mit dem Server abgeglichen.
  */
 
-export type ColType = 'text' | 'number' | 'relation' | 'file' | 'select' | 'date' | 'checkbox' | 'rollup' | 'formula' | 'template' | 'geo'
+export type ColType = 'text' | 'number' | 'relation' | 'file' | 'select' | 'date' | 'checkbox' | 'rollup' | 'formula' | 'template' | 'geo' | 'autonumber'
 export type CellValue = string | number | null
 
 export interface SelectOption { id: string; name: string; color: string }
@@ -115,8 +115,24 @@ export function addColumn(
     }
     t.get('cols').set(id, c)
     t.get('colOrder').push([id])
+    if (type === 'autonumber') { // vorhandene Zeilen der Reihe nach nummerieren
+      const rows: Y.Map<Y.Map<any>> = t.get('rows')
+      const base = nextPos()
+      t.get('rowOrder').toArray().forEach((rid: string, i: number) => rows.get(rid)?.set(id, base + i))
+    }
   })
   return id
+}
+
+/**
+ * Zeitmarke für „Aufsteigende Zahl“: Mikrosekunden-genaue Uhrzeit, nie kleiner als die größte schon vergebene.
+ * Angezeigt wird der Rang unter allen Zeilen (siehe cells.ts), nicht die Marke selbst: gleichzeitig angelegte Zeilen
+ * bekommen so beim Zusammenführen eine eindeutige Reihenfolge, ohne dass sich jemand abstimmen muss.
+ */
+function nextStamp(rows: Y.Map<Y.Map<any>>, colId: string): number {
+  let max = 0
+  rows.forEach((r) => { const v = r.get(colId); if (typeof v === 'number' && v > max) max = v })
+  return Math.max(nextPos(), max + 1)
 }
 
 /** Legt eine Zeile mit den angegebenen Werten an (alles in einer Änderung, also auch in einem Schritt rückgängig zu machen). */
@@ -133,8 +149,10 @@ export function addRow(doc: Y.Doc, tableId: string): string {
   const id = uid()
   doc.transact(() => {
     const t = tablesOf(doc).get(tableId)!
-    t.get('rows').set(id, new Y.Map<any>())
+    const row = new Y.Map<any>()
+    t.get('rows').set(id, row)
     t.get('rowOrder').push([id])
+    for (const [cid, c] of t.get('cols').entries()) if ((c as Y.Map<any>).get('type') === 'autonumber') row.set(cid, nextStamp(t.get('rows'), cid))
   })
   return id
 }
@@ -434,7 +452,7 @@ export interface RowSummary { title: string; subs: string[] }
 export function summarize(doc: Y.Doc, table: TableInfo, rowId: string): RowSummary {
   const row: Y.Map<any> | undefined = tablesOf(doc).get(table.id)?.get('rows').get(rowId)
   const vals = table.columns
-    .filter((c) => c.type !== 'relation' && c.type !== 'file' && c.type !== 'checkbox' && c.type !== 'geo' && !isComputed(c))
+    .filter((c) => c.type !== 'relation' && c.type !== 'file' && c.type !== 'checkbox' && c.type !== 'geo' && c.type !== 'autonumber' && !isComputed(c))
     .map((c) => {
       const v = row?.get(c.id)
       if (c.type === 'select') return c.options?.find((o) => o.id === v)?.name ?? ''

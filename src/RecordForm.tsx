@@ -10,7 +10,7 @@ import { Modal } from './Modal'
 import { RichField } from './richText'
 
 /** Spalten, die im Formular ausgefüllt werden können; Berechnetes und Ausgeblendetes nicht. */
-export const formColumns = (table: TableInfo): ColumnInfo[] => table.columns.filter((c) => !isComputed(c) && !c.hidden)
+export const formColumns = (table: TableInfo): ColumnInfo[] => table.columns.filter((c) => !isComputed(c) && c.type !== 'autonumber' && !c.hidden)
 
 /** Zusätzlich zu den Zellwerten: gewählte Dateien und Verknüpfungen, je Spalte. */
 export interface RecordExtras {
