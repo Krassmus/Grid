@@ -117,6 +117,10 @@ function Picker(props: {
       return [s.title, ...s.subs].join(' ').toLowerCase().includes(needle)
         || !!columnTexts?.some((m) => (m.get(id)?.text ?? '').toLowerCase().includes(needle))
     })
+  // alphabetisch nach der Darstellung (Titel, dann Untertitel); Zahlen im Text nach ihrem Wert („2“ vor „10“)
+  const label = (id: string) => { const s = reprs(props.target.id)?.get(id) ?? summarize(props.doc, props.target, id); return [s.title, ...s.subs].join(' ') }
+  const collator = new Intl.Collator('de', { numeric: true, sensitivity: 'base' })
+  const sorted = rows.map((id) => ({ id, text: label(id) })).sort((a, b) => collator.compare(a.text, b.text)).map((x) => x.id)
   return (
     <Modal onClose={props.onClose}>
       <div className="dialog picker" onMouseDown={(e) => e.stopPropagation()}
@@ -124,10 +128,10 @@ function Picker(props: {
         <h3>Datensatz aus „{props.target.name}“ verknüpfen</h3>
         <input autoFocus placeholder="Suchen …" value={q} onChange={(e) => setQ(e.target.value)} />
         <div className="picker-list">
-          {rows.map((id) => (
+          {sorted.map((id) => (
             <Tile key={id} doc={props.doc} table={props.target} rowId={id} display="full" onClick={() => props.onPick(id)} />
           ))}
-          {rows.length === 0 && <p className="hint">Keine passenden Datensätze.</p>}
+          {sorted.length === 0 && <p className="hint">Keine passenden Datensätze.</p>}
         </div>
         <div className="actions split">
           {props.allowCreate !== false ? <button type="button" onClick={() => setCreating(true)}>+ Neuer Datensatz …</button> : <span />}
@@ -764,6 +768,18 @@ export function ClientPane(props: {
   const query = (table && searches[table.id]?.trim().toLowerCase()) || ''
   // Tippen ohne Fokus (kein Feld, kein Dialog) landet in der Suche
   const searchRef = useRef<HTMLInputElement>(null)
+  // Haftet die Kopfzeile am oberen Rand (Tabelle ist angescrollt), verliert sie ihre runden Ecken: sonst scheinen dahinter die Zeilen durch
+  const wrapRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const check = () => {
+      const wrap = wrapRef.current, head = wrap?.querySelector('.grid-head')
+      if (wrap && head) wrap.classList.toggle('scrolled', head.getBoundingClientRect().top > wrap.getBoundingClientRect().top + 2)
+    }
+    document.addEventListener('scroll', check, { capture: true, passive: true })
+    window.addEventListener('resize', check)
+    check()
+    return () => { document.removeEventListener('scroll', check, true); window.removeEventListener('resize', check) }
+  }, [])
   const tableId = table?.id
   useEffect(() => {
     if (!tableId) return
@@ -884,7 +900,7 @@ export function ClientPane(props: {
 
       {table && (
         <>
-          <div className="gridwrap"
+          <div className="gridwrap" ref={wrapRef}
             onFocus={() => { editingInGrid.current = true }}
             onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) { editingInGrid.current = false; setSortTick((n) => n + 1) } }}>
             <div className="grid" style={{ ['--cols' as any]: template }}>

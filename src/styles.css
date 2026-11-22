@@ -58,6 +58,7 @@ button.primary:disabled { opacity: .4; cursor: default; }
 .grid { min-width: max-content; }
 .grid-head, .row-inner { display: grid; grid-template-columns: var(--cols); }
 /* Kopfzeile bleibt beim Scrollen oben (sticky relativ zum Fenster) */
+.gridwrap.scrolled .grid-head { border-radius: 0; }
 .grid-head { position: sticky; top: 0; z-index: 2; background: var(--c-f9faf8); border-bottom: 1px solid var(--c-e1e7ea); border-radius: 15px 15px 0 0; }
 .h { position: relative; padding: 14px 5px 9px; font-size: 13px; font-weight: 500; letter-spacing: .12em; text-transform: uppercase; color: var(--c-7b8890); white-space: nowrap; }
 .h small { margin-left: 8px; text-transform: none; letter-spacing: 0; font-size: 11px; opacity: .7; }
