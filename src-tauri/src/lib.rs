@@ -197,7 +197,9 @@ fn build_menu<M: tauri::Manager<tauri::Wry>>(app: &M, recent: &[String], theme: 
     .close_window()
     .build()?;
   let edit = SubmenuBuilder::new(app, "Bearbeiten")
-    .undo().redo().separator().cut().copy().paste().select_all()
+    .item(&item("undo", "Rückgängig", "CmdOrCtrl+Z")?)
+    .item(&item("redo", "Wiederholen", "CmdOrCtrl+Shift+Z")?)
+    .separator().cut().copy().paste().select_all()
     .build()?;
   let app_menu = SubmenuBuilder::new(app, "Grid")
     .about(None).separator()

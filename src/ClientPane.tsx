@@ -38,6 +38,7 @@ import { SyncDialog, syncLabel, type SyncControl } from './SyncDialog'
 import { isMobileUI } from './platform'
 import { ItemMenu, beginLongPress } from './ItemMenu'
 import { AccountButton } from './ProfileDialog'
+import { useUndo } from './undo'
 import { AnimItem, useAnimatedList } from './animatedList'
 import { ConfirmDialog, Modal } from './Modal'
 import { TableDialog } from './TableDialog'
@@ -591,6 +592,21 @@ function SyncButton(props: { control: SyncControl; onClick: () => void }) {
 
 const NO_ROWS: string[] = []
 
+/** Rückgängig und Wiederholen (iPad: oben neben dem Konto). */
+function UndoButtons({ undo }: { undo: ReturnType<typeof useUndo> }) {
+  const icon = (flip: boolean) => (
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={flip ? { transform: 'scaleX(-1)' } : undefined}>
+      <path d="M9 14L4 9l5-5" /><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />
+    </svg>
+  )
+  return (
+    <span className="undo-btns">
+      <button type="button" disabled={!undo.canUndo} onClick={undo.undo} title="Rückgängig" aria-label="Rückgängig">{icon(false)}</button>
+      <button type="button" disabled={!undo.canRedo} onClick={undo.redo} title="Wiederholen" aria-label="Wiederholen">{icon(true)}</button>
+    </span>
+  )
+}
+
 export function ClientPane(props: {
   title: string
   doc: Y.Doc
@@ -656,6 +672,7 @@ export function ClientPane(props: {
   const [hint, setHint] = useState<DropHint | null>(null)
   // Nach „+ Tabelle“ gleich in die erste Zelle der ersten Zeile springen
   const sectionRef = useRef<HTMLElement>(null)
+  const history = useUndo(doc)
   const [focusFirst, setFocusFirst] = useState(false)
   useEffect(() => {
     if (!focusFirst || !table?.rowIds.length) return
@@ -902,7 +919,10 @@ export function ClientPane(props: {
       {(props.onHome || props.onAccount) && (
         <div className="topbar">
           {props.onHome ? <button type="button" className="home-btn" onClick={props.onHome} aria-label="Zurück zur Dokumentenliste">‹ Dokumente</button> : <span />}
-          {props.onAccount && <AccountButton onClick={props.onAccount} />}
+          <span className="topbar-right">
+            <UndoButtons undo={history} />
+            {props.onAccount && <AccountButton onClick={props.onAccount} />}
+          </span>
         </div>
       )}
       <nav className="tabs">

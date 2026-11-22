@@ -1,3 +1,4 @@
+import { runUndoCommand } from './undo'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import * as Y from 'yjs'
 import { FakeHub } from './sync'
@@ -192,6 +193,7 @@ function Single() {
       const actions: Record<string, () => Promise<void>> = { open, new: create, save, save_as: saveAs, open_cloud: async () => setCloudOpen(true), join: async () => setJoinOpen(true), account: async () => setProfileOpen(true) }
       const unlisten = await listen<string>('menu', (e) => {
         if (e.payload === 'clear_recent') { writeRecent([]); return }
+        if (e.payload === 'undo' || e.payload === 'redo') { runUndoCommand(e.payload); return }
         const theme = /^theme:(.+)$/.exec(e.payload)
         if (theme) { if (isThemeChoice(theme[1])) setTheme(theme[1]); return }
         const recent = /^recent:(\d+)$/.exec(e.payload)

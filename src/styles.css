@@ -790,3 +790,10 @@ button.invite-row:hover .plus-avatar { border-color: #0a84ff; color: #0a84ff; }
 .person-row.on { border-color: #1456c8; color: inherit; }
 .person-row .pick-mark.on { border-color: #1456c8; background: radial-gradient(#1456c8 0 45%, var(--c-ffffff) 50%); }
 .person-checks { display: grid; gap: 4px; }
+
+/* Rückgängig / Wiederholen in der Kopfzeile */
+.topbar-right { display: inline-flex; align-items: center; gap: 8px; }
+.undo-btns { display: inline-flex; gap: 2px; }
+.undo-btns button { display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 34px; padding: 0; border: none; background: none; box-shadow: none; border-radius: 9px; color: var(--c-0a58ca); cursor: pointer; }
+.undo-btns button:disabled { color: var(--c-b9c4ca); cursor: default; }
+.undo-btns button:not(:disabled):hover { background: var(--c-e9edef); }
