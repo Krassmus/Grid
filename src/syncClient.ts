@@ -143,6 +143,10 @@ export interface AccountInfo {
   manageUrl: string | null
   /** Zahlungslink mit der Konto-Kennung (Stripe), falls der Server einen kennt */
   checkoutUrl: string | null
+  /** In-App-Kauf (App Store): Produkte, die ein Abo freischalten, und die Links, die Apple verlangt; sonst `null` */
+  iap?: { products: { id: string; quota: number }[]; termsUrl: string | null; privacyUrl: string | null } | null
+  /** Woher das Abo kommt: `apple` (Kauf) oder `manual` (vom Betreiber freigeschaltet) */
+  planSource?: string
   /** Der Server kann E-Mails schicken (Bestätigung, Wiederherstellung) */
   mail?: boolean
   email?: string | null

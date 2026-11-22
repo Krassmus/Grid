@@ -1,5 +1,8 @@
 import { isTauri } from './gridFile'
 
+/** iPad oder iPhone (hier gibt es den App Store für In-App-Käufe). */
+export const isIOS: boolean = typeof navigator !== 'undefined' && (/iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) && isTauri
+
 /**
  * Touch-Gerät mit der App (iPad, iPhone, Android): keine Menüleiste, keine frei wählbaren Speicherorte.
  * Dann gibt es eine Dokumentenliste statt der Menübefehle. Im Browser zum Ausprobieren: `?mobile` an die Adresse hängen.

@@ -96,3 +96,22 @@ Restart=on-failure
 [Install]
 WantedBy=multi-user.target
 ```
+
+## In-App-Kauf (App Store), freie Konten, Speicherplatz
+
+Kurzfassung der Einrichtung (Hintergrund: `docs/SYNC.md`). Der Server prüft Apples signierte Belege selbst; er braucht keinen Schlüssel von Apple.
+
+1. **App Store Connect:** App mit der Kennung `eu.townwork.grid` anlegen, Verträge, Steuern und Bank für bezahlte Apps ausfüllen, unter „Abos“ eine Abo-Gruppe mit den Produkten `eu.townwork.grid.cloud.monthly` und `eu.townwork.grid.cloud.yearly` (Preis, Name, Beschreibung) anlegen.
+2. **Server** (`Environment=…` in der systemd-Datei, dazu `--billing --open-registration`):
+
+```ini
+Environment=GRID_APPLE_BUNDLE_ID=eu.townwork.grid
+Environment=GRID_APPLE_PRODUCTS=eu.townwork.grid.cloud.monthly=2GB,eu.townwork.grid.cloud.yearly=2GB
+Environment=GRID_APPLE_SANDBOX=1
+Environment=GRID_TERMS_URL=https://townwork.eu/grid/bedingungen
+Environment=GRID_PRIVACY_URL=https://townwork.eu/grid/datenschutz
+```
+
+   `GRID_APPLE_SANDBOX=1` nimmt auch Test-Käufe an (TestFlight, Prüfung durch Apple); nach der Freigabe kann es bleiben oder weg. Optional in App Store Connect unter „App-Informationen“ die Adresse `https://<server>/billing/apple/notify` als URL für Server-Benachrichtigungen eintragen (Version 2), dann folgen Verlängerungen und Erstattungen sofort.
+3. **Zugang ohne Kauf** (Freunde, Apple-Team): Das Konto meldet sich einmal an (offene Registrierung), dann: `grid-server accounts list` zeigt die Kennung, `grid-server accounts plan <Kennung> paid --quota 2GB --until 2027-12-31` schaltet es frei.
+4. **Speicherplatz:** `grid-server status`. Unter `GRID_MIN_FREE` (Standard 5GB) freiem Platz nimmt der Server keine Änderungen mehr an.

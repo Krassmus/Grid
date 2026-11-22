@@ -17,6 +17,11 @@ ed25519-dalek = "2"
 hmac = "0.12"
 getrandom = "0.3"
 tower-http = { version = "0.6", features = ["cors"] }
+base64 = "0.22"
+x509-parser = { version = "0.16", features = ["verify"] }
+p256 = { version = "0.13", features = ["ecdsa", "pkcs8"] }
+libc = "0.2"
 
 [dev-dependencies]
 tokio-tungstenite = "0.27"
+rcgen = "0.13"

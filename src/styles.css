@@ -751,3 +751,9 @@ button.invite-row:hover .plus-avatar { border-color: #0a84ff; color: #0a84ff; }
 .member-invite textarea { width: 100%; box-sizing: border-box; }
 .member-item.invite.open { background: var(--c-f9faf8); }
 .member-more .hint { margin: 0; }
+
+/* Abo kaufen (App Store) */
+.paywall { display: flex; flex-direction: column; gap: 8px; }
+.product-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--c-e1e7ea); border-radius: 14px; background: var(--c-ffffff); }
+.paywall-terms { margin: 0; font-size: 12px; line-height: 1.5; color: var(--c-666677); }
+.paywall .actions { justify-content: flex-start; }

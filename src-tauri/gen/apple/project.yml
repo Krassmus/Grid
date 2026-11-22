@@ -1,6 +1,6 @@
 name: grid
 options:
-  bundleIdPrefix: app.grid.desktop
+  bundleIdPrefix: eu.townwork.grid
   deploymentTarget:
     iOS: 16.0
 fileGroups: [../../src]
@@ -11,7 +11,7 @@ settingGroups:
   app:
     base:
       PRODUCT_NAME: Grid
-      PRODUCT_BUNDLE_IDENTIFIER: app.grid.desktop
+      PRODUCT_BUNDLE_IDENTIFIER: eu.townwork.grid
       DEVELOPMENT_TEAM: 7GD6JHBABJ
 targetTemplates:
   app:

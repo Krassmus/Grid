@@ -2,7 +2,10 @@
 //! Protokoll und Hintergrund: docs/SYNC.md
 
 mod adminlog;
+mod apple;
 mod auth;
+mod disk;
+mod iap;
 mod recovery;
 pub mod store;
 
@@ -23,6 +26,9 @@ use std::{
     sync::{Arc, Mutex},
 };
 pub use store::Store;
+/// Freier Platz und Gesamtgröße des Datenträgers (für `grid-server status`).
+pub fn disk_free(dir: &std::path::Path) -> Option<u64> { disk::free_bytes(dir) }
+pub fn disk_total(dir: &std::path::Path) -> Option<u64> { disk::total_bytes(dir) }
 use store::COMPACT_AT;
 use tokio::sync::broadcast;
 use tower_http::cors::{Any, CorsLayer};
@@ -71,6 +77,20 @@ pub struct Config {
     pub manage_url: Option<String>,
     /// Name des Servers, den Grid anzeigt (z. B. „Firmenserver“).
     pub name: Option<String>,
+    /// Kennung der App im App Store (z. B. `eu.townwork.grid`); schaltet In-App-Käufe ein. Ohne: abgeschaltet.
+    pub apple_bundle: Option<String>,
+    /// Produkte, die ein Abo freischalten: (Produktkennung, Speicher in Bytes)
+    pub apple_products: Vec<(String, i64)>,
+    /// Auch Belege der Testumgebung (Sandbox, TestFlight, App-Prüfung) annehmen
+    pub apple_sandbox: bool,
+    /// Nur für Tests: anderes Wurzelzertifikat statt dem von Apple
+    #[doc(hidden)]
+    pub apple_root_override: Option<Vec<u8>>,
+    /// Links, die Apple in der Kaufansicht verlangt
+    pub terms_url: Option<String>,
+    pub privacy_url: Option<String>,
+    /// Unter diesem freien Platz auf dem Datenträger (Bytes) nimmt der Server nichts Neues mehr an; 0 = nicht prüfen.
+    pub min_free: i64,
     /// Absender für E-Mails (aktiviert Bestätigung und Wiederherstellung per E-Mail); ohne ist beides abgeschaltet.
     pub mail_from: Option<String>,
     /// Programm zum Versenden (liest die Nachricht samt Kopfzeilen von der Standardeingabe); Standard `/usr/sbin/sendmail -t -i`.
@@ -97,6 +117,8 @@ pub struct AppState {
     next_client: Mutex<u64>,
     /// Zeitpunkte versandter Codes je Konto bzw. Adresse (Begrenzung gegen Missbrauch)
     mail_log: Mutex<HashMap<String, Vec<i64>>>,
+    /// freier Platz auf dem Datenträger der Daten
+    disk: disk::Watch,
 }
 
 pub type Shared = Arc<AppState>;
@@ -123,6 +145,7 @@ pub fn app_with(data: &std::path::Path, cfg: Config) -> rusqlite::Result<Router>
         members: Mutex::new(HashMap::new()),
         next_client: Mutex::new(0),
         mail_log: Mutex::new(HashMap::new()),
+        disk: disk::Watch::new(data.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(std::path::Path::new("."))),
     });
     Ok(Router::new()
         .route("/health", get(|| async { "ok" }))
@@ -136,6 +159,8 @@ pub fn app_with(data: &std::path::Path, cfg: Config) -> rusqlite::Result<Router>
         .route("/recover/start", post(recovery::recover_start))
         .route("/recover/finish", post(recovery::recover_finish))
         .route("/billing/stripe", post(stripe_webhook))
+        .route("/billing/apple/transaction", post(iap::transaction))
+        .route("/billing/apple/notify", post(iap::notify))
         .route("/admin/accounts", get(admin_accounts))
         .route("/admin/accounts/{id}/plan", axum::routing::put(admin_plan))
         .route("/docs", get(list_docs))
@@ -302,8 +327,14 @@ impl AppState {
     /// zahlenden Admin und freien Speicher. Die Grenze ist weich: der Schreibvorgang, der sie überschreitet, geht noch durch.
     fn writable(&self, doc: &str) -> Writable {
         let ok = Writable { ok: true, code: "", reason: String::new() };
-        if !self.cfg.billing { return ok; }
         let deny = |code: &'static str, reason: String| Writable { ok: false, code, reason };
+        // Datenträger fast voll: nichts Neues annehmen, lesen geht weiter
+        if self.cfg.min_free > 0 {
+            if let Some(free) = self.disk.free() {
+                if (free as i64) < self.cfg.min_free { return deny("disk", "Der Server hat zu wenig freien Speicherplatz und nimmt vorübergehend keine Änderungen an. Sie bleiben hier gespeichert und werden später hochgeladen.".into()); }
+            }
+        }
+        if !self.cfg.billing { return ok; }
         let payer = match self.payer_of(doc) {
             Ok(Some(p)) => p,
             Ok(None) => return deny("no-plan", "Kein Admin dieses Dokuments hat ein aktives Abo. Das Dokument ist nur lesbar.".into()),
@@ -372,7 +403,7 @@ async fn me(State(s): State<Shared>, h: HeaderMap) -> Response {
     Json(serde_json::json!({
         "id": a.id, "plan": a.plan, "active": a.paid_now(), "paidUntil": a.paid_until, "quota": a.quota,
         "used": s.store.owned_bytes(&a.id).unwrap_or(0), "billing": s.cfg.billing, "manageUrl": s.cfg.manage_url,
-        "mail": s.cfg.mail_from.is_some(), "email": s.store.email_of(&a.id).ok().and_then(|e| e.0), "emailVerified": s.store.email_of(&a.id).map(|e| e.1).unwrap_or(false), "recovery": s.store.email_of(&a.id).map(|e| e.2).unwrap_or(false),
+        "planSource": s.store.plan_source(&a.id), "mail": s.cfg.mail_from.is_some(), "iap": s.cfg.apple_bundle.as_ref().map(|_| serde_json::json!({ "products": s.cfg.apple_products.iter().map(|(id, q)| serde_json::json!({ "id": id, "quota": q })).collect::<Vec<_>>(), "termsUrl": s.cfg.terms_url, "privacyUrl": s.cfg.privacy_url })), "email": s.store.email_of(&a.id).ok().and_then(|e| e.0), "emailVerified": s.store.email_of(&a.id).map(|e| e.1).unwrap_or(false), "recovery": s.store.email_of(&a.id).map(|e| e.2).unwrap_or(false),
         "checkoutUrl": s.cfg.checkout_url.as_ref().map(|u| format!("{u}{}client_reference_id={}", if u.contains('?') { "&" } else { "?" }, a.id)),
     })).into_response()
 }

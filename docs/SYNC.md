@@ -96,6 +96,21 @@ Voraussetzung: Das Konto der Person ist auf dem Server freigegeben (bei offener 
 - **In-App-Kauf** (Apple/Google): die App kauft über den Store, schickt den Beleg an den Server, der ihn beim Store prüft und dann dasselbe Abo setzt. Ein Konto, egal über welchen Weg bezahlt wurde; die Store-Gebühr trägt der Preis.
 - **E-Mail zum Konto** (Wiederherstellung bei Geräteverlust, Beglaubigung des öffentlichen Schlüssels durch townwork.eu) und eine Einstellung „Konto auf diesem Server nur mit Abo anlegen“ gehören ebenfalls hierher.
 
+#### In-App-Kauf über den App Store (gebaut, Stripe ist optional)
+
+- **Kein Zwischenschritt am Server:** Mit `--open-registration --billing` legt sich jedes Konto selbst an (ohne Abo kann es Mitglied in fremden Dokumenten sein, aber keinen Speicher besitzen). Ein Kauf schaltet das Abo sofort frei; niemand muss etwas bestätigen.
+- **Ablauf (iPad/iPhone):** Das Plugin `src-tauri/plugins/tauri-plugin-iap` (Swift, StoreKit 2) kauft mit `appAccountToken = Kontokennung` (die UUID des Grid-Kontos steht so in Apples Beleg). Die App schickt den von Apple **signierten Beleg (JWS)** an `POST /billing/apple/transaction`. Der Server prüft die Signatur (ES256) und die Zertifikatskette bis zum fest eingebauten *Apple Root CA – G3* samt Apples Kennzeichen an den Zertifikaten (`server/src/apple.rs`), ohne bei Apple nachzufragen und ohne Zugangsdaten. Außerdem: richtige App (`bundleId`), bekanntes Produkt, Kontokennung im Beleg = angemeldetes Konto, Beleg nicht erstattet, Abo nicht abgelaufen, Transaktion gehört genau einem Konto.
+- **Verlängerungen:** Bei jedem Verbinden meldet die App alle gerade gültigen Käufe des Apple-Kontos (`Transaction.currentEntitlements`), also auch Käufe von einem anderen Gerät. Optional hält Apple den Server über *App Store Server Notifications V2* (`POST /billing/apple/notify`, in App Store Connect als Adresse eintragen) auf dem Laufenden: Verlängerung, Ablauf, Erstattung.
+- **Abo und Quelle:** Das Abo gilt bis Ende des bezahlten Zeitraums plus 3 Tage Nachfrist. Jedes Abo merkt seine Quelle: `apple` (Kauf) oder `manual` (Betreiber). Ein Ablauf oder eine Erstattung beendet nur `apple`-Abos; ein von Hand gesetztes bleibt.
+- **Zugang ohne Kauf (Freunde, Apple-Prüfung):** `grid-server accounts plan <Kennung> paid --quota 2GB [--until 2027-12-31]` (die Kennung zeigt `grid-server accounts list`; Grid zeigt sie im Dialog „Konto“). Damit braucht es keinen Kauf, und ein gekauftes Abo überschreibt es nicht.
+- **Konfiguration:** `GRID_APPLE_BUNDLE_ID` (z. B. `eu.townwork.grid`), `GRID_APPLE_PRODUCTS="eu.townwork.grid.cloud.monthly=2GB,eu.townwork.grid.cloud.yearly=2GB"` (Produkt = Speicher), `GRID_APPLE_SANDBOX=1` (auch Test-Belege annehmen: nötig für TestFlight und die Prüfung durch Apple), `GRID_TERMS_URL` und `GRID_PRIVACY_URL` (Apple verlangt beide in der Kaufansicht).
+- **Mac:** Ein Abo gehört zum Grid-Konto, nicht zum Gerät: wer auf dem iPad kauft, hat es auch auf dem Mac. Direkt auf dem Mac kaufen geht erst, wenn Grid dort über den Mac App Store ausgeliefert wird (dieselbe StoreKit-Anbindung).
+
+#### Freier Speicherplatz auf dem Server
+
+- `GRID_MIN_FREE` (Standard 5GB): Fällt der freie Platz auf dem Datenträger darunter, nimmt der Server nichts Neues an (Änderungen und Dateien; Meldung „zu wenig freien Speicherplatz“, Code `disk`). Lesen geht weiter, die Clients behalten ihre Änderungen und laden sie später hoch. `0` schaltet die Prüfung ab.
+- `grid-server status` zeigt freien Platz, Zahl der Konten, vergebenen und belegten Speicher und warnt, wenn der offene Rest der vergebenen Kontingente größer ist als der freie Platz. Das Kontingent ist ein Höchstwert; mehr zu vergeben als frei ist, geht, solange nicht alle ihn ausnutzen.
+
 ### 5. Mehrere Server (Phase 5, gebaut)
 
 - **Ein Dokument weiß, wohin es gehört:** `meta.sync` in der Datei hält die Server-Adresse und den Schlüssel des Servers. Jedes Dokument kann zu einem anderen Server gehören (townwork.eu, Firmenserver, …); dasselbe Konto gilt überall, braucht aber auf jedem Server eine Freigabe.

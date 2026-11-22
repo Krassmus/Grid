@@ -27,6 +27,7 @@ rusqlite = { version = "0.42.0", features = ["bundled"] }
 zip = { version = "9.5.1", default-features = false, features = ["deflate"] }
 tauri-plugin-dialog = "2.8.4"
 tauri-plugin-opener = "2.7.3"
+tauri-plugin-iap = { path = "plugins/tauri-plugin-iap" }
 
 # Schlüsselbund des Betriebssystems für den Konto-Schlüssel; anderswo (und bei Fehlern) eine Datei im Konfigurationsordner
 [target.'cfg(any(target_os = "macos", target_os = "ios", target_os = "windows"))'.dependencies]

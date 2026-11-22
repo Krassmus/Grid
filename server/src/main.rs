@@ -3,6 +3,8 @@
 //!                      grid-server accounts plan <Kennung> paid [--until 2027-12-31] [--quota 5GB]
 //!                      grid-server accounts plan <Kennung> free
 //! Ohne `--open-registration` (oder GRID_OPEN_REGISTRATION=1) warten neue Konten auf `approve`.
+//! Speicherplatz: `grid-server status` zeigt freien Platz und vergebenen Speicher; unter `GRID_MIN_FREE` (Standard 5GB) freiem Platz nimmt der Server nichts Neues an.
+//! In-App-Kauf (App Store): GRID_APPLE_BUNDLE_ID, GRID_APPLE_PRODUCTS="produkt=5GB,…", optional GRID_APPLE_SANDBOX=1, GRID_TERMS_URL, GRID_PRIVACY_URL.
 //! Neue Dokumente müssen Ende-zu-Ende-verschlüsselt sein (docs/E2E.md); `--allow-plaintext` (GRID_ALLOW_PLAINTEXT=1) erlaubt auch unverschlüsselte.
 //! Mit `--billing` (GRID_BILLING=1) braucht das Schreiben ein Abo und freien Speicher (Cloud); ohne ist alles frei.
 //! Weitere Umgebungsvariablen: GRID_NAME (Anzeigename des Servers), GRID_CHECKOUT_URL / GRID_STRIPE_WEBHOOK_SECRET / GRID_STRIPE_QUOTA (Stripe), GRID_ADMIN_KEY (schaltet /admin/… ein), GRID_MANAGE_URL (Link „Abo verwalten“).
@@ -49,6 +51,27 @@ fn parse_date(s: &str) -> Result<i64, String> {
     Ok((days + 1) * 86_400 - 1)
 }
 
+fn gb(b: i64) -> String { format!("{:.1} GB", b as f64 / 1e9) }
+
+/// Lage des Servers: Datenträger, Konten, vergebener Speicher gegenüber freiem Platz.
+fn status() -> Result<(), String> {
+    let dir = data_dir();
+    let store = grid_server::Store::open(&dir.join("grid.db")).map_err(|e| e.to_string())?;
+    let list = store.accounts().map_err(|e| e.to_string())?;
+    let paid: Vec<_> = list.iter().filter(|a| a.approved() && a.paid_now()).collect();
+    let granted: i64 = paid.iter().map(|a| a.quota).sum();
+    let used: i64 = list.iter().map(|a| store.owned_bytes(&a.id).unwrap_or(0)).sum();
+    let (free, total) = (grid_server::disk_free(&dir), grid_server::disk_total(&dir));
+    println!("Datenträger:  {} frei von {}", free.map(|b| gb(b as i64)).unwrap_or("?".into()), total.map(|b| gb(b as i64)).unwrap_or("?".into()));
+    println!("Konten:       {} ({} warten auf Freigabe), {} mit Abo", list.len(), list.iter().filter(|a| !a.approved()).count(), paid.len());
+    println!("Speicher:     {} vergeben, {} belegt", gb(granted), gb(used));
+    if let Some(f) = free {
+        let open = (granted - used).max(0);
+        if open as u64 > f { println!("ACHTUNG: Wenn alle ihren Speicher ausnutzen ({} offen), reicht der freie Platz nicht.", gb(open)); }
+    }
+    Ok(())
+}
+
 fn data_dir() -> PathBuf { PathBuf::from(arg("--data", "GRID_DATA", "./data")) }
 
 fn accounts(args: &[String]) -> Result<(), String> {
@@ -70,8 +93,8 @@ fn accounts(args: &[String]) -> Result<(), String> {
             if list.is_empty() { println!("Noch keine Konten."); }
             for a in list {
                 let label = if a.approved() { "freigegeben" } else { "WARTET" };
-                let plan = if a.paid_now() { format!("Abo bis {}", a.paid_until.map(|t| t.to_string()).unwrap_or("unbefristet".into())) } else { "kostenlos".into() };
-                println!("{}  {}  {}…  {}", label, a.id, &a.pubkey[..16], plan);
+                let plan = if a.paid_now() { format!("Abo ({}) bis {}, Speicher {}", store.plan_source(&a.id), a.paid_until.map(|t| t.to_string()).unwrap_or("unbefristet".into()), gb(a.quota)) } else { "kostenlos".into() };
+                println!("{}  {}  {}…  {}  belegt {}", label, a.id, &a.pubkey[..16], plan, gb(store.owned_bytes(&a.id).unwrap_or(0)));
             }
             Ok(())
         }
@@ -98,6 +121,10 @@ fn accounts(args: &[String]) -> Result<(), String> {
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("status") {
+        if let Err(e) = status() { eprintln!("{e}"); std::process::exit(1); }
+        return;
+    }
     if args.first().map(String::as_str) == Some("accounts") {
         if let Err(e) = accounts(&positional(&args[1..])) {
             eprintln!("{e}");
@@ -113,6 +140,13 @@ async fn main() {
     let cfg = grid_server::Config {
         open_registration: open,
         billing,
+        apple_bundle: std::env::var("GRID_APPLE_BUNDLE_ID").ok().filter(|b| !b.is_empty()),
+        apple_products: std::env::var("GRID_APPLE_PRODUCTS").ok().map(|v| v.split(',').filter_map(|p| { let (id, q) = p.split_once('=')?; Some((id.trim().to_string(), parse_size(q).ok()?)) }).collect()).unwrap_or_default(),
+        apple_sandbox: flag("--apple-sandbox", "GRID_APPLE_SANDBOX"),
+        apple_root_override: None,
+        terms_url: std::env::var("GRID_TERMS_URL").ok().filter(|u| u.starts_with("http")),
+        privacy_url: std::env::var("GRID_PRIVACY_URL").ok().filter(|u| u.starts_with("http")),
+        min_free: std::env::var("GRID_MIN_FREE").ok().and_then(|v| parse_size(&v).ok()).unwrap_or(5_000_000_000),
         mail_from: std::env::var("GRID_MAIL_FROM").ok().filter(|m| m.contains('@')),
         mail_command: std::env::var("GRID_MAIL_COMMAND").ok().filter(|m| !m.trim().is_empty()),
         require_enc: !flag("--allow-plaintext", "GRID_ALLOW_PLAINTEXT"),

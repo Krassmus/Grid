@@ -883,3 +883,129 @@ async fn members_can_leave_and_leftover_keys_are_reported_as_stale() {
     let got: serde_json::Value = serde_json::from_str(&http("GET", &addr, &keys, Some(&ta), b"").await.1).unwrap();
     assert_eq!((got["epoch"].as_i64(), got["stale"].clone()), (Some(2), serde_json::json!([])));
 }
+
+// ---------- In-App-Kauf (App Store) und freier Speicherplatz ----------
+
+mod storekit {
+    use base64::{Engine, engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD}};
+    use p256::ecdsa::{Signature, SigningKey, signature::Signer};
+    use rcgen::{BasicConstraints, CertificateParams, CustomExtension, IsCa, KeyPair};
+
+    pub struct Pki { pub root: Vec<u8>, inter: Vec<u8>, leaf: Vec<u8>, key: SigningKey }
+    pub fn pki() -> Pki {
+        let ext = |oid: &[u64]| CustomExtension::from_oid_content(oid, vec![0x05, 0x00]);
+        let rk = KeyPair::generate().unwrap();
+        let mut rp = CertificateParams::new(Vec::<String>::new()).unwrap();
+        rp.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+        let root = rp.self_signed(&rk).unwrap();
+        let ik = KeyPair::generate().unwrap();
+        let mut ip = CertificateParams::new(Vec::<String>::new()).unwrap();
+        ip.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+        let inter = ip.signed_by(&ik, &root, &rk).unwrap();
+        let lk = KeyPair::generate().unwrap();
+        let mut lp = CertificateParams::new(Vec::<String>::new()).unwrap();
+        let _ = ext;
+        let leaf = lp.signed_by(&lk, &inter, &ik).unwrap();
+        use p256::pkcs8::DecodePrivateKey;
+        Pki { root: root.der().to_vec(), inter: inter.der().to_vec(), leaf: leaf.der().to_vec(), key: SigningKey::from_pkcs8_der(&lk.serialize_der()).unwrap() }
+    }
+    pub fn sign(p: &Pki, payload: serde_json::Value) -> String {
+        let h = URL_SAFE_NO_PAD.encode(serde_json::json!({ "alg": "ES256", "x5c": [STANDARD.encode(&p.leaf), STANDARD.encode(&p.inter)] }).to_string());
+        let b = URL_SAFE_NO_PAD.encode(payload.to_string());
+        let sig: Signature = p.key.sign(format!("{h}.{b}").as_bytes());
+        format!("{h}.{b}.{}", URL_SAFE_NO_PAD.encode(sig.to_bytes()))
+    }
+}
+
+fn tx(account: &str, original: &str, product: &str, expires_in: i64, env: &str) -> serde_json::Value {
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+    serde_json::json!({ "bundleId": "eu.townwork.grid", "productId": product, "originalTransactionId": original, "appAccountToken": account.to_uppercase(),
+        "expiresDate": (now + expires_in) * 1000, "environment": env, "signedDate": now * 1000 })
+}
+
+#[tokio::test]
+async fn app_store_purchase_unlocks_a_plan_without_anyone_approving_the_account() {
+    let dir = tmp("iap");
+    let pki = storekit::pki();
+    let addr = serve_with(&dir, grid_server::Config {
+        open_registration: true, billing: true, apple_bundle: Some("eu.townwork.grid".into()),
+        apple_products: vec![("eu.townwork.grid.cloud.monthly".into(), 5_000_000_000)], apple_root_override: Some(pki.root.clone()), ..Default::default()
+    }).await;
+    let (a, b) = (acct(1), acct(2));
+    let (ta, tb) = (token(&addr, &a).await, token(&addr, &b).await);
+    let me = |t: String| { let addr = addr.clone(); async move { serde_json::from_str::<serde_json::Value>(&http("GET", &addr, "/me", Some(&t), b"").await.1).unwrap() } };
+    let send = |t: String, v: serde_json::Value| { let (addr, pki_jws) = (addr.clone(), storekit::sign(&pki, v)); async move { http("POST", &addr, "/billing/apple/transaction", Some(&t), serde_json::json!({ "jws": pki_jws }).to_string().as_bytes()).await } };
+
+    let m = me(ta.clone()).await;
+    assert_eq!(m["active"], false);
+    assert_eq!(m["iap"]["products"][0]["id"], "eu.townwork.grid.cloud.monthly");
+
+    // Kauf des eigenen Kontos: Abo ist sofort da
+    assert_eq!(status(&send(ta.clone(), tx(&a.id, "1000", "eu.townwork.grid.cloud.monthly", 30 * 86_400, "Production")).await), 200);
+    let m = me(ta.clone()).await;
+    assert_eq!((m["active"].as_bool(), m["quota"].as_i64(), m["planSource"].as_str()), (Some(true), Some(5_000_000_000), Some("apple")));
+    // gleiche Meldung noch einmal ist harmlos
+    assert_eq!(status(&send(ta.clone(), tx(&a.id, "1000", "eu.townwork.grid.cloud.monthly", 30 * 86_400, "Production")).await), 200);
+
+    // Fremde Konten, fremde Käufe, falsche Produkte, Testumgebung, abgelaufen: abgelehnt
+    assert_eq!(status(&send(tb.clone(), tx(&a.id, "1000", "eu.townwork.grid.cloud.monthly", 30 * 86_400, "Production")).await), 403); // Kauf von Konto a, von b gemeldet
+    assert_eq!(status(&send(tb.clone(), tx(&b.id, "1000", "eu.townwork.grid.cloud.monthly", 30 * 86_400, "Production")).await), 403); // dieselbe Transaktion gehört a
+    assert_eq!(status(&send(tb.clone(), tx(&b.id, "2000", "irgendwas", 30 * 86_400, "Production")).await), 400);
+    assert_eq!(status(&send(tb.clone(), tx(&b.id, "2000", "eu.townwork.grid.cloud.monthly", 30 * 86_400, "Sandbox")).await), 400);
+    assert_eq!(status(&send(tb.clone(), tx(&b.id, "2000", "eu.townwork.grid.cloud.monthly", -3600, "Production")).await), 400);
+    assert_eq!(me(tb.clone()).await["active"], false);
+    // ein Beleg, den nicht Apple (die erwartete Wurzel) signiert hat
+    let other = storekit::pki();
+    let forged = serde_json::json!({ "jws": storekit::sign(&other, tx(&b.id, "3000", "eu.townwork.grid.cloud.monthly", 86_400, "Production")) }).to_string();
+    assert_eq!(status(&http("POST", &addr, "/billing/apple/transaction", Some(&tb), forged.as_bytes()).await), 400);
+    assert_eq!(me(tb.clone()).await["active"], false);
+
+    // Server-Benachrichtigung: Ablauf beendet ein gekauftes Abo ...
+    let note = |kind: &str, t: serde_json::Value| serde_json::json!({ "signedPayload": storekit::sign(&pki, serde_json::json!({ "notificationType": kind, "signedDate": 0, "data": { "signedTransactionInfo": storekit::sign(&pki, t) } })) }).to_string();
+    // (signedDate 0 im äußeren Beleg: gilt als „jetzt“ nur, wenn es fehlt; hier prüfen die Zertifikate zur Zeit 0 → ungültig)
+    let outer_bad = http("POST", &addr, "/billing/apple/notify", None, note("EXPIRED", tx(&a.id, "1000", "eu.townwork.grid.cloud.monthly", -10, "Production")).as_bytes()).await;
+    assert_eq!(status(&outer_bad), 400);
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+    let note = |kind: &str, t: serde_json::Value| serde_json::json!({ "signedPayload": storekit::sign(&pki, serde_json::json!({ "notificationType": kind, "signedDate": now * 1000, "data": { "signedTransactionInfo": storekit::sign(&pki, t) } })) }).to_string();
+    assert_eq!(status(&http("POST", &addr, "/billing/apple/notify", None, note("DID_RENEW", tx(&a.id, "1000", "eu.townwork.grid.cloud.monthly", 60 * 86_400, "Production")).as_bytes()).await), 200);
+    let until = me(ta.clone()).await["paidUntil"].as_i64().unwrap();
+    assert!(until > now + 59 * 86_400);
+    assert_eq!(status(&http("POST", &addr, "/billing/apple/notify", None, note("EXPIRED", tx(&a.id, "1000", "eu.townwork.grid.cloud.monthly", -10, "Production")).as_bytes()).await), 200);
+    assert_eq!(me(ta.clone()).await["active"], false);
+
+    // ... aber ein vom Betreiber gesetztes Abo (Freunde, Apple-Prüfung) bleibt davon unberührt
+    let store = grid_server::Store::open(&dir.join("t.db")).unwrap();
+    store.set_plan(&b.id, "paid", None, 1_000_000_000).unwrap();
+    assert_eq!(status(&http("POST", &addr, "/billing/apple/notify", None, note("EXPIRED", tx(&b.id, "4000", "eu.townwork.grid.cloud.monthly", -10, "Production")).as_bytes()).await), 200);
+    let m = me(tb.clone()).await;
+    assert_eq!((m["active"].as_bool(), m["planSource"].as_str(), m["quota"].as_i64()), (Some(true), Some("manual"), Some(1_000_000_000)));
+}
+
+#[tokio::test]
+async fn purchases_are_off_without_app_settings() {
+    let dir = tmp("noiap");
+    let addr = serve_with(&dir, grid_server::Config { open_registration: true, ..Default::default() }).await;
+    let ta = token(&addr, &acct(1)).await;
+    assert_eq!(status(&http("POST", &addr, "/billing/apple/transaction", Some(&ta), b"{\"jws\":\"a.b.c\"}").await), 400);
+    assert_eq!(status(&http("POST", &addr, "/billing/apple/notify", None, b"{\"signedPayload\":\"a.b.c\"}").await), 404);
+    let m: serde_json::Value = serde_json::from_str(&http("GET", &addr, "/me", Some(&ta), b"").await.1).unwrap();
+    assert!(m["iap"].is_null());
+}
+
+#[tokio::test]
+async fn server_stops_accepting_changes_when_disk_space_is_low() {
+    let dir = tmp("disk");
+    // Mindestens „unendlich“ frei verlangt: der Datenträger gilt immer als zu voll
+    let addr = serve_with(&dir, grid_server::Config { open_registration: true, min_free: i64::MAX, ..Default::default() }).await;
+    let a = acct(1);
+    let ta = token(&addr, &a).await;
+    make_doc(&addr, &ta, &a).await;
+    let key = "b".repeat(64);
+    let r = http("PUT", &addr, &format!("/blob/{DOC}/{key}"), Some(&ta), b"x").await;
+    assert_eq!(status(&r), 402);
+    assert!(r.1.contains("Speicherplatz"));
+    // Lesen geht weiter
+    assert_eq!(status(&http("GET", &addr, &format!("/blobs/{DOC}"), Some(&ta), b"").await), 200);
+    let m = get_members(&addr, &ta).await.1;
+    assert_eq!(m["writable"]["code"], "disk");
+}

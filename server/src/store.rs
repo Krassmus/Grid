@@ -36,6 +36,7 @@ impl Store {
              CREATE TABLE IF NOT EXISTS admin_log (doc TEXT NOT NULL, seq INTEGER NOT NULL, entry TEXT NOT NULL, PRIMARY KEY (doc, seq));
              CREATE TABLE IF NOT EXISTS keys (doc TEXT NOT NULL, epoch INTEGER NOT NULL, account TEXT NOT NULL, sender TEXT NOT NULL, box TEXT NOT NULL, PRIMARY KEY (doc, epoch, account));
              CREATE TABLE IF NOT EXISTS codes (key TEXT PRIMARY KEY, hash TEXT NOT NULL, expires INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, data TEXT NOT NULL DEFAULT '');
+             CREATE TABLE IF NOT EXISTS apple_tx (original TEXT PRIMARY KEY, account TEXT NOT NULL);
              CREATE TABLE IF NOT EXISTS join_requests (doc TEXT NOT NULL, account TEXT NOT NULL, pub TEXT NOT NULL, name TEXT NOT NULL, time INTEGER NOT NULL, PRIMARY KEY (doc, account));",
         )?;
         // Spalten, die erst später dazukamen (bestehende Datenbanken werden erweitert)
@@ -46,6 +47,7 @@ impl Store {
             ("docs", "owner", "TEXT"),
             ("docs", "enc", "INTEGER NOT NULL DEFAULT 0"),
             ("accounts", "email", "TEXT"),
+            ("accounts", "plan_source", "TEXT NOT NULL DEFAULT 'manual'"),
             ("accounts", "email_verified", "INTEGER NOT NULL DEFAULT 0"),
             ("accounts", "recovery", "TEXT"),
         ] {
@@ -307,9 +309,26 @@ impl Store {
         Ok(())
     }
 
+    /// Abo von Hand setzen (Betreiber): gilt als „manual“, ein Kauf im App Store überschreibt es nicht.
     pub fn set_plan(&self, id: &str, plan: &str, paid_until: Option<i64>, quota: i64) -> rusqlite::Result<()> {
-        self.conn().execute("UPDATE accounts SET plan = ?2, paid_until = ?3, quota = ?4 WHERE id = ?1", params![id, plan, paid_until, quota])?;
+        self.set_plan_from(id, plan, paid_until, quota, "manual")
+    }
+
+    /// Abo setzen und merken, woher es kommt (`manual`, `apple`).
+    pub fn set_plan_from(&self, id: &str, plan: &str, paid_until: Option<i64>, quota: i64, source: &str) -> rusqlite::Result<()> {
+        self.conn().execute("UPDATE accounts SET plan = ?2, paid_until = ?3, quota = ?4, plan_source = ?5 WHERE id = ?1", params![id, plan, paid_until, quota, source])?;
         Ok(())
+    }
+
+    pub fn plan_source(&self, id: &str) -> String {
+        self.conn().query_row("SELECT plan_source FROM accounts WHERE id = ?1", [id], |r| r.get(0)).unwrap_or_else(|_| "manual".into())
+    }
+
+    /// Ordnet eine App-Store-Transaktion (ursprüngliche Nummer) einem Konto zu; liefert das Konto, dem sie schon gehört.
+    pub fn claim_apple_tx(&self, original: &str, account: &str) -> rusqlite::Result<String> {
+        let c = self.conn();
+        c.execute("INSERT OR IGNORE INTO apple_tx (original, account) VALUES (?1, ?2)", params![original, account])?;
+        c.query_row("SELECT account FROM apple_tx WHERE original = ?1", [original], |r| r.get(0))
     }
 
     // ---------- Zahlungsanbieter (Stripe) ----------

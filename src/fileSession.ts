@@ -6,6 +6,7 @@ import { acceptRequest, announceMove, claimDocument, ensureGenesis, fetchMembers
 import { fingerprint, getIdentity } from './identity'
 import { makeInvite } from './invite'
 import { DocKeys } from './docKeys'
+import { iapAvailable, syncPurchases } from './iap'
 import { publishProfile } from './model'
 import { getProfile, onProfileChange } from './profile'
 import type { Role } from './adminLog'
@@ -84,6 +85,8 @@ export class FileSession {
     if (sync.key) pinServer(sync.server, sync.key) // in der Datei gemerkt: der Server muss diesen Schlüssel beweisen
     else if (pinnedKey(sync.server)) sync.key = pinnedKey(sync.server)!
     this.keys = sync.enc ? new DocKeys(sync.server, this.meta.docId) : null
+    // iPad: Verlängerungen und Käufe auf anderen Geräten dem Server melden (er prüft Apples Signatur selbst)
+    if (iapAvailable) void syncPurchases(sync.server).catch(() => {})
     this.conn = new SyncConnection(this.doc,
       { server: sync.server, docId: this.meta.docId, name: this.name, keys: this.keys ?? undefined },
       (s) => this.setSyncState(s), () => void this.refreshMembers(),

@@ -48,6 +48,7 @@ async fn grid_open(request: Request<'_>) -> Result<Response, String> {
 // (oder er nicht antwortet), ersatzweise in einer Datei, die nur der Benutzer lesen darf.
 
 #[cfg(any(target_os = "macos", target_os = "ios", target_os = "windows"))]
+/// Name des Eintrags im Schlüsselbund. Bleibt absichtlich die frühere App-Kennung, damit das Konto nach der Umbenennung der App gefunden wird.
 const KEY_SERVICE: &str = "app.grid.desktop";
 #[cfg(any(target_os = "macos", target_os = "ios", target_os = "windows"))]
 const KEY_NAME: &str = "account";
@@ -256,6 +257,7 @@ pub fn run() {
   let builder = tauri::Builder::default()
     .plugin(tauri_plugin_dialog::init())
     .plugin(tauri_plugin_opener::init())
+    .plugin(tauri_plugin_iap::init())
     .manage(PendingOpen::default())
     .manage(MenuState { recent: Mutex::new(Vec::new()), theme: Mutex::new("system".to_string()) })
     .invoke_handler(tauri::generate_handler![grid_save, grid_open, take_pending_open, set_recent_menu, set_theme, identity_load, identity_store, app_platform, docs_dir, list_documents, delete_document])
