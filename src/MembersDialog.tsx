@@ -31,7 +31,9 @@ export function MembersDialog(props: { control: MembersControl; onClose: () => v
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [invite, setInvite] = useState('')
+  const [inviting, setInviting] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [open, setOpen] = useState<string | null>(null) // Mitglied, dessen Aktionen aufgeklappt sind
   const [removing, setRemoving] = useState<string | null>(null)
   useEffect(() => { void getIdentity().then((i) => setMe(i.id)).catch(() => {}) }, [])
   const admin = members?.role === 'admin'
@@ -40,65 +42,99 @@ export function MembersDialog(props: { control: MembersControl; onClose: () => v
     try { await f() } catch (e) { setError(message(e)) } finally { setBusy(false) }
   }
   const list = members?.state ? [...members.state.members.entries()] : []
+  const requests = admin ? members?.requests ?? [] : []
+  const admins = list.filter(([, m]) => m.role === 'admin').length
   return (
     <Modal onClose={props.onClose}>
-      <div className="dialog sync-dialog members-dialog" onMouseDown={(e) => e.stopPropagation()} onKeyDown={(e) => e.key === 'Escape' && props.onClose()}>
+      <div className="dialog sync-dialog members-dialog cloud-dialog" onMouseDown={(e) => e.stopPropagation()} onKeyDown={(e) => e.key === 'Escape' && props.onClose()}>
         <h3>Mitglieder</h3>
-        {!members && <p className="hint">Wird geladen …</p>}
-        {members && !members.state && <p className="hint">Die Mitgliederliste wird beim nächsten Verbinden angelegt.</p>}
+        {!members && <p className="cloud-lead">Wird geladen …</p>}
+        {members && !members.state && <p className="cloud-lead">Die Mitgliederliste wird beim nächsten Verbinden angelegt.</p>}
 
-        {admin && members.requests.length > 0 && (
-          <>
+        {requests.length > 0 && (
+          <section className="member-requests">
             <h4>Möchten beitreten</h4>
-            {members.requests.map((r) => (
-              <div key={r.account} className="member-row request">
-                <div>
-                  <strong>{who(r.name)}</strong>
-                  <small>Prüfnummer <code>{fingerprint(r.pub)}</code></small>
-                </div>
+            {requests.map((r) => (
+              <div key={r.account} className="member-card request">
+                <Avatar name={r.name} size={36} />
+                <div className="member-who"><strong>{who(r.name)}</strong><small>Prüfnummer <code>{fingerprint(r.pub)}</code></small></div>
                 <span className="member-actions">
                   <button type="button" disabled={busy} onClick={() => void act(() => props.control.reject(r.account))}>Ablehnen</button>
                   <button type="button" className="primary" disabled={busy} onClick={() => void act(() => props.control.accept(r))}>Zulassen</button>
                 </span>
               </div>
             ))}
-            <p className="hint">Vergleiche die Prüfnummer mit der, die die Person in Grid sieht (am besten am Telefon oder im Gespräch), bevor du zulässt.</p>
-          </>
+            <p className="cloud-note">Vergleiche die Prüfnummer mit der, die die Person in Grid sieht (am besten am Telefon), bevor du zulässt.</p>
+          </section>
         )}
 
-        {list.length > 0 && <h4>Im Dokument</h4>}
-        {list.map(([id, m]) => (
-          <div key={id} className="member-row">
-            <Avatar name={m.name} avatar={props.control.profiles?.[id]?.avatar} size={34} />
-            <div className="member-who">
-              <strong>{who(m.name)}{id === me && ' (du)'}</strong>
-              <small><code>{fingerprint(m.pub)}</code> · {m.role === 'admin' ? 'Admin' : 'Mitglied'}</small>
-            </div>
-            {admin && (removing === id
-              ? <span className="member-actions">
-                  <button type="button" onClick={() => setRemoving(null)}>Abbrechen</button>
-                  <button type="button" className="danger" disabled={busy} onClick={() => { setRemoving(null); void act(() => props.control.remove(id)) }}>Entfernen</button>
-                </span>
-              : <span className="member-actions">
-                  <button type="button" className="linklike" disabled={busy} onClick={() => void act(() => props.control.changeRole(id, m.role === 'admin' ? 'member' : 'admin'))}>
-                    {m.role === 'admin' ? 'Zum Mitglied machen' : 'Zum Admin machen'}
-                  </button>
-                  <button type="button" className="linklike danger-text" disabled={busy} onClick={() => setRemoving(id)}>{id === me ? 'Verlassen' : 'Entfernen'}</button>
-                </span>)}
-          </div>
-        ))}
-
-        {admin && (
-          <>
-            <h4>Person einladen</h4>
-            {invite
-              ? <>
-                  <textarea readOnly rows={3} value={invite} onFocus={(e) => e.target.select()} aria-label="Einladung" />
-                  <div className="actions"><button type="button" onClick={() => { void navigator.clipboard?.writeText(invite); setCopied(true) }}>{copied ? 'Kopiert' : 'Kopieren'}</button></div>
-                  <p className="hint">Schicke den Text der Person. Sie fügt ihn in Grid unter „Ablage → Einladung annehmen …“ ein und klopft damit an; hier erscheint dann ihre Anfrage.</p>
-                </>
-              : <div className="actions"><button type="button" onClick={() => void act(async () => { setInvite(await props.control.invite()); setCopied(false) })}>Einladung erzeugen</button></div>}
-          </>
+        {(list.length > 0 || admin) && (
+          <section className="member-list">
+            {list.map(([id, m]) => {
+              const mine = id === me
+              const name = m.name || props.control.profiles?.[id]?.name || ''
+              const onlyAdmin = mine && m.role === 'admin' && admins === 1
+              const hasMenu = mine || admin // das eigene Konto kann jeder verlassen; andere verwalten nur Admins
+              return (
+                <div key={id} className={`member-item${open === id ? ' open' : ''}`}>
+                  <div className="member-line">
+                    <Avatar name={name} avatar={props.control.profiles?.[id]?.avatar} size={36} />
+                    <div className="member-who">
+                      <strong>{who(name)}{mine && <span className="you"> · du</span>}</strong>
+                      <small><code>{fingerprint(m.pub)}</code></small>
+                    </div>
+                    <span className={`chip role ${m.role}`}>{m.role === 'admin' ? 'Admin' : 'Mitglied'}</span>
+                    {hasMenu && (
+                      <button type="button" className="more" aria-label={`Aktionen für ${who(name)}`} aria-expanded={open === id}
+                        onClick={() => { setOpen(open === id ? null : id); setRemoving(null) }}>⋯</button>
+                    )}
+                  </div>
+                  {hasMenu && open === id && (
+                    <div className="member-more">
+                      {removing === id
+                        ? <>
+                            <span>{mine ? 'Dieses Dokument wirklich verlassen? Es bleibt auf diesem Gerät, wird aber nicht mehr mit dem Server abgeglichen.' : `${who(name)} wirklich entfernen?`}</span>
+                            <span className="member-actions">
+                              <button type="button" onClick={() => setRemoving(null)}>Abbrechen</button>
+                              <button type="button" className="danger" disabled={busy} onClick={() => { setRemoving(null); setOpen(null); void act(async () => { await props.control.remove(id); if (mine) props.onClose() }) }}>{mine ? 'Verlassen' : 'Entfernen'}</button>
+                            </span>
+                          </>
+                        : onlyAdmin
+                        ? <span className="hint">Du bist der einzige Admin. Ernenne zuerst jemand anderen zum Admin, um das Dokument zu verlassen.</span>
+                        : <>
+                            {!mine ? (
+                              <button type="button" className="linklike" disabled={busy} onClick={() => void act(() => props.control.changeRole(id, m.role === 'admin' ? 'member' : 'admin'))}>
+                                {m.role === 'admin' ? 'Zum Mitglied machen' : 'Zum Admin machen'}
+                              </button>
+                            ) : <span />}
+                            <button type="button" className="linklike danger-text" disabled={busy} onClick={() => setRemoving(id)}>{mine ? 'Verlassen' : 'Entfernen'}</button>
+                          </>}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+            {admin && (
+              <div className={`member-item invite${inviting ? ' open' : ''}`}>
+                <button type="button" className="member-line invite-row" disabled={busy && !inviting} aria-expanded={inviting}
+                  onClick={() => { if (inviting) { setInviting(false); return } setInviting(true); setCopied(false); setInvite(''); void act(async () => setInvite(await props.control.invite())) }}>
+                  <span className="plus-avatar" aria-hidden>+</span>
+                  <span className="member-who"><strong>Person einladen</strong><small>Erzeugt einen Einladungstext zum Weitergeben</small></span>
+                </button>
+                {inviting && (
+                  <div className="member-invite">
+                    {invite
+                      ? <>
+                          <textarea readOnly rows={3} value={invite} onFocus={(e) => e.target.select()} aria-label="Einladung" />
+                          <p>Schicke den Text der Person. Sie fügt ihn in Grid unter „Einladung annehmen“ ein und klopft damit an; hier erscheint dann ihre Anfrage.</p>
+                          <div className="actions"><button type="button" className="primary" onClick={() => { void navigator.clipboard?.writeText(invite); setCopied(true) }}>{copied ? 'Kopiert' : 'Kopieren'}</button></div>
+                        </>
+                      : <p>Wird erzeugt …</p>}
+                  </div>
+                )}
+              </div>
+            )}
+          </section>
         )}
 
         {error && <p className="sync-error" role="alert">{error}</p>}
@@ -140,7 +176,7 @@ export function JoinDialog(props: { onJoined: (invite: Invite) => void; onClose:
   }
   return (
     <Modal onClose={props.onClose}>
-      <form className="dialog sync-dialog" onMouseDown={(e) => e.stopPropagation()}
+      <form className="dialog sync-dialog cloud-dialog" onMouseDown={(e) => e.stopPropagation()}
         onSubmit={(e) => { e.preventDefault(); void join() }} onKeyDown={(e) => e.key === 'Escape' && props.onClose()}>
         <h3>Einladung annehmen</h3>
         <textarea rows={3} placeholder="grid-invite:1:…" value={text} onChange={(e) => setText(e.target.value)} aria-label="Einladung" autoFocus />

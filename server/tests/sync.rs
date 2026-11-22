@@ -849,3 +849,37 @@ async fn email_is_off_without_mail_settings() {
     assert_eq!(status(&http("POST", &addr, "/me/email", Some(&ta), b"{\"email\":\"a@example.org\"}").await), 404);
     assert_eq!(status(&http("POST", &addr, "/recover/start", None, b"{\"email\":\"a@example.org\"}").await), 404);
 }
+
+#[tokio::test]
+async fn members_can_leave_and_leftover_keys_are_reported_as_stale() {
+    let dir = tmp("leave");
+    let addr = serve(&dir, true).await;
+    let (a, b) = (acct(1), acct(2));
+    let (ta, tb) = (token(&addr, &a).await, token(&addr, &b).await);
+    let mut c = Chain::new();
+    let (g, h) = c.entry(&a, "genesis", &a, "admin", "Anna");
+    assert_eq!(status(&http_hdr("POST", &addr, &format!("/docs/{DOC}/admin"), Some(&ta), "X-Grid-Enc: 1\r\n", g.to_string().as_bytes()).await), 204);
+    c.accept(h);
+    let (set, h) = c.entry(&a, "set", &b, "member", "Ben");
+    assert_eq!(status(&post_entry(&addr, &ta, &set).await), 204);
+    c.accept(h);
+    let keys = format!("/docs/{DOC}/keys");
+    let boxes = serde_json::json!([{ "epoch": 1, "account": a.id, "box": "ka" }, { "epoch": 1, "account": b.id, "box": "kb" }]);
+    assert_eq!(status(&http("PUT", &addr, &keys, Some(&ta), boxes.to_string().as_bytes()).await), 204);
+
+    // Der einzige Admin kann nicht gehen
+    let (bad, _) = c.entry(&a, "remove", &a, "admin", "");
+    assert_eq!(status(&post_entry(&addr, &ta, &bad).await), 400);
+    // Ein Mitglied verlässt das Dokument selbst und hat danach keinen Zugriff mehr
+    let (leave, h) = c.entry(&b, "remove", &b, "member", "");
+    assert_eq!(status(&post_entry(&addr, &tb, &leave).await), 204);
+    c.accept(h);
+    assert_eq!(status(&http("GET", &addr, &keys, Some(&tb), b"").await), 403);
+    // Der Admin erfährt, dass der Ausgetretene noch eine Kiste für die neueste Epoche hat
+    let got: serde_json::Value = serde_json::from_str(&http("GET", &addr, &keys, Some(&ta), b"").await.1).unwrap();
+    assert_eq!(got["stale"], serde_json::json!([b.id]));
+    // Nach einer neuen Epoche nur für Anna ist nichts mehr offen
+    assert_eq!(status(&http("PUT", &addr, &keys, Some(&ta), serde_json::json!([{ "epoch": 2, "account": a.id, "box": "ka2" }]).to_string().as_bytes()).await), 204);
+    let got: serde_json::Value = serde_json::from_str(&http("GET", &addr, &keys, Some(&ta), b"").await.1).unwrap();
+    assert_eq!((got["epoch"].as_i64(), got["stale"].clone()), (Some(2), serde_json::json!([])));
+}

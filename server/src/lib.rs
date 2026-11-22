@@ -560,14 +560,18 @@ async fn get_keys(State(s): State<Shared>, h: HeaderMap, Path(doc): Path<String>
     let boxes = match s.store.keys_for(&doc, &id) { Ok(b) => b, Err(e) => return fail(e) };
     let epoch = s.store.max_epoch(&doc);
     let mut missing: Vec<String> = Vec::new();
+    // `stale`: Konten mit einer Kiste für die neueste Epoche, die nicht mehr Mitglied sind (Admin erneuert dann den Schlüssel)
+    let mut stale: Vec<String> = Vec::new();
     if epoch > 0 && matches!(s.role(&doc, &id), Ok(Some(ref r)) if r == "admin") {
         if let (Ok(Some(st)), Ok(have)) = (s.log_state(&doc), s.store.key_holders(&doc, epoch)) {
             missing = st.members.keys().filter(|m| !have.contains(m)).cloned().collect();
             missing.sort();
+            stale = have.iter().filter(|a| !st.members.contains_key(*a)).cloned().collect();
+            stale.sort();
         }
     }
     Json(serde_json::json!({
-        "enc": s.store.is_enc(&doc), "epoch": epoch, "missing": missing,
+        "enc": s.store.is_enc(&doc), "epoch": epoch, "missing": missing, "stale": stale,
         "boxes": boxes.into_iter().map(|(e, from, b)| serde_json::json!({ "epoch": e, "from": from, "box": b })).collect::<Vec<_>>(),
     })).into_response()
 }

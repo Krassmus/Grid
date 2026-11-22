@@ -69,7 +69,9 @@ export function applyEntry(state: AdminState, doc: string, e: AdminEntry): Admin
   } else if (e.type === 'set' || e.type === 'remove' || e.type === 'move' || e.type === 'encrypt') {
     const actor = state.members.get(e.actor)
     if (!actor) throw new Error('Nur Mitglieder dürfen das')
-    if (actor.role !== 'admin') throw new Error('Nur Admins dürfen das')
+    // Jedes Mitglied darf sich selbst entfernen (verlassen); alles andere dürfen nur Admins
+    const leaving = e.type === 'remove' && e.subject === e.actor
+    if (actor.role !== 'admin' && !leaving) throw new Error('Nur Admins dürfen das')
     if (e.type === 'move') {
       if (e.subject !== e.actor) throw new Error('Umzug: subject muss der Unterzeichner sein')
       if (!/^https?:\/\//.test(e.name)) throw new Error('Umzug: Server-Adresse ungültig')

@@ -95,7 +95,9 @@ impl State {
             }
             "set" | "remove" | "move" | "encrypt" => {
                 let actor = self.members.get(&e.actor).ok_or("Nur Mitglieder dürfen das")?;
-                if actor.role != "admin" { return Err("Nur Admins dürfen das"); }
+                // Jedes Mitglied darf sich selbst entfernen (verlassen); alles andere dürfen nur Admins
+                let leaving = e.kind == "remove" && e.subject == e.actor;
+                if actor.role != "admin" && !leaving { return Err("Nur Admins dürfen das"); }
                 if e.kind == "move" {
                     if e.subject != e.actor { return Err("Umzug: subject muss der Unterzeichner sein"); }
                     if !(e.name.starts_with("https://") || e.name.starts_with("http://")) { return Err("Umzug: Server-Adresse ungültig"); }

@@ -131,7 +131,15 @@ export class FileSession {
   }
   accept = (req: JoinRequest, role: Role = 'member') => this.change((s, d) => acceptRequest(s, d, req, role))
   reject = (account: string) => this.change((s, d) => rejectRequest(s, d, account))
-  remove = (account: string) => this.change(async (s, d) => { await removeMember(s, d, account); await this.keys?.rotate() }) // neuer Schlüssel: das entfernte Mitglied bekommt ihn nicht
+  /** Mitglied entfernen oder (eigenes Konto) das Dokument verlassen: dann löst sich dieses Gerät vom Server, die Datei bleibt. */
+  remove = async (account: string) => {
+    const me = await getIdentity()
+    await this.change(async (s, d) => {
+      await removeMember(s, d, account)
+      if (account !== me.id) await this.keys?.rotate() // neuer Schlüssel: das entfernte Mitglied bekommt ihn nicht (beim Verlassen erneuert ihn ein Admin)
+    })
+    if (account === me.id) this.disconnect()
+  }
   /** Als Admin ein unverschlüsseltes Dokument auf Ende-zu-Ende-Verschlüsselung umstellen (der Server löscht dabei den Klartext). */
   encryptDocument = () => this.change((s, d) => markEncrypted(s, d))
   changeRole = (account: string, role: Role) => this.change((s, d) => setRole(s, d, account, role))

@@ -82,4 +82,16 @@ describe('Admin-Protokoll', () => {
     expect(s.members.size).toBe(2) // Mitglieder unverändert
     expect(() => applyEntry(s, DOC, buildEntry(a, s, DOC, 'encrypt', sub(a), 'admin', '', T))).toThrow() // schon verschlüsselt
   })
+
+  it('jedes Mitglied darf sich selbst entfernen, andere nur Admins, und der letzte Admin bleibt', () => {
+    const [a, b, c] = [person(1), person(2), person(3)]
+    let s = emptyState()
+    s = applyEntry(s, DOC, buildEntry(a, s, DOC, 'genesis', sub(a), 'admin', 'Anna', T))
+    s = applyEntry(s, DOC, buildEntry(a, s, DOC, 'set', sub(b), 'member', 'Ben', T))
+    s = applyEntry(s, DOC, buildEntry(a, s, DOC, 'set', sub(c), 'member', 'Cleo', T))
+    expect(() => applyEntry(s, DOC, buildEntry(b, s, DOC, 'remove', sub(c), 'member', '', T))).toThrow() // Ben darf Cleo nicht entfernen
+    expect(() => applyEntry(s, DOC, buildEntry(a, s, DOC, 'remove', sub(a), 'admin', '', T))).toThrow() // der einzige Admin bleibt
+    s = applyEntry(s, DOC, buildEntry(b, s, DOC, 'remove', sub(b), 'member', '', T)) // Ben verlässt das Dokument
+    expect([...s.members.keys()]).toEqual([a.id, c.id])
+  })
 })

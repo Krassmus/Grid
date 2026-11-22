@@ -57,24 +57,19 @@ function useAccount(): Identity | null {
 const GB = 1e9
 const fmtSize = (b: number) => (b >= GB ? `${(b / GB).toFixed(1)} GB` : b >= 1e6 ? `${Math.round(b / 1e6)} MB` : `${Math.round(b / 1e3)} KB`).replace('.', ',')
 
-/** Name und Schlüssel-Fingerabdruck des Servers (zum Vergleichen mit dem, was der Betreiber nennt). */
-function ServerLine(props: { server: string; onSwitch: () => void }) {
+/** Angaben des Servers (Name, Schlüssel) für die Anzeige; `null`, solange sie fehlen. */
+function useServerInfo(server: string | null): ServerInfo | null {
   const [info, setInfo] = useState<ServerInfo | null>(null)
   useEffect(() => {
+    if (!server) { setInfo(null); return }
     let alive = true
-    fetchServerInfo(props.server).then((i) => alive && setInfo(i)).catch(() => alive && setInfo(null))
+    fetchServerInfo(server).then((i) => alive && setInfo(i)).catch(() => alive && setInfo(null))
     return () => { alive = false }
-  }, [props.server])
-  return (
-    <div className="sync-server-block">
-      <p className="sync-server">{info?.name && <strong>{info.name} · </strong>}{props.server}</p>
-      <p className="sync-account">
-        <span>{info ? <>Server-Schlüssel <code>{fingerprint(info.pub)}</code></> : ''}</span>
-        <button type="button" className="linklike" onClick={props.onSwitch}>Server wechseln …</button>
-      </p>
-    </div>
-  )
+  }, [server])
+  return info
 }
+
+const hostOf = (url: string) => { try { return new URL(url).host } catch { return url } }
 
 /** Abo und Speicher des Kontos (nur auf Servern mit Abo-Pflicht). Wartet nach dem Kauf auf die Bestätigung des Zahlungsanbieters. */
 function PlanLine(props: { server: string; refresh: unknown; onActive: () => void }) {
@@ -95,16 +90,19 @@ function PlanLine(props: { server: string; refresh: unknown; onActive: () => voi
   }, [props.server, props.refresh])
   if (!info?.billing) return null
   const until = info.paidUntil ? new Date(info.paidUntil * 1000).toLocaleDateString('de-DE') : null
+  const share = info.quota > 0 ? Math.min(100, Math.round((info.used / info.quota) * 100)) : 0
   return (
-    <div className="plan-line">
-      {info.active
-        ? <p><strong>Abo aktiv</strong>{until && <> bis {until}</>} · {fmtSize(info.used)} von {fmtSize(info.quota)} belegt</p>
-        : <p><strong>Kein Abo</strong> – Dokumente, die dir gehören, sind nur lesbar.</p>}
-      <p className="plan-actions">
-        {!info.active && info.checkoutUrl && <button type="button" className="primary" onClick={() => void openExternal(info.checkoutUrl!)}>Abo abschließen …</button>}
-        {info.manageUrl && <button type="button" className="linklike" onClick={() => void openExternal(info.manageUrl!)}>Abo verwalten …</button>}
-      </p>
-    </div>
+    <section className={`cloud-card plan ${info.active ? 'ok' : 'warn'}`}>
+      <div className="cloud-card-main">
+        <strong>{info.active ? 'Abo aktiv' : 'Kein Abo'}</strong>
+        <small>{info.active ? `${until ? `bis ${until} · ` : ''}${fmtSize(info.used)} von ${fmtSize(info.quota)}` : 'Dokumente, die dir gehören, sind nur lesbar.'}</small>
+        {info.active && <span className="meter" aria-hidden><i style={{ width: `${share}%` }} /></span>}
+      </div>
+      <span className="plan-actions">
+        {!info.active && info.checkoutUrl && <button type="button" className="primary" onClick={() => void openExternal(info.checkoutUrl!)}>Abo abschließen</button>}
+        {info.manageUrl && <button type="button" className="linklike" onClick={() => void openExternal(info.manageUrl!)}>Verwalten</button>}
+      </span>
+    </section>
   )
 }
 
@@ -120,28 +118,19 @@ export function Field(props: { label: string; value: string; onChange: (v: strin
   )
 }
 
-/** Zeile „Dein Konto“ mit Zugang zum Sichern/Übertragen. */
-function AccountLine(props: { me: Identity | null; onManage: () => void }) {
-  return (
-    <p className="sync-account">
-      <span>Dein Konto <code>{props.me ? fingerprint(props.me.publicKey) : '…'}</code></span>
-      <button type="button" className="linklike" onClick={props.onManage}>Sichern oder übertragen …</button>
-    </p>
-  )
-}
-
-/** Dokument mit einem Server verbinden oder die Verbindung lösen. */
+/** Dokument mit der Cloud verbinden oder die Verbindung verwalten. */
 export function SyncDialog(props: { control: SyncControl; onClose: () => void }) {
   const c = props.control
   const me = useAccount()
+  const info = useServerInfo(c.server)
   const [server, setServer] = useState(c.server ?? lastServer())
-  const [encrypting, setEncrypting] = useState(false)
-  const [encError, setEncError] = useState<string | null>(null)
-  const [account, setAccount] = useState(false)
   const [membersOpen, setMembersOpen] = useState(false)
   const [switching, setSwitching] = useState(false)
   const [target, setTarget] = useState('')
   const [moveError, setMoveError] = useState<string | null>(null)
+  const [disconnecting, setDisconnecting] = useState(false)
+  const [encrypting, setEncrypting] = useState(false)
+  const [encError, setEncError] = useState<string | null>(null)
   const requests = c.members?.requests.length ?? 0
   const connected = !!c.server
   const submit = () => {
@@ -150,92 +139,121 @@ export function SyncDialog(props: { control: SyncControl; onClose: () => void })
     rememberServer(url)
     c.connect(url, true) // neue Cloud-Dokumente sind immer verschlüsselt
   }
-  if (account) return <AccountDialog onClose={() => setAccount(false)} />
   if (membersOpen) return <MembersDialog control={c} onClose={() => setMembersOpen(false)} />
+
+  const st = c.state
+  const tone = st?.status === 'online' ? (st.readonly ? 'warn' : 'ok') : st?.status === 'denied' ? 'bad' : 'warn'
+  const mine = me ? fingerprint(me.publicKey) : ''
+  // Eine Erklärung, nur wenn etwas zu tun oder zu wissen ist
+  const note = st?.readonly ? `${st.readonly.reason} Änderungen bleiben hier gespeichert und werden hochgeladen, sobald es wieder geht.`
+    : st?.status === 'pending' && st.kind === 'join' ? `Ein Admin muss dich zulassen. Nenne ihm deine Prüfnummer ${mine}; danach verbindet sich Grid von selbst.`
+    : st?.status === 'pending' && st.kind === 'account' ? `Der Betreiber des Servers muss dein Konto freigeben. Kennung ${me?.id.slice(0, 8) ?? ''} (${mine}).`
+    : st?.status === 'pending' ? st.reason ?? null
+    : st?.status === 'denied' ? st.reason ?? null
+    : null
+
   return (
     <Modal onClose={props.onClose}>
-      <form className="dialog sync-dialog" onMouseDown={(e) => e.stopPropagation()}
+      <form className="dialog sync-dialog cloud-dialog" onMouseDown={(e) => e.stopPropagation()}
         onSubmit={(e) => { e.preventDefault(); if (!connected) submit() }}
         onKeyDown={(e) => e.key === 'Escape' && props.onClose()}>
-        <h3>Cloud-Synchronisation</h3>
+        <h3>Cloud</h3>
         {connected ? (
           <>
-            <p className={`sync-status ${c.state?.readonly ? 'readonly' : c.state?.status ?? 'connecting'}`}><span className="dot" />{syncLabel(c)}</p>
-            <ServerLine server={c.server!} onSwitch={() => { setSwitching(true); setTarget('') }} />
-            {c.enc && <p className="sync-account"><span>🔒 Ende-zu-Ende verschlüsselt</span></p>}
-            {!c.enc && c.state?.status === 'online' && (
-              <div className="switch-box">
-                <p><strong>Nicht verschlüsselt</strong><br /><span className="hint">Der Server kann dieses Dokument lesen.</span></p>
-                {c.members?.role === 'admin' && !encrypting && <div className="actions"><button type="button" onClick={() => { setEncrypting(true); setEncError(null) }}>Dokument verschlüsseln …</button></div>}
-                {encrypting && (
-                  <>
-                    <p className="hint">Der Server löscht den lesbaren Stand und die Dateien; alle Mitglieder laden ihren Stand verschlüsselt neu hoch. Dafür muss ein Admin online sein, bis alle ihren Schlüssel haben. Frühere Sicherungen des Servers enthalten den Klartext weiter. Das lässt sich nicht rückgängig machen.</p>
-                    <div className="actions">
-                      <button type="button" onClick={() => setEncrypting(false)}>Abbrechen</button>
-                      <button type="button" className="primary" onClick={() => c.encryptDocument().then(() => setEncrypting(false), (e: Error) => setEncError(e.message))}>Jetzt verschlüsseln</button>
-                    </div>
-                    {encError && <p className="sync-error" role="alert">{encError}</p>}
-                  </>
-                )}
+            <section className={`cloud-card ${tone}`}>
+              <span className="dot" aria-hidden />
+              <div className="cloud-card-main">
+                <strong>{syncLabel(c)}</strong>
+                <small>{info?.name ?? hostOf(c.server!)}</small>
+                <span className={`chip ${c.enc ? 'lock' : 'open'}`}>{c.enc ? '🔒 Ende-zu-Ende verschlüsselt' : 'Nicht verschlüsselt'}</span>
               </div>
+            </section>
+            {note && <p className={`cloud-note ${tone}`} role={tone === 'bad' ? 'alert' : 'status'}>{note}</p>}
+            {st?.status === 'denied' && st.kind === 'untrusted' && (
+              <div className="actions"><button type="button" className="danger-outline" onClick={() => c.trustServer()}>Dem neuen Schlüssel vertrauen</button></div>
             )}
+
             {c.moved && (
-              <div className="switch-box moved">
-                <p><strong>Dieses Dokument ist umgezogen</strong><br /><span className="sync-server">{c.moved.server}</span></p>
-                <p className="hint">Ein Admin hat den Umzug angekündigt (im Mitgliederprotokoll unterschrieben). Du brauchst auf dem neuen Server ein freigegebenes Konto.</p>
-                <div className="actions"><button type="button" className="primary" onClick={() => c.followMove()}>Zum neuen Server wechseln</button></div>
-              </div>
+              <section className="cloud-card moved">
+                <div className="cloud-card-main"><strong>Dieses Dokument ist umgezogen</strong><small>{hostOf(c.moved.server)} · von einem Admin angekündigt</small></div>
+                <button type="button" className="primary" onClick={() => c.followMove()}>Wechseln</button>
+              </section>
             )}
-            {switching && (
-              <div className="switch-box">
-                <Field label="Neuer Server" value={target} onChange={setTarget} placeholder="https://firma.example/grid" autoFocus />
-                <p className="hint">Das Dokument wird mit allen Mitgliedern und Rollen auf den neuen Server kopiert. Mitglieder müssen dort ein Konto haben und sich selbst mit dem neuen Server verbinden. Der alte Server behält seine Kopie.</p>
+
+            {!c.enc && st?.status === 'online' && (
+              <section className="cloud-card warn">
+                <div className="cloud-card-main"><strong>Der Server kann dieses Dokument lesen</strong>
+                  <small>{c.members?.role === 'admin' ? 'Verschlüssele es, damit nur Mitglieder es lesen können.' : 'Ein Admin kann es verschlüsseln.'}</small></div>
+                {c.members?.role === 'admin' && !encrypting && <button type="button" onClick={() => { setEncrypting(true); setEncError(null) }}>Verschlüsseln …</button>}
+              </section>
+            )}
+            {encrypting && (
+              <div className="cloud-confirm">
+                <p>Der Server löscht den lesbaren Stand und die Dateien, und alle Mitglieder laden ihren Stand verschlüsselt neu hoch. Ein Admin muss dafür online sein, bis alle ihren Schlüssel haben. Alte Sicherungen des Servers enthalten den Klartext weiter. Das lässt sich nicht rückgängig machen.</p>
                 <div className="actions">
-                  <button type="button" onClick={() => setSwitching(false)}>Abbrechen</button>
-                  <button type="button" className="primary" disabled={!normalizeServer(target)} onClick={() => {
-                    const u = normalizeServer(target)
-                    setMoveError(null)
-                    c.moveTo(u).then(() => { rememberServer(u); setSwitching(false) }, (e: Error) => setMoveError(e.message))
-                  }}>Umziehen</button>
+                  <button type="button" onClick={() => setEncrypting(false)}>Abbrechen</button>
+                  <button type="button" className="primary" onClick={() => c.encryptDocument().then(() => setEncrypting(false), (e: Error) => setEncError(e.message))}>Jetzt verschlüsseln</button>
                 </div>
-                {moveError && <p className="sync-error" role="alert">{moveError}</p>}
+                {encError && <p className="sync-error" role="alert">{encError}</p>}
               </div>
             )}
-            {c.state?.status === 'denied' && c.state.kind === 'untrusted'
-              ? <>
-                  <p className="sync-error" role="alert">{c.state.reason}</p>
-                  <div className="actions"><button type="button" className="danger-outline" onClick={() => c.trustServer()}>Dem neuen Schlüssel vertrauen</button></div>
-                </>
-              : c.state?.status === 'pending' && c.state.kind === 'keys'
-              ? <p className="hint">{c.state.reason}</p>
-              : c.state?.status === 'pending' && c.state.kind === 'claim'
-              ? <p className="hint">{c.state.reason}</p>
-              : c.state?.status === 'pending' && c.state.kind === 'join'
-              ? <p className="hint">Ein Admin des Dokuments muss deine Anfrage zulassen. Nenne ihm deine Prüfnummer <code>{me ? fingerprint(me.publicKey) : ''}</code>; danach verbindet sich Grid von selbst.</p>
-              : c.state?.status === 'pending'
-              ? <p className="hint">Der Betreiber des Servers muss dein Konto freigeben. Nenne ihm die Kennung <code>{me?.id.slice(0, 8)}</code>
-                  ({me ? fingerprint(me.publicKey) : ''}); danach verbindet sich Grid von selbst.</p>
-              : <p className="hint">Änderungen werden laufend abgeglichen. Ohne Verbindung arbeitest du lokal weiter; beim nächsten Verbinden werden beide Seiten zusammengeführt.</p>}
-            {c.state?.readonly && <p className="sync-error" role="status">{c.state.readonly.reason} Änderungen bleiben hier gespeichert und werden hochgeladen, sobald es wieder geht.</p>}
-            <AccountLine me={me} onManage={() => setAccount(true)} />
-            {c.server && c.state?.status === 'online' && <PlanLine server={c.server} refresh={c.state.readonly?.code ?? ''} onActive={() => c.resync()} />}
-            {c.state?.status === 'online' && (
-              <p className="sync-account">
-                <span>Mitglieder{c.members?.state ? ` (${c.members.state.members.size})` : ''}</span>
-                <button type="button" className="linklike" onClick={() => setMembersOpen(true)}>Verwalten und einladen …{requests > 0 && <span className="badge">{requests}</span>}</button>
-              </p>
+
+            {c.server && st?.status === 'online' && <PlanLine server={c.server} refresh={st.readonly?.code ?? ''} onActive={() => c.resync()} />}
+
+            {st?.status === 'online' && (
+              <button type="button" className="cloud-row" onClick={() => setMembersOpen(true)}>
+                <span><strong>Mitglieder</strong><small>{c.members?.state ? `${c.members.state.members.size} im Dokument · ` : ''}Einladen und verwalten</small></span>
+                <span className="cloud-row-end">{requests > 0 && <span className="badge">{requests}</span>}<span className="chev" aria-hidden>›</span></span>
+              </button>
             )}
-            <div className="actions split">
-              <button type="button" className="danger-outline" onClick={() => { c.disconnect(); props.onClose() }}>Verbindung lösen</button>
-              <button type="button" className="primary" onClick={props.onClose}>Fertig</button>
-            </div>
+
+            <details className="cloud-adv">
+              <summary>Erweitert</summary>
+              <dl>
+                <dt>Server</dt><dd>{c.server}</dd>
+                {info && <><dt>Server-Schlüssel</dt><dd><code>{fingerprint(info.pub)}</code></dd></>}
+                {mine && <><dt>Deine Prüfnummer</dt><dd><code>{mine}</code></dd></>}
+              </dl>
+              {!switching
+                ? <button type="button" className="linklike" onClick={() => { setSwitching(true); setTarget('') }}>Auf einen anderen Server umziehen …</button>
+                : (
+                  <div className="cloud-confirm">
+                    <Field label="Neuer Server" value={target} onChange={setTarget} placeholder="https://firma.example/grid" autoFocus />
+                    <p>Das Dokument wird mit allen Mitgliedern auf den neuen Server kopiert. Sie brauchen dort ein Konto und verbinden sich selbst mit dem neuen Server. Der alte Server behält seine Kopie.</p>
+                    <div className="actions">
+                      <button type="button" onClick={() => setSwitching(false)}>Abbrechen</button>
+                      <button type="button" className="primary" disabled={!normalizeServer(target)} onClick={() => {
+                        const u = normalizeServer(target)
+                        setMoveError(null)
+                        c.moveTo(u).then(() => { rememberServer(u); setSwitching(false) }, (e: Error) => setMoveError(e.message))
+                      }}>Umziehen</button>
+                    </div>
+                    {moveError && <p className="sync-error" role="alert">{moveError}</p>}
+                  </div>
+                )}
+            </details>
+
+            {disconnecting
+              ? (
+                <div className="cloud-confirm">
+                  <p><strong>Wirklich die Synchronisation zu diesem Server trennen?</strong><br />Das Dokument bleibt auf diesem Gerät vollständig erhalten, wird aber nicht mehr abgeglichen. Auf dem Server und bei den anderen Mitgliedern bleibt es bestehen.</p>
+                  <div className="actions">
+                    <button type="button" onClick={() => setDisconnecting(false)}>Abbrechen</button>
+                    <button type="button" className="danger" onClick={() => { c.disconnect(); props.onClose() }}>Trennen</button>
+                  </div>
+                </div>
+              )
+              : (
+                <div className="actions split">
+                  <button type="button" className="danger-outline" onClick={() => setDisconnecting(true)}>Verbindung lösen</button>
+                  <button type="button" className="primary" onClick={props.onClose}>Fertig</button>
+                </div>
+              )}
           </>
         ) : (
           <>
+            <p className="cloud-lead">Synchronisiere dieses Dokument mit anderen Geräten und Personen. Es wird Ende-zu-Ende verschlüsselt: der Server speichert nur unlesbare Daten, und lokal bleibt alles vollständig erhalten.</p>
             <Field label="Server" value={server} onChange={setServer} placeholder="https://townwork.eu/grid" autoFocus />
-            <p className="hint">Du meldest dich mit deinem Grid-Konto an, ein Passwort gibt es nicht. Das Dokument bleibt auch lokal vollständig erhalten.</p>
-            <p className="hint">🔒 Das Dokument wird Ende-zu-Ende verschlüsselt: Der Server speichert nur unlesbare Daten. Geht dein Konto verloren und hat niemand sonst Zugang, sind die Daten auf dem Server nicht mehr lesbar; sichere das Konto unter „Sichern oder übertragen“.</p>
-            <AccountLine me={me} onManage={() => setAccount(true)} />
             <div className="actions">
               <button type="button" onClick={props.onClose}>Abbrechen</button>
               <button type="submit" className="primary" disabled={!server.trim()}>Verbinden</button>
@@ -309,7 +327,6 @@ export function CloudOpenDialog(props: { onOpen: (doc: CloudDoc, server: string)
   const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
   const [busy, setBusy] = useState(false)
-  const [account, setAccount] = useState(false)
   const load = async () => {
     const url = normalizeServer(server)
     if (!url) return
@@ -323,7 +340,6 @@ export function CloudOpenDialog(props: { onOpen: (doc: CloudDoc, server: string)
       else setError(String((e as Error).message ?? e))
     } finally { setBusy(false) }
   }
-  if (account) return <AccountDialog onClose={() => { setAccount(false); setDocs(null); setPending(false) }} />
   return (
     <Modal onClose={props.onClose}>
       <form className="dialog sync-dialog" onMouseDown={(e) => e.stopPropagation()}
@@ -345,7 +361,6 @@ export function CloudOpenDialog(props: { onOpen: (doc: CloudDoc, server: string)
                 </li>
               ))}
             </ul>)}
-        <AccountLine me={me} onManage={() => setAccount(true)} />
         <div className="actions">
           <button type="button" onClick={props.onClose}>Schließen</button>
           <button type="submit" className="primary" disabled={busy || !server.trim()}>{docs ? 'Aktualisieren' : 'Dokumente anzeigen'}</button>

@@ -8,7 +8,7 @@ import { getIdentity } from './identity'
 import { fetchMembers, type MembersInfo } from './members'
 import { authedFetch } from './syncClient'
 
-interface KeysReply { enc: boolean; epoch: number; missing: string[]; boxes: { epoch: number; from: string; box: string }[] }
+interface KeysReply { enc: boolean; epoch: number; missing: string[]; stale?: string[]; boxes: { epoch: number; from: string; box: string }[] }
 type Put = { epoch: number; account: string; box: string }
 
 export class DocKeys {
@@ -87,6 +87,8 @@ export class DocKeys {
     this.serverEpoch = reply.epoch
     await this.absorb(reply.boxes, st)
     if (reply.epoch === 0) { await this.createFirst(info); return }
+    // Jemand ist nicht mehr Mitglied (entfernt oder ausgetreten), kennt aber den neuesten Schlüssel: neuen Schlüssel für alle anderen
+    if (reply.stale?.length && this.keys.has(reply.epoch)) { await this.rotate(true); return }
     const out: Put[] = []
     for (const acct of reply.missing) {
       const m = st.members.get(acct)
@@ -97,11 +99,12 @@ export class DocKeys {
   }
 
   /** Nach dem Entfernen eines Mitglieds: neue Epoche für alle Verbliebenen (das entfernte Mitglied bekommt sie nicht). */
-  async rotate(): Promise<void> {
+  async rotate(onlyIfStale = false): Promise<void> {
     const info = await fetchMembers(this.server, this.doc)
     if (!info.state) return
     const reply = await this.fetch()
     await this.absorb(reply.boxes, info.state)
+    if (onlyIfStale && !reply.stale?.length) return // ein anderer Admin war schneller
     const epoch = reply.epoch + 1
     if (epoch > 255) throw new Error('Zu viele Schlüsselwechsel')
     const key = newDocKey()

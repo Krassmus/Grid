@@ -678,3 +678,76 @@ button.account-btn { border: none; background: none; box-shadow: none; padding: 
 button.avatar-pick { border: none; background: none; box-shadow: none; padding: 0; min-height: 0; border-radius: 50%; cursor: pointer; line-height: 0; }
 .avatar-pick:hover { box-shadow: 0 0 0 3px var(--c-e1e7ea); }
 .profile-links { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+
+/* ---------- Cloud-Dialog ---------- */
+.cloud-dialog { width: min(460px, 94vw); min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+.cloud-dialog h3 { margin: 0; }
+.cloud-lead { margin: 0; color: var(--c-666677); font-size: 14px; line-height: 1.5; }
+.cloud-dialog .sync-field { margin: 0; }
+.cloud-card { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--c-e1e7ea); border-radius: 14px; background: var(--c-f9faf8); }
+.cloud-card .dot { width: 10px; height: 10px; border-radius: 50%; background: #ff9f0a; flex: none; }
+.cloud-card.ok .dot { background: #1a7f37; }
+.cloud-card.bad .dot { background: #c0392b; }
+.cloud-card.warn:not(.plan) { border-color: color-mix(in srgb, #ff9f0a 40%, transparent); }
+.cloud-card-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.cloud-card-main strong { font-size: 15px; font-weight: 600; }
+.cloud-card-main small { color: var(--c-666677); font-size: 13px; overflow: hidden; text-overflow: ellipsis; }
+.cloud-card .chip { align-self: flex-start; margin-top: 6px; font-size: 12px; font-weight: 500; padding: 3px 9px; border-radius: 999px; background: var(--c-e9edef); color: var(--c-3b4a52); white-space: nowrap; }
+.cloud-card .chip.lock { background: color-mix(in srgb, #1a7f37 14%, transparent); color: #1a7f37; }
+.cloud-card .chip.open { background: color-mix(in srgb, #ff9f0a 22%, transparent); color: var(--c-3b4a52); }
+.cloud-card.plan { flex-wrap: wrap; }
+.cloud-card .plan-actions { display: flex; align-items: center; gap: 12px; margin: 0; }
+.cloud-card .meter { display: block; height: 5px; border-radius: 3px; background: var(--c-e1e7ea); margin-top: 6px; overflow: hidden; }
+.cloud-card .meter i { display: block; height: 100%; background: #0a84ff; border-radius: 3px; }
+.cloud-note { margin: 0; padding: 10px 12px; border-radius: 10px; font-size: 13px; line-height: 1.45; background: var(--c-f4f7f8); color: var(--c-3b4a52); }
+.cloud-note.bad { background: color-mix(in srgb, #c0392b 10%, transparent); color: #c0392b; }
+.cloud-note.warn { background: color-mix(in srgb, #ff9f0a 14%, transparent); }
+.cloud-confirm { padding: 12px 14px; border: 1px solid var(--c-d5dce0); border-radius: 12px; background: var(--c-f4f7f8); display: flex; flex-direction: column; gap: 10px; }
+.cloud-confirm p { margin: 0; font-size: 13px; line-height: 1.45; color: var(--c-3b4a52); }
+button.cloud-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; text-align: left; padding: 12px 14px; border: 1px solid var(--c-e1e7ea); border-radius: 14px; background: var(--c-ffffff); box-shadow: none; font: inherit; color: inherit; cursor: pointer; }
+button.cloud-row:hover { background: var(--c-f4f7f8); }
+button.cloud-row strong { display: block; font-size: 15px; font-weight: 600; }
+button.cloud-row small { color: var(--c-666677); font-size: 13px; }
+.cloud-row-end { display: inline-flex; align-items: center; gap: 8px; color: var(--c-999999); }
+.cloud-row .chev { font-size: 22px; line-height: 1; }
+.cloud-adv { border-top: 1px solid var(--c-e1e7ea); padding-top: 10px; font-size: 13px; color: var(--c-666677); }
+.cloud-adv summary { cursor: pointer; font-weight: 500; list-style: none; }
+.cloud-adv summary::-webkit-details-marker { display: none; }
+.cloud-adv summary::before { content: '›'; display: inline-block; width: 14px; transition: transform .15s; }
+.cloud-adv[open] summary::before { transform: rotate(90deg); }
+.cloud-adv dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 10px 0; }
+.cloud-adv dt { color: var(--c-999999); }
+.cloud-adv dd { margin: 0; word-break: break-all; color: var(--c-3b4a52); }
+.cloud-adv code { font-family: ui-monospace, Menlo, monospace; font-size: 12px; background: var(--c-e9edef); padding: 1px 5px; border-radius: 5px; }
+.cloud-dialog .actions { margin-top: 2px; }
+
+/* ---------- Mitglieder ---------- */
+.members-dialog h4 { margin: 0 0 6px; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--c-999999); }
+.member-requests { display: flex; flex-direction: column; gap: 8px; }
+.member-card { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid color-mix(in srgb, #0a84ff 35%, transparent); border-radius: 14px; background: color-mix(in srgb, #0a84ff 6%, transparent); }
+.member-who { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.member-who strong { font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.member-who small { color: var(--c-666677); font-size: 12px; }
+.member-who code, .member-card code { font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+.member-who .you { color: var(--c-999999); font-weight: 400; }
+.member-actions { display: flex; gap: 8px; align-items: center; flex: none; }
+.member-list { border: 1px solid var(--c-e1e7ea); border-radius: 14px; background: var(--c-ffffff); overflow: hidden; }
+.member-item + .member-item { border-top: 1px solid var(--c-e1e7ea); }
+.member-line { display: flex; align-items: center; gap: 12px; padding: 10px 12px; }
+.member-item.open { background: var(--c-f9faf8); }
+.chip.role { flex: none; font-size: 12px; font-weight: 500; padding: 3px 9px; border-radius: 999px; background: var(--c-e9edef); color: var(--c-3b4a52); }
+.chip.role.admin { background: color-mix(in srgb, #0a84ff 14%, transparent); color: var(--c-1456c8); }
+button.more { flex: none; border: none; background: none; box-shadow: none; min-height: 0; width: 30px; height: 30px; padding: 0; border-radius: 50%; font-size: 18px; line-height: 1; color: var(--c-666677); cursor: pointer; }
+button.more:hover, button.more[aria-expanded="true"] { background: var(--c-e9edef); }
+.member-more { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 12px 12px 60px; font-size: 13px; color: var(--c-3b4a52); }
+.members-dialog .cloud-confirm textarea { width: 100%; box-sizing: border-box; }
+
+button.invite-row { width: 100%; text-align: left; border: none; background: none; box-shadow: none; font: inherit; color: inherit; cursor: pointer; min-height: 0; }
+button.invite-row:hover { background: var(--c-f4f7f8); }
+.plus-avatar { flex: none; width: 36px; height: 36px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; border: 1.5px dashed var(--c-999999); color: var(--c-666677); font-size: 22px; line-height: 1; }
+button.invite-row:hover .plus-avatar { border-color: #0a84ff; color: #0a84ff; }
+.member-invite { padding: 2px 12px 12px 60px; display: flex; flex-direction: column; gap: 8px; }
+.member-invite p { margin: 0; font-size: 13px; line-height: 1.45; color: var(--c-3b4a52); }
+.member-invite textarea { width: 100%; box-sizing: border-box; }
+.member-item.invite.open { background: var(--c-f9faf8); }
+.member-more .hint { margin: 0; }
