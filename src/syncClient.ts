@@ -8,7 +8,11 @@ import { blobKeyOf, neededAssetKeys } from './gridFile'
 import { getBlob, putBlob } from './blobStore'
 import { filesOf } from './model'
 import { ed25519 } from '@noble/curves/ed25519.js'
-import { fromHex, getIdentity, onIdentityChanged, signMessage } from './identity'
+import { sha256 } from '@noble/hashes/sha2.js'
+import { fromHex, getIdentity, onIdentityChanged, signMessage, toHex } from './identity'
+import { decryptBlob, decryptEntry, encryptBlob, encryptEntry, MissingKey } from './e2e'
+import type { DocKeys } from './docKeys'
+import { fetchMembers } from './members'
 
 export type SyncStatus = 'connecting' | 'online' | 'offline' | 'pending' | 'denied'
 /**
@@ -17,7 +21,7 @@ export type SyncStatus = 'connecting' | 'online' | 'offline' | 'pending' | 'deni
  * `denied` mit `untrusted`: der Server hat nicht den Schlüssel, den Grid von ihm kennt.
  */
 export interface SyncState {
-  status: SyncStatus; reason?: string; kind?: 'account' | 'join' | 'claim' | 'untrusted'
+  status: SyncStatus; reason?: string; kind?: 'account' | 'join' | 'claim' | 'untrusted' | 'keys'
   /** Verbunden, aber der Server nimmt keine Änderungen an (kein Abo oder Speicher voll); lokal geht alles weiter. */
   readonly?: { code: string; reason: string }
 }
@@ -25,6 +29,12 @@ export interface SyncState {
 const REMOTE = Symbol('remote')
 const STEP1 = 0
 const UPDATE = 1
+// verschlüsselte Dokumente (docs/E2E.md)
+const ENC_PUT = 4
+const ENC_ENTRY = 5
+const ENC_SNAPSHOT = 6
+const SHADOW = Symbol('shadow')
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
 export const toWsUrl = (server: string, docId: string) =>
   `${server.replace(/\/+$/, '').replace(/^http/i, 'ws')}/ws/${encodeURIComponent(docId)}`
@@ -141,7 +151,7 @@ export async function fetchAccountInfo(server: string): Promise<AccountInfo> {
   return r.json()
 }
 
-export interface CloudDoc { id: string; name: string; updated: number }
+export interface CloudDoc { id: string; name: string; updated: number; enc?: boolean }
 
 export async function listCloudDocs(server: string): Promise<CloudDoc[]> {
   const r = await authedFetch(server, '/docs')
@@ -163,10 +173,17 @@ export class SyncConnection {
   private claims = 0
   private readonly: { code: string; reason: string } | null = null
   private resyncTimer: ReturnType<typeof setTimeout> | undefined
+  // verschlüsselter Modus: `shadow` hält, was der Server schon kennt (daraus ergibt sich, was noch hochgeladen werden muss)
+  private shadow = new Y.Doc()
+  private since = 0
+  private chain: Promise<void> = Promise.resolve()
+  private gen = 0
+  private keysReady: Promise<void> = Promise.resolve()
+  private pendingCompact = 0
 
   constructor(
     private doc: Y.Doc,
-    private cfg: { server: string; docId: string; name: string },
+    private cfg: { server: string; docId: string; name: string; keys?: DocKeys },
     private onState: (s: SyncState) => void,
     /** Mitglieder oder Beitrittsanfragen könnten sich geändert haben (auch gleich nach dem Verbinden). */
     private onNotice: () => void = () => {},
@@ -181,7 +198,9 @@ export class SyncConnection {
 
   /** Zustand mit dem Server neu abgleichen (z. B. weil ein Abo gerade aktiv geworden ist). */
   resync() {
-    if (this.online) this.ws?.send(frame(STEP1, Y.encodeStateVector(this.doc)))
+    if (!this.online) return
+    if (this.cfg.keys) void this.pushDiff()
+    else this.ws?.send(frame(STEP1, Y.encodeStateVector(this.doc)))
   }
 
   /** Anderes Konto in Gebrauch: neu verbinden. */
@@ -194,12 +213,15 @@ export class SyncConnection {
     this.stopped = false
     this.attempt = 0
     this.expired = 0
+    this.shadow = new Y.Doc() // anderes Konto, andere Schlüssel: von vorn nachladen
+    this.since = 0
     void this.open()
   }
 
   private onLocal = (update: Uint8Array, origin: unknown) => {
-    if (origin === REMOTE || !this.online) return
-    this.ws?.send(frame(UPDATE, update))
+    if (origin === REMOTE || origin === SHADOW || !this.online) return
+    if (this.cfg.keys) void this.sendEnc(update)
+    else this.ws?.send(frame(UPDATE, update))
   }
 
   private onFilesChanged = () => {
@@ -233,11 +255,21 @@ export class SyncConnection {
     try { ws = new WebSocket(toWsUrl(this.cfg.server, this.cfg.docId)) } catch { return this.lost() }
     ws.binaryType = 'arraybuffer'
     this.ws = ws
-    ws.onopen = () => ws.send(JSON.stringify({ t: 'hello', token, name: this.cfg.name }))
+    const gen = ++this.gen
+    ws.onopen = () => ws.send(JSON.stringify({ t: 'hello', token, name: this.cfg.name, since: this.cfg.keys ? this.since : undefined }))
     ws.onmessage = (e) => {
       if (typeof e.data === 'string') {
         const m = JSON.parse(e.data)
-        if (m.t === 'ok') {
+        if (m.t === 'ok' && this.cfg.keys) {
+          // verschlüsselt: erst nach dem Nachladen (Nachricht „synced“) gilt die Verbindung als online
+          this.attempt = 0; this.expired = 0; this.claims = 0; this.readonly = null
+          this.keysReady = this.ensureKeys(ws, gen)
+        } else if (m.t === 'synced' && this.cfg.keys) {
+          this.chain = this.chain.then(() => this.finishSync(ws, gen))
+        } else if (m.t === 'compact' && this.cfg.keys) {
+          this.pendingCompact = Math.max(this.pendingCompact, m.upto)
+          this.chain = this.chain.then(() => this.compactIfDue(ws, gen))
+        } else if (m.t === 'ok') {
           this.online = true
           this.attempt = 0
           this.expired = 0
@@ -256,6 +288,7 @@ export class SyncConnection {
         } else if (m.t === 'writable') {
           if (this.readonly) { this.readonly = null; this.onState({ status: 'online' }) }
         } else if (m.t === 'members') {
+          if (this.cfg.keys) void this.cfg.keys.load().catch(() => {})
           this.onNotice()
         } else if (m.t === 'denied') {
           this.ws = null
@@ -281,11 +314,103 @@ export class SyncConnection {
       }
       const data = new Uint8Array(e.data as ArrayBuffer)
       const body = data.subarray(1)
+      if (this.cfg.keys) {
+        if (data[0] === ENC_ENTRY && data.length > 9) {
+          const seq = Number(new DataView(data.buffer, data.byteOffset + 1, 8).getBigUint64(0))
+          const entry = data.slice(9)
+          this.chain = this.chain.then(() => this.applyEntry(ws, gen, seq, entry))
+        }
+        return
+      }
       if (data[0] === STEP1) ws.send(frame(UPDATE, Y.encodeStateAsUpdate(this.doc, body)))
       else if (data[0] === UPDATE && body.length > 2) Y.applyUpdate(this.doc, body, REMOTE)
     }
     ws.onclose = () => { if (this.ws === ws) this.lost() }
     ws.onerror = () => { /* onclose folgt */ }
+  }
+
+  // ---------- verschlüsselter Modus ----------
+
+  private alive(ws: WebSocket, gen: number) { return !this.stopped && gen === this.gen && this.ws === ws }
+
+  /** Dokumentschlüssel besorgen; der Ersteller legt den ersten an, alle anderen warten, bis ein Admin ihre Kiste abgelegt hat. */
+  private async ensureKeys(ws: WebSocket, gen: number) {
+    const keys = this.cfg.keys!
+    while (this.alive(ws, gen)) {
+      try {
+        if (await keys.load()) return
+        if (keys.serverEpoch === 0 && (await keys.createFirst(await fetchMembers(this.cfg.server, this.cfg.docId)))) return
+      } catch { /* offline oder noch kein Mitglied: nächster Versuch */ }
+      this.onState({ status: 'pending', kind: 'keys', reason: 'Wartet auf den Dokumentschlüssel: ein Admin muss ihn senden (er muss dafür online sein).' })
+      await sleep(5000)
+    }
+  }
+
+  private async keyFor(epoch: number, ws: WebSocket, gen: number): Promise<Uint8Array | undefined> {
+    for (;;) {
+      const k = await this.cfg.keys!.keyFor(epoch)
+      if (k || !this.alive(ws, gen)) return k
+      this.onState({ status: 'pending', kind: 'keys', reason: `Schlüssel (Epoche ${epoch}) fehlt: ein Admin muss ihn senden.` })
+      await sleep(5000)
+    }
+  }
+
+  private async applyEntry(ws: WebSocket, gen: number, seq: number, entry: Uint8Array) {
+    if (!this.alive(ws, gen)) return
+    await this.keysReady
+    let plain: Uint8Array
+    try {
+      plain = await decryptEntry(this.cfg.docId, (e) => this.keyFor(e, ws, gen), entry)
+    } catch (e) {
+      if (e instanceof MissingKey || !this.alive(ws, gen)) return
+      this.since = Math.max(this.since, seq) // beschädigter oder fremder Eintrag: überspringen
+      return
+    }
+    Y.applyUpdate(this.shadow, plain, SHADOW)
+    Y.applyUpdate(this.doc, plain, REMOTE)
+    this.since = Math.max(this.since, seq)
+    if (this.pendingCompact && this.since >= this.pendingCompact) await this.compactIfDue(ws, gen)
+  }
+
+  private async finishSync(ws: WebSocket, gen: number) {
+    if (!this.alive(ws, gen)) return
+    await this.keysReady
+    if (!this.alive(ws, gen)) return
+    this.online = true
+    this.onState({ status: 'online' })
+    this.onNotice()
+    await this.pushDiff()
+    void this.syncBlobs()
+  }
+
+  /** Was der Server noch nicht kennt (z. B. aus der Zeit ohne Verbindung), verschlüsselt hochladen. */
+  private async pushDiff() {
+    const diff = Y.encodeStateAsUpdate(this.doc, Y.encodeStateVector(this.shadow))
+    if (diff.length > 2) await this.sendEnc(diff)
+  }
+
+  private async sendEnc(update: Uint8Array) {
+    const keys = this.cfg.keys!
+    const epoch = keys.top
+    const key = keys.key(epoch)
+    const ws = this.ws
+    if (!key || !ws || ws.readyState !== WebSocket.OPEN) return
+    ws.send(frame(ENC_PUT, await encryptEntry(this.cfg.docId, epoch, key, update)))
+  }
+
+  /** Meldet der Server viele Einträge, lädt ein Client den Gesamtzustand hoch (der Server kann ihn nicht selbst bilden). */
+  private async compactIfDue(ws: WebSocket, gen: number) {
+    const upto = this.pendingCompact
+    if (!upto || this.since < upto || !this.alive(ws, gen)) return
+    this.pendingCompact = 0
+    const keys = this.cfg.keys!
+    const epoch = keys.top, key = keys.key(epoch)
+    if (!key || ws.readyState !== WebSocket.OPEN) return
+    const entry = await encryptEntry(this.cfg.docId, epoch, key, Y.encodeStateAsUpdate(this.shadow))
+    const body = new Uint8Array(8 + entry.length)
+    new DataView(body.buffer).setBigUint64(0, BigInt(upto))
+    body.set(entry, 8)
+    ws.send(frame(ENC_SNAPSHOT, body))
   }
 
   private lost() {
@@ -308,13 +433,27 @@ export class SyncConnection {
         const remote = new Set<string>(await r.json())
         const mimes = new Map<string, string>() // Hash → Dateityp aus dem Dokument (der Server liefert nur Bytes)
         filesOf(this.doc).forEach((f, k) => mimes.set(k.split('|')[3], f.mime))
+        const keys = this.cfg.keys
         for (const key of neededAssetKeys(this.doc)) {
           const local = await getBlob(blobKeyOf(key))
           if (local && !remote.has(key)) {
-            await authedFetch(server, `/blob/${docId}/${key}`, { method: 'PUT', body: local })
+            if (keys) {
+              const epoch = keys.top, k = keys.key(epoch)
+              if (!k) continue
+              await authedFetch(server, `/blob/${docId}/${key}`, { method: 'PUT', body: await encryptBlob(docId, epoch, k, key, new Uint8Array(await local.arrayBuffer())) as BodyInit })
+            } else await authedFetch(server, `/blob/${docId}/${key}`, { method: 'PUT', body: local })
           } else if (!local && remote.has(key)) {
             const d = await authedFetch(server, `/blob/${docId}/${key}`)
-            if (d.ok) await putBlob(blobKeyOf(key), new Blob([await d.arrayBuffer()], { type: key.endsWith('.thumb') ? 'image/jpeg' : mimes.get(key) ?? '' }))
+            if (!d.ok) continue
+            let bytes: BlobPart = await d.arrayBuffer()
+            if (keys) {
+              try {
+                const plain = await decryptBlob(docId, (e) => keys.keyFor(e), key, new Uint8Array(bytes as ArrayBuffer))
+                if (!key.endsWith('.thumb') && toHex(sha256(plain)) !== key) continue // passt nicht zum Hash im Dokument
+                bytes = plain as BlobPart
+              } catch { continue }
+            }
+            await putBlob(blobKeyOf(key), new Blob([bytes], { type: key.endsWith('.thumb') ? 'image/jpeg' : mimes.get(key) ?? '' }))
           }
         }
       } catch { /* beim nächsten Verbinden erneut */ }

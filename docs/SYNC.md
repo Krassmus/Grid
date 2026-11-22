@@ -105,4 +105,4 @@ Voraussetzung: Das Konto der Person ist auf dem Server freigegeben (bei offener 
 
 ## Später
 
-Ende-zu-Ende-Verschlüsselung (dann kann der Server nicht mehr lesen; Schlüsselformate werden vorher so gewählt, dass das möglich bleibt), feinere Rechte, Store-Anbindung für iOS/Android.
+Ende-zu-Ende-Verschlüsselung ist gebaut: siehe `docs/E2E.md`. Weiter später: feinere Rechte, Store-Anbindung für iOS/Android.

@@ -5,6 +5,7 @@ import { SyncConnection, fetchServerInfo, normalizeServer, onServerKey, pinServe
 import { acceptRequest, announceMove, claimDocument, ensureGenesis, fetchMembers, rejectRequest, removeMember, setRole, type JoinRequest, type MembersInfo } from './members'
 import { fingerprint, getIdentity } from './identity'
 import { makeInvite } from './invite'
+import { DocKeys } from './docKeys'
 import type { Role } from './adminLog'
 
 /** Ab so vielen Einträgen im Protokoll ersetzt ein Gesamtzustand die Updates. */
@@ -23,6 +24,8 @@ export class FileSession {
   private tables: Materializer | null = null
   private logEntries = 0
   private conn: SyncConnection | null = null
+  /** Dokumentschlüssel (nur bei verschlüsselten Dokumenten) */
+  private keys: DocKeys | null = null
   private attached = false
   /** Zustand der Cloud-Verbindung für die Oberfläche (`null` = nicht verbunden). */
   syncState: SyncState | null = null
@@ -72,10 +75,11 @@ export class FileSession {
     this.conn?.close()
     if (sync.key) pinServer(sync.server, sync.key) // in der Datei gemerkt: der Server muss diesen Schlüssel beweisen
     else if (pinnedKey(sync.server)) sync.key = pinnedKey(sync.server)!
+    this.keys = sync.enc ? new DocKeys(sync.server, this.meta.docId) : null
     this.conn = new SyncConnection(this.doc,
-      { server: sync.server, docId: this.meta.docId, name: this.name },
+      { server: sync.server, docId: this.meta.docId, name: this.name, keys: this.keys ?? undefined },
       (s) => this.setSyncState(s), () => void this.refreshMembers(),
-      () => claimDocument(sync.server, this.meta.docId, this.meta.adminLog))
+      () => claimDocument(sync.server, this.meta.docId, this.meta.adminLog, !!sync.enc))
   }
 
   resync() { this.conn?.resync() }
@@ -92,6 +96,13 @@ export class FileSession {
         if (await ensureGenesis(server, this.meta.docId, info)) info = await fetchMembers(server, this.meta.docId)
         if (info.entries.length !== (this.meta.adminLog?.length ?? 0)) { this.meta.adminLog = info.entries; this.schedule() }
         this.setMembers(info)
+        // Verschlüsselung muss auf beiden Seiten gleich sein; sonst würde Klartext dort landen, wo er nicht hingehört
+        if (info.entries.length > 0 && !!this.meta.sync?.enc !== info.enc) {
+          this.conn?.close(); this.conn = null
+          this.setSyncState({ status: 'denied', reason: info.enc ? 'Das Dokument ist auf dem Server verschlüsselt, diese Datei kennt es unverschlüsselt.' : 'Diese Datei erwartet ein verschlüsseltes Dokument, der Server hat es unverschlüsselt.' })
+          return
+        }
+        if (this.keys) await this.keys.provision(info) // als Admin: Schlüssel an neue Mitglieder verteilen
       } catch { /* (noch) kein Mitglied oder offline: die Verbindung meldet den Grund */ }
     })
     return this.membersQueue
@@ -105,7 +116,7 @@ export class FileSession {
   }
   accept = (req: JoinRequest, role: Role = 'member') => this.change((s, d) => acceptRequest(s, d, req, role))
   reject = (account: string) => this.change((s, d) => rejectRequest(s, d, account))
-  remove = (account: string) => this.change((s, d) => removeMember(s, d, account))
+  remove = (account: string) => this.change(async (s, d) => { await removeMember(s, d, account); await this.keys?.rotate() }) // neuer Schlüssel: das entfernte Mitglied bekommt ihn nicht
   changeRole = (account: string, role: Role) => this.change((s, d) => setRole(s, d, account, role))
 
   /** Einladungstext für dieses Dokument (der Empfänger klopft damit an). */
@@ -113,15 +124,15 @@ export class FileSession {
     const server = this.meta.sync?.server
     if (!server) throw new Error('Das Dokument ist nicht mit einem Server verbunden')
     const me = await getIdentity()
-    return makeInvite({ server, doc: this.meta.docId, name: this.name, admin: fingerprint(me.publicKey), key: this.meta.sync?.key })
+    return makeInvite({ server, doc: this.meta.docId, name: this.name, admin: fingerprint(me.publicKey), key: this.meta.sync?.key, ...(this.meta.sync?.enc ? { enc: true } : {}) })
   }
 
   private get name() { return this.path ? this.path.split(/[\\/]/).pop()!.replace(/\.grid$/i, '') : 'Mein Dokument' }
 
   /** Dokument mit einem Server verbinden (und die Anbindung in der Datei merken). */
-  connect(server: string, key?: string) {
+  connect(server: string, key?: string, enc = false) {
     const url = normalizeServer(server)
-    this.meta.sync = key ? { server: url, key } : { server: url }
+    this.meta.sync = { server: url, ...(key ? { key } : {}), ...(enc ? { enc: true } : {}) }
     this.schedule()
     if (this.attached) this.openConn()
   }
@@ -136,6 +147,7 @@ export class FileSession {
     if (this.meta.sync && this.members?.role === 'admin') {
       try { await this.change((s, d) => announceMove(s, d, url, info.pub)) } catch { /* alter Server nicht erreichbar: trotzdem umziehen */ }
     }
+    if (this.meta.sync?.enc) throw new Error('Verschlüsselte Dokumente lassen sich noch nicht auf einen anderen Server umziehen.')
     this.connect(url, info.pub)
   }
 
@@ -161,6 +173,7 @@ export class FileSession {
     delete this.meta.sync
     this.conn?.close()
     this.conn = null
+    this.keys = null
     this.setSyncState(null)
     this.setMembers(null)
     this.schedule()

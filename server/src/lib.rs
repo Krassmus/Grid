@@ -32,6 +32,10 @@ use yrs::{
 
 const MSG_STEP1: u8 = 0;
 const MSG_UPDATE: u8 = 1;
+/// Verschlüsselte Dokumente (docs/E2E.md): Client → Server Eintrag / Gesamtzustand, Server → Client nummerierter Eintrag
+const MSG_ENC_PUT: u8 = 4;
+const MSG_ENC_ENTRY: u8 = 5;
+const MSG_ENC_SNAPSHOT: u8 = 6;
 const MAX_BLOB: usize = 256 * 1024 * 1024;
 const MAX_WS_MESSAGE: usize = 128 * 1024 * 1024;
 
@@ -45,6 +49,8 @@ struct Room {
 enum Event {
     /// Yjs-Update von Client `from`
     Update(u64, Arc<Vec<u8>>),
+    /// Neuer verschlüsselter Eintrag (Nummer, Bytes)
+    Enc(i64, Arc<Vec<u8>>),
     /// Mitglieder oder Beitrittsanfragen haben sich geändert: Berechtigung neu prüfen, Clients benachrichtigen
     Members,
 }
@@ -121,6 +127,7 @@ pub fn app_with(data: &std::path::Path, cfg: Config) -> rusqlite::Result<Router>
         .route("/docs/{doc}/import", post(import_log))
         .route("/docs/{doc}/join", post(join_doc))
         .route("/docs/{doc}/join/{account}", axum::routing::delete(reject_join))
+        .route("/docs/{doc}/keys", get(get_keys).put(put_keys))
         .route("/blobs/{doc}", get(list_blobs))
         .route("/blob/{doc}/{key}", get(get_blob).put(put_blob))
         .route("/ws/{doc}", get(ws))
@@ -416,7 +423,7 @@ async fn put_blob(State(s): State<Shared>, h: HeaderMap, Path((doc, key)): Path<
     let w = s.writable(&doc);
     if !w.ok { return (StatusCode::PAYMENT_REQUIRED, w.reason).into_response(); }
     // Originale sind inhaltsadressiert: der Name muss zu den Bytes passen.
-    if !key.ends_with(".thumb") {
+    if !key.ends_with(".thumb") && !s.store.is_enc(&doc) { // verschlüsselte Dateien prüft der Client nach dem Entschlüsseln
         let hex = auth::hex(&Sha256::digest(&body));
         if hex != key { return (StatusCode::BAD_REQUEST, "Hash passt nicht zum Inhalt").into_response(); }
     }
@@ -431,7 +438,7 @@ async fn members(State(s): State<Shared>, h: HeaderMap, Path(doc): Path<String>)
     let entries = match s.entries(&doc) { Ok(e) => e, Err(e) => return fail(e) };
     let requests = if role == "admin" { s.store.requests(&doc).unwrap_or_default() } else { Vec::new() };
     let w = s.writable(&doc);
-    Json(serde_json::json!({ "role": role, "entries": entries, "requests": requests, "writable": { "ok": w.ok, "code": w.code, "reason": w.reason } })).into_response()
+    Json(serde_json::json!({ "role": role, "entries": entries, "requests": requests, "enc": s.store.is_enc(&doc), "writable": { "ok": w.ok, "code": w.code, "reason": w.reason } })).into_response()
 }
 
 /// Neuer Eintrag im Admin-Protokoll (vom Aufrufer unterschrieben).
@@ -457,7 +464,10 @@ async fn post_admin(State(s): State<Shared>, h: HeaderMap, Path(doc): Path<Strin
         return (StatusCode::CONFLICT, "Das Protokoll hat sich inzwischen geändert").into_response();
     }
     s.members.lock().unwrap_or_else(|e| e.into_inner()).insert(doc.clone(), Arc::new(next));
-    if entry.kind == "genesis" { let _ = s.store.set_owner(&doc, &entry.actor); } // legt das Dokument an; der Ersteller ist Besitzer
+    if entry.kind == "genesis" {
+        let _ = s.store.set_owner(&doc, &entry.actor);
+        if h.get("x-grid-enc").is_some_and(|v| v == "1") { let _ = s.store.set_enc(&doc); } // verschlüsselt: unveränderlich ab dem Anlegen
+    }
     if entry.kind == "set" { let _ = s.store.remove_request(&doc, &entry.subject); }
     s.notify(&doc);
     StatusCode::NO_CONTENT.into_response()
@@ -511,13 +521,52 @@ async fn reject_join(State(s): State<Shared>, h: HeaderMap, Path((doc, account))
     StatusCode::NO_CONTENT.into_response()
 }
 
+// ---------- Schlüsselkisten (verschlüsselte Dokumente) ----------
+
+/// Kisten für den Aufrufer (alle Epochen); für Admins außerdem, welche Mitglieder für die neueste Epoche noch keine haben.
+async fn get_keys(State(s): State<Shared>, h: HeaderMap, Path(doc): Path<String>) -> Response {
+    let id = match doc_access(&s, &h, &doc) { Ok(id) => id, Err(r) => return r };
+    let boxes = match s.store.keys_for(&doc, &id) { Ok(b) => b, Err(e) => return fail(e) };
+    let epoch = s.store.max_epoch(&doc);
+    let mut missing: Vec<String> = Vec::new();
+    if epoch > 0 && matches!(s.role(&doc, &id), Ok(Some(ref r)) if r == "admin") {
+        if let (Ok(Some(st)), Ok(have)) = (s.log_state(&doc), s.store.key_holders(&doc, epoch)) {
+            missing = st.members.keys().filter(|m| !have.contains(m)).cloned().collect();
+            missing.sort();
+        }
+    }
+    Json(serde_json::json!({
+        "enc": s.store.is_enc(&doc), "epoch": epoch, "missing": missing,
+        "boxes": boxes.into_iter().map(|(e, from, b)| serde_json::json!({ "epoch": e, "from": from, "box": b })).collect::<Vec<_>>(),
+    })).into_response()
+}
+
+#[derive(serde::Deserialize)]
+struct KeyBox { epoch: i64, account: String, #[serde(rename = "box")] boxed: String }
+
+/// Ein Admin legt Schlüsselkisten für Mitglieder ab (auch für eine neue Epoche).
+async fn put_keys(State(s): State<Shared>, h: HeaderMap, Path(doc): Path<String>, Json(list): Json<Vec<KeyBox>>) -> Response {
+    let id = match doc_access(&s, &h, &doc) { Ok(id) => id, Err(r) => return r };
+    match s.role(&doc, &id) { Ok(Some(r)) if r == "admin" => {} Ok(_) => return StatusCode::FORBIDDEN.into_response(), Err(e) => return fail(e) }
+    if !s.store.is_enc(&doc) { return (StatusCode::BAD_REQUEST, "Das Dokument ist nicht verschlüsselt").into_response(); }
+    if list.len() > 2_000 { return StatusCode::BAD_REQUEST.into_response(); }
+    let top = s.store.max_epoch(&doc);
+    for k in &list {
+        if k.epoch < 1 || k.epoch > top + 1 || k.boxed.len() > 1_024 || !valid_doc(&k.account) { return (StatusCode::BAD_REQUEST, "Kiste ungültig").into_response(); }
+        if !matches!(s.access(&doc, &k.account), Ok(true)) { return (StatusCode::BAD_REQUEST, "Kein Mitglied").into_response(); }
+    }
+    for k in &list { if let Err(e) = s.store.put_key(&doc, k.epoch, &k.account, &id, &k.boxed) { return fail(e); } }
+    s.notify(&doc);
+    StatusCode::NO_CONTENT.into_response()
+}
+
 // ---------- WebSocket ----------
 
 fn room(state: &Shared, id: &str) -> Result<Arc<Room>, String> {
     let mut rooms = state.rooms.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(r) = rooms.get(id) { return Ok(r.clone()); }
     let doc = Doc::new();
-    {
+    if !state.store.is_enc(id) { // verschlüsselte Dokumente hält der Server nur als Protokoll, nicht als Yjs-Zustand
         let mut txn = doc.transact_mut();
         for u in state.store.log(id).map_err(|e| e.to_string())? {
             txn.apply_update(Update::decode_v1(&u).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
@@ -550,7 +599,7 @@ async fn deny(socket: &mut WebSocket, code: &str, reason: &str) {
 async fn session(state: Shared, id: String, mut socket: WebSocket) {
     // 1. Anmeldung
     #[derive(serde::Deserialize)]
-    struct Hello { t: String, token: String, name: Option<String> }
+    struct Hello { t: String, token: String, name: Option<String>, since: Option<i64> }
     let hello = match socket.recv().await {
         Some(Ok(Message::Text(t))) => serde_json::from_str::<Hello>(&t).ok().filter(|h| h.t == "hello"),
         _ => None,
@@ -591,6 +640,7 @@ async fn session(state: Shared, id: String, mut socket: WebSocket) {
         *n
     };
     let mut rx = room.tx.subscribe();
+    if state.store.is_enc(&id) { return session_enc(state, id, account.id, socket, room, rx, hello.since.unwrap_or(0)).await; }
     let mut was_readonly = false;
 
     // 2. Eigenen Zustandsvektor anbieten
@@ -658,7 +708,7 @@ async fn session(state: Shared, id: String, mut socket: WebSocket) {
                     Ok(Event::Update(from, body)) if from != me => {
                         if socket.send(frame(MSG_UPDATE, &body)).await.is_err() { break }
                     }
-                    Ok(Event::Update(..)) => {}
+                    Ok(Event::Update(..)) | Ok(Event::Enc(..)) => {}
                     Ok(Event::Members) => {
                         // Wer nicht mehr Mitglied ist, wird getrennt; alle anderen erfahren von der Änderung
                         if !state.access(&id, &account.id).unwrap_or(false) { break }
@@ -669,6 +719,80 @@ async fn session(state: Shared, id: String, mut socket: WebSocket) {
                         let sv = room.doc.lock().unwrap_or_else(|e| e.into_inner()).transact().state_vector().encode_v1();
                         if socket.send(frame(MSG_STEP1, &sv)).await.is_err() { break }
                     }
+                    Err(_) => break,
+                }
+            }
+        }
+    }
+}
+
+// ---------- WebSocket, verschlüsseltes Dokument (docs/E2E.md) ----------
+
+fn enc_frame(seq: i64, entry: &[u8]) -> Message {
+    let mut v = Vec::with_capacity(entry.len() + 9);
+    v.push(MSG_ENC_ENTRY);
+    v.extend_from_slice(&seq.to_be_bytes());
+    v.extend_from_slice(entry);
+    Message::Binary(v.into())
+}
+
+/// Der Server kennt hier nur nummerierte, undurchsichtige Einträge: speichern, verteilen, ab einer Nummer nachliefern.
+async fn session_enc(state: Shared, id: String, account: String, mut socket: WebSocket, room: Arc<Room>, mut rx: broadcast::Receiver<Event>, since: i64) {
+    let status = |w: &Writable| Message::Text(if w.ok { "{\"t\":\"writable\"}".to_string() } else { serde_json::json!({ "t": "readonly", "code": w.code, "reason": w.reason }).to_string() }.into());
+    // Nachliefern, was der Client noch nicht kennt
+    let (backlog, count) = match (state.store.log_since(&id, since.max(0)), state.store.log(&id)) {
+        (Ok(b), Ok(all)) => (b, all.len()),
+        _ => return,
+    };
+    let last = backlog.last().map(|(s, _)| *s).unwrap_or(since.max(0));
+    for (seq, data) in &backlog { if socket.send(enc_frame(*seq, data)).await.is_err() { return; } }
+    let synced = serde_json::json!({ "t": "synced", "last": last, "count": count, "epoch": state.store.max_epoch(&id) });
+    if socket.send(Message::Text(synced.to_string().into())).await.is_err() { return; }
+    let w = state.writable(&id);
+    if !w.ok && socket.send(status(&w)).await.is_err() { return; }
+    let mut was_readonly = false;
+    loop {
+        tokio::select! {
+            incoming = socket.recv() => {
+                let Some(Ok(msg)) = incoming else { break };
+                let Message::Binary(data) = msg else {
+                    if matches!(msg, Message::Close(_)) { break }
+                    continue
+                };
+                let Some((&kind, body)) = data.split_first() else { continue };
+                if kind != MSG_ENC_PUT && kind != MSG_ENC_SNAPSHOT { continue }
+                if !state.access(&id, &account).unwrap_or(false) { break }
+                let w = state.writable(&id);
+                if !w.ok {
+                    was_readonly = true;
+                    if socket.send(status(&w)).await.is_err() { break }
+                    continue
+                }
+                if was_readonly { was_readonly = false; if socket.send(status(&w)).await.is_err() { break } }
+                if kind == MSG_ENC_PUT {
+                    if body.len() < 29 { continue } // Epoche + Nonce + Tag
+                    let Ok((seq, n)) = state.store.append_enc(&id, body) else { break };
+                    let _ = room.tx.send(Event::Enc(seq, Arc::new(body.to_vec())));
+                    if n >= COMPACT_AT {
+                        let m = serde_json::json!({ "t": "compact", "upto": seq, "count": n });
+                        if socket.send(Message::Text(m.to_string().into())).await.is_err() { break }
+                    }
+                } else {
+                    if body.len() < 8 + 29 { continue }
+                    let upto = i64::from_be_bytes(body[..8].try_into().unwrap_or([0; 8]));
+                    let _ = state.store.compact_enc(&id, upto, &body[8..]);
+                }
+            }
+            outgoing = rx.recv() => {
+                match outgoing {
+                    Ok(Event::Enc(seq, body)) => { if socket.send(enc_frame(seq, &body)).await.is_err() { break } }
+                    Ok(Event::Members) => {
+                        if !state.access(&id, &account).unwrap_or(false) { break }
+                        if socket.send(Message::Text("{\"t\":\"members\"}".into())).await.is_err() { break }
+                    }
+                    Ok(Event::Update(..)) => {}
+                    // Verteiler übergelaufen: der Client holt sich per Neuverbinden, was fehlt
+                    Err(broadcast::error::RecvError::Lagged(_)) => break,
                     Err(_) => break,
                 }
             }

@@ -9,6 +9,8 @@ export interface Invite {
   admin: string
   /** öffentlicher Schlüssel des Servers (so erkennt der Eingeladene den richtigen Server) */
   key?: string
+  /** Das Dokument ist Ende-zu-Ende-verschlüsselt (docs/E2E.md); der Eingeladene verbindet dann nur verschlüsselt. */
+  enc?: boolean
 }
 
 const PREFIX = 'grid-invite:1:'
@@ -29,5 +31,6 @@ export function parseInvite(text: string): Invite {
   return {
     server: o.server, doc: o.doc, name: typeof o.name === 'string' ? o.name : '', admin: typeof o.admin === 'string' ? o.admin : '',
     ...(typeof o.key === 'string' && /^[0-9a-f]{64}$/.test(o.key) ? { key: o.key } : {}),
+    ...(o.enc === true ? { enc: true } : {}),
   }
 }

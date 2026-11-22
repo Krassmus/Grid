@@ -78,7 +78,7 @@ function Single() {
   }
 
   /** Dokument aus der Cloud: Speicherort wählen, leere Datei mit der Anbindung anlegen; der Abgleich füllt sie. */
-  const openFromCloud = async (d: CloudDoc, server: string, key?: string) => {
+  const openFromCloud = async (d: CloudDoc, server: string, key?: string, enc = !!d.enc) => {
     setCloudOpen(false)
     let p: string
     if (isMobileUI) p = await docsPath(d.name || 'Cloud-Dokument')
@@ -89,7 +89,7 @@ function Single() {
       p = withExt(chosen)
     }
     await current.current?.flush()
-    const doc = new Y.Doc(), meta = { ...newMeta(), docId: d.id, sync: key ? { server, key } : { server } }
+    const doc = new Y.Doc(), meta = { ...newMeta(), docId: d.id, sync: { server, ...(key ? { key } : {}), ...(enc ? { enc: true } : {}) } }
     try {
       const known = await writeGrid(p, doc, meta, new Set())
       adopt(new FileSession(++counter.current, doc, p, meta, known, setError))
@@ -211,7 +211,7 @@ function Single() {
 
   const dialogs = (
     <>
-      {joinOpen && <JoinDialog onClose={() => setJoinOpen(false)} onJoined={(i: Invite) => { setJoinOpen(false); void openFromCloud({ id: i.doc, name: i.name, updated: 0 }, i.server, i.key) }} />}
+      {joinOpen && <JoinDialog onClose={() => setJoinOpen(false)} onJoined={(i: Invite) => { setJoinOpen(false); void openFromCloud({ id: i.doc, name: i.name, updated: 0 }, i.server, i.key, !!i.enc) }} />}
       {cloudOpen && <CloudOpenDialog onOpen={(d, server) => void openFromCloud(d, server)} onClose={() => setCloudOpen(false)} />}
       {error && !(isMobileUI && !session) && <div className="file-error" role="alert">{error}<button type="button" onClick={() => setError(null)}>✕</button></div>}
     </>
@@ -231,13 +231,14 @@ function Single() {
     members,
     accept: session.accept, reject: session.reject, remove: session.remove, changeRole: session.changeRole, invite: () => session.invite(),
     server: session.meta.sync?.server ?? null,
-    connect: (server) => { session.connect(server); bump((n) => n + 1) },
+    enc: !!session.meta.sync?.enc,
+    connect: (server, enc) => { session.connect(server, undefined, enc); bump((n) => n + 1) },
     disconnect: () => { session.disconnect(); bump((n) => n + 1) },
     trustServer: () => { session.trustServer(); bump((n) => n + 1) },
     resync: () => session.resync(),
     moveTo: async (server) => { await session.moveTo(server); bump((n) => n + 1) },
     moved: session.movedTo,
-    followMove: () => { const m = session.movedTo; if (m) { session.connect(m.server, m.key); bump((n) => n + 1) } },
+    followMove: () => { const m = session.movedTo; if (m) { session.connect(m.server, m.key, !!session.meta.sync?.enc); bump((n) => n + 1) } },
   }
   return (
     <>

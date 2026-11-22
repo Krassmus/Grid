@@ -27,10 +27,14 @@ fn pub_hex(a: &Acct) -> String { a.key.verifying_key().to_bytes().iter().map(|b|
 
 /// Minimaler HTTP-Client. Liefert (Statuszeile, Body).
 async fn http(method: &str, addr: &str, path: &str, token: Option<&str>, body: &[u8]) -> (String, String) {
+    http_hdr(method, addr, path, token, "", body).await
+}
+
+async fn http_hdr(method: &str, addr: &str, path: &str, token: Option<&str>, extra: &str, body: &[u8]) -> (String, String) {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let mut s = tokio::net::TcpStream::connect(addr).await.unwrap();
     let auth = token.map(|t| format!("Authorization: Bearer {t}\r\n")).unwrap_or_default();
-    let req = format!("{method} {path} HTTP/1.1\r\nHost: {addr}\r\n{auth}Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len());
+    let req = format!("{method} {path} HTTP/1.1\r\nHost: {addr}\r\n{auth}{extra}Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len());
     s.write_all(req.as_bytes()).await.unwrap();
     s.write_all(body).await.unwrap();
     let mut out = Vec::new();
@@ -590,4 +594,105 @@ async fn stripe_events_set_and_end_the_plan() {
     // Ohne Geheimnis in der Einstellung gibt es den Webhook nicht
     let addr2 = serve_with(&tmp("stripe-off"), grid_server::Config { open_registration: true, ..Default::default() }).await;
     assert_eq!(stripe_post(&addr2, "t=1,v1=00", "{}").await, 404);
+}
+
+// ---------- Verschlüsselte Dokumente (docs/E2E.md) ----------
+
+fn enc_entry(n: u8) -> Vec<u8> { let mut v = vec![1u8]; v.extend(std::iter::repeat_n(n, 40)); v } // Epoche 1, undurchsichtige Bytes
+
+async fn open_enc(addr: &str, tok: &str, since: i64) -> (Ws, Vec<(i64, Vec<u8>)>, serde_json::Value) {
+    let (mut ws, _) = connect_async(format!("ws://{addr}/ws/{DOC}")).await.unwrap();
+    ws.send(Message::Text(format!("{{\"t\":\"hello\",\"token\":\"{tok}\",\"since\":{since}}}").into())).await.unwrap();
+    let mut entries = Vec::new();
+    loop {
+        match ws.next().await {
+            Some(Ok(Message::Text(t))) if t.contains("\"synced\"") => return (ws, entries, serde_json::from_str(&t).unwrap()),
+            Some(Ok(Message::Text(_))) => {}
+            Some(Ok(Message::Binary(b))) if b[0] == 5 => entries.push((i64::from_be_bytes(b[1..9].try_into().unwrap()), b[9..].to_vec())),
+            other => panic!("unerwartet: {other:?}"),
+        }
+    }
+}
+
+async fn next_entry(ws: &mut Ws) -> (i64, Vec<u8>) {
+    loop {
+        match tokio::time::timeout(std::time::Duration::from_secs(3), ws.next()).await.expect("Zeitüberschreitung") {
+            Some(Ok(Message::Binary(b))) if b[0] == 5 => return (i64::from_be_bytes(b[1..9].try_into().unwrap()), b[9..].to_vec()),
+            Some(Ok(_)) => {}
+            other => panic!("unerwartet: {other:?}"),
+        }
+    }
+}
+
+#[tokio::test]
+async fn encrypted_documents_store_opaque_entries_and_keys() {
+    let dir = tmp("enc");
+    let addr = serve(&dir, true).await;
+    let (a, b) = (acct(1), acct(2));
+    let (ta, tb) = (token(&addr, &a).await, token(&addr, &b).await);
+
+    // Anlegen mit Verschlüsselung (Merkmal am Gründungseintrag)
+    let mut c = Chain::new();
+    let (g, h) = c.entry(&a, "genesis", &a, "admin", "Anna");
+    assert_eq!(status(&http_hdr("POST", &addr, &format!("/docs/{DOC}/admin"), Some(&ta), "X-Grid-Enc: 1\r\n", g.to_string().as_bytes()).await), 204);
+    c.accept(h);
+    let (set, h) = c.entry(&a, "set", &b, "member", "Ben");
+    assert_eq!(status(&post_entry(&addr, &ta, &set).await), 204);
+    c.accept(h);
+    assert_eq!(get_members(&addr, &ta).await.1["enc"], true);
+
+    // Schlüsselkisten: nur Admins, nur Mitglieder, Epochen ohne Lücke
+    let keys = format!("/docs/{DOC}/keys");
+    let put = |t: &str, body: serde_json::Value| { let (addr, t, keys) = (addr.clone(), t.to_string(), keys.clone()); async move { status(&http("PUT", &addr, &keys, Some(&t), body.to_string().as_bytes()).await) } };
+    assert_eq!(put(&ta, serde_json::json!([{ "epoch": 3, "account": a.id, "box": "x" }])).await, 400); // Lücke
+    assert_eq!(put(&tb, serde_json::json!([{ "epoch": 1, "account": b.id, "box": "x" }])).await, 403); // kein Admin
+    assert_eq!(put(&ta, serde_json::json!([{ "epoch": 1, "account": a.id, "box": "kiste-a" }])).await, 204);
+    let got: serde_json::Value = serde_json::from_str(&http("GET", &addr, &keys, Some(&ta), b"").await.1).unwrap();
+    assert_eq!(got["epoch"], 1);
+    assert_eq!(got["missing"], serde_json::json!([b.id])); // Ben hat noch keine Kiste
+    assert_eq!(got["boxes"][0]["box"], "kiste-a");
+    assert_eq!(put(&ta, serde_json::json!([{ "epoch": 1, "account": b.id, "box": "kiste-b" }])).await, 204);
+    let gb: serde_json::Value = serde_json::from_str(&http("GET", &addr, &keys, Some(&tb), b"").await.1).unwrap();
+    assert_eq!((gb["boxes"][0]["box"].as_str(), gb["boxes"][0]["from"].as_str()), (Some("kiste-b"), Some(a.id.as_str())));
+    assert_eq!(gb["missing"], serde_json::json!([])); // Ben ist kein Admin
+
+    // Einträge: Nummer vergeben, an alle verteilen (auch an den Absender), später Dazukommende bekommen alles
+    let (mut wa, none, synced) = open_enc(&addr, &ta, 0).await;
+    assert!(none.is_empty());
+    assert_eq!((synced["last"].as_i64(), synced["count"].as_i64()), (Some(0), Some(0)));
+    let (mut wb, _, _) = open_enc(&addr, &tb, 0).await;
+    wa.send(frame(4, &enc_entry(7))).await.unwrap();
+    assert_eq!(next_entry(&mut wa).await, (1, enc_entry(7)));
+    assert_eq!(next_entry(&mut wb).await, (1, enc_entry(7)));
+    wb.send(frame(4, &enc_entry(8))).await.unwrap();
+    assert_eq!(next_entry(&mut wa).await.0, 2);
+    let (_w, late, synced) = open_enc(&addr, &tb, 0).await;
+    assert_eq!(late.iter().map(|e| e.0).collect::<Vec<_>>(), vec![1, 2]);
+    assert_eq!(synced["last"], 2);
+    let (_w2, since1, _) = open_enc(&addr, &ta, 1).await;
+    assert_eq!(since1.iter().map(|e| e.0).collect::<Vec<_>>(), vec![2]);
+
+    // Zu kurze Einträge (kein Tag) und Klartext-Updates werden nicht gespeichert
+    wa.send(frame(4, &[1, 2, 3])).await.unwrap();
+    wa.send(frame(1, &[0, 0, 5, 5, 5])).await.unwrap();
+
+    // Gesamtzustand ersetzt alles bis zur Nummer 2
+    let mut snap = 2i64.to_be_bytes().to_vec();
+    snap.extend(enc_entry(9));
+    wa.send(frame(6, &snap)).await.unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    let (_w3, all, synced) = open_enc(&addr, &ta, 0).await;
+    assert_eq!(all, vec![(2, enc_entry(9))]);
+    assert_eq!(synced["count"], 1);
+    // eine unbekannte Nummer wird abgelehnt
+    let mut bad = 99i64.to_be_bytes().to_vec();
+    bad.extend(enc_entry(1));
+    wa.send(frame(6, &bad)).await.unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    assert_eq!(open_enc(&addr, &ta, 0).await.1.len(), 1);
+
+    // Dateien: der Server prüft den Hash bei verschlüsselten Dokumenten nicht (er sieht nur Chiffretext)
+    let key = "a".repeat(64);
+    let r = http("PUT", &addr, &format!("/blob/{DOC}/{key}"), Some(&ta), &enc_entry(3)).await;
+    assert_eq!(status(&r), 204);
 }

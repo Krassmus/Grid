@@ -13,7 +13,9 @@ const rememberServer = (s: string) => { try { localStorage.setItem(LAST, s) } ca
 export interface SyncControl extends MembersControl {
   state: SyncState | null
   server: string | null
-  connect: (server: string) => void
+  /** Dokument ist Ende-zu-Ende-verschlüsselt (steht fest, solange es besteht) */
+  enc: boolean
+  connect: (server: string, enc?: boolean) => void
   disconnect: () => void
   /** Dem Schlüssel vertrauen, den der Server jetzt zeigt (nach einer Warnung) */
   trustServer: () => void
@@ -31,7 +33,7 @@ export const syncLabel = (c: SyncControl) => {
   switch (c.state?.status) {
     case 'online': return c.state.readonly ? 'Nur lesen' : 'Synchronisiert'
     case 'offline': return 'Offline – wird später abgeglichen'
-    case 'pending': return c.state.kind === 'join' ? 'Wartet auf Zustimmung eines Admins' : c.state.kind === 'claim' ? 'Dokument ist hier noch nicht angelegt' : 'Wartet auf Freigabe des Kontos'
+    case 'pending': return c.state.kind === 'keys' ? 'Wartet auf den Dokumentschlüssel' : c.state.kind === 'join' ? 'Wartet auf Zustimmung eines Admins' : c.state.kind === 'claim' ? 'Dokument ist hier noch nicht angelegt' : 'Wartet auf Freigabe des Kontos'
     case 'denied': return c.state.kind === 'untrusted' ? 'Server hat einen anderen Schlüssel' : `Abgelehnt: ${c.state.reason ?? 'kein Zugriff'}`
     default: return 'Verbinde …'
   }
@@ -131,6 +133,7 @@ export function SyncDialog(props: { control: SyncControl; onClose: () => void })
   const c = props.control
   const me = useAccount()
   const [server, setServer] = useState(c.server ?? lastServer())
+  const [encrypt, setEncrypt] = useState(true)
   const [account, setAccount] = useState(false)
   const [membersOpen, setMembersOpen] = useState(false)
   const [switching, setSwitching] = useState(false)
@@ -142,7 +145,7 @@ export function SyncDialog(props: { control: SyncControl; onClose: () => void })
     const url = normalizeServer(server)
     if (!url) return
     rememberServer(url)
-    c.connect(url)
+    c.connect(url, encrypt)
   }
   if (account) return <AccountDialog onClose={() => setAccount(false)} />
   if (membersOpen) return <MembersDialog control={c} onClose={() => setMembersOpen(false)} />
@@ -156,6 +159,7 @@ export function SyncDialog(props: { control: SyncControl; onClose: () => void })
           <>
             <p className={`sync-status ${c.state?.readonly ? 'readonly' : c.state?.status ?? 'connecting'}`}><span className="dot" />{syncLabel(c)}</p>
             <ServerLine server={c.server!} onSwitch={() => { setSwitching(true); setTarget('') }} />
+            {c.enc && <p className="sync-account"><span>🔒 Ende-zu-Ende verschlüsselt</span></p>}
             {c.moved && (
               <div className="switch-box moved">
                 <p><strong>Dieses Dokument ist umgezogen</strong><br /><span className="sync-server">{c.moved.server}</span></p>
@@ -183,6 +187,8 @@ export function SyncDialog(props: { control: SyncControl; onClose: () => void })
                   <p className="sync-error" role="alert">{c.state.reason}</p>
                   <div className="actions"><button type="button" className="danger-outline" onClick={() => c.trustServer()}>Dem neuen Schlüssel vertrauen</button></div>
                 </>
+              : c.state?.status === 'pending' && c.state.kind === 'keys'
+              ? <p className="hint">{c.state.reason}</p>
               : c.state?.status === 'pending' && c.state.kind === 'claim'
               ? <p className="hint">{c.state.reason}</p>
               : c.state?.status === 'pending' && c.state.kind === 'join'
@@ -209,6 +215,10 @@ export function SyncDialog(props: { control: SyncControl; onClose: () => void })
           <>
             <Field label="Server" value={server} onChange={setServer} placeholder="https://townwork.eu/grid" autoFocus />
             <p className="hint">Du meldest dich mit deinem Grid-Konto an, ein Passwort gibt es nicht. Das Dokument bleibt auch lokal vollständig erhalten.</p>
+            <label className="cfg-check">
+              <input type="checkbox" checked={encrypt} onChange={(e) => setEncrypt(e.target.checked)} />
+              <span>Ende-zu-Ende verschlüsseln<small>Der Server speichert nur unlesbare Daten. Später nicht mehr änderbar. Geht dein Konto verloren (und hat niemand sonst Zugang), sind die Daten auf dem Server nicht mehr lesbar; sichere das Konto unter „Sichern oder übertragen“.</small></span>
+            </label>
             <AccountLine me={me} onManage={() => setAccount(true)} />
             <div className="actions">
               <button type="button" onClick={props.onClose}>Abbrechen</button>

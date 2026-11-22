@@ -23,7 +23,7 @@ export interface GridMeta {
   savedAt?: string
   app?: string
   /** Cloud-Anbindung: Adresse des Servers (der Zugangsschlüssel liegt nicht in der Datei). */
-  sync?: { server: string; /** öffentlicher Schlüssel des Servers (gemerkt beim ersten Verbinden) */ key?: string }
+  sync?: { server: string; /** öffentlicher Schlüssel des Servers (gemerkt beim ersten Verbinden) */ key?: string; /** Ende-zu-Ende-verschlüsselt (docs/E2E.md); steht fest, solange das Dokument besteht */ enc?: boolean }
   /** Admin-Protokoll des Dokuments (wer Mitglied/Admin ist), damit es mit der Datei umziehen kann */
   adminLog?: AdminEntry[]
 }

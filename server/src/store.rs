@@ -10,6 +10,7 @@ pub struct DocInfo {
     pub id: String,
     pub name: String,
     pub updated: i64,
+    pub enc: bool,
 }
 
 /// Ab so vielen Einträgen ersetzt ein Gesamtzustand das Protokoll eines Dokuments.
@@ -33,6 +34,7 @@ impl Store {
              CREATE TABLE IF NOT EXISTS members (doc TEXT NOT NULL, account TEXT NOT NULL, role TEXT NOT NULL, PRIMARY KEY (doc, account));
              CREATE TABLE IF NOT EXISTS stripe_customers (customer TEXT PRIMARY KEY, account TEXT NOT NULL);
              CREATE TABLE IF NOT EXISTS admin_log (doc TEXT NOT NULL, seq INTEGER NOT NULL, entry TEXT NOT NULL, PRIMARY KEY (doc, seq));
+             CREATE TABLE IF NOT EXISTS keys (doc TEXT NOT NULL, epoch INTEGER NOT NULL, account TEXT NOT NULL, sender TEXT NOT NULL, box TEXT NOT NULL, PRIMARY KEY (doc, epoch, account));
              CREATE TABLE IF NOT EXISTS join_requests (doc TEXT NOT NULL, account TEXT NOT NULL, pub TEXT NOT NULL, name TEXT NOT NULL, time INTEGER NOT NULL, PRIMARY KEY (doc, account));",
         )?;
         // Spalten, die erst später dazukamen (bestehende Datenbanken werden erweitert)
@@ -41,6 +43,7 @@ impl Store {
             ("accounts", "paid_until", "INTEGER"),
             ("accounts", "quota", "INTEGER NOT NULL DEFAULT 0"),
             ("docs", "owner", "TEXT"),
+            ("docs", "enc", "INTEGER NOT NULL DEFAULT 0"),
         ] {
             let have: i64 = c.query_row(&format!("SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = '{column}'"), [], |r| r.get(0))?;
             if have == 0 { c.execute(&format!("ALTER TABLE {table} ADD COLUMN {column} {ddl}"), [])?; }
@@ -63,8 +66,8 @@ impl Store {
 
     pub fn all_docs(&self) -> rusqlite::Result<Vec<DocInfo>> {
         let c = self.conn();
-        let mut s = c.prepare("SELECT id, name, updated FROM docs ORDER BY updated DESC")?;
-        let rows = s.query_map([], |r| Ok(DocInfo { id: r.get(0)?, name: r.get(1)?, updated: r.get(2)? }))?;
+        let mut s = c.prepare("SELECT id, name, updated, enc FROM docs ORDER BY updated DESC")?;
+        let rows = s.query_map([], |r| Ok(DocInfo { id: r.get(0)?, name: r.get(1)?, updated: r.get(2)?, enc: r.get::<_, i64>(3)? != 0 }))?;
         rows.collect()
     }
 
@@ -109,6 +112,73 @@ impl Store {
     pub fn put_blob(&self, doc: &str, key: &str, data: &[u8]) -> rusqlite::Result<()> {
         self.conn().execute("INSERT OR REPLACE INTO blobs (doc, key, data) VALUES (?1, ?2, ?3)", params![doc, key, data])?;
         Ok(())
+    }
+
+    // ---------- Verschlüsselte Dokumente (docs/E2E.md) ----------
+
+    pub fn is_enc(&self, doc: &str) -> bool {
+        self.conn().query_row("SELECT enc FROM docs WHERE id = ?1", [doc], |r| r.get::<_, i64>(0)).optional().ok().flatten().unwrap_or(0) != 0
+    }
+
+    /// Markiert das Dokument als verschlüsselt (nur beim Anlegen, danach unveränderlich).
+    pub fn set_enc(&self, doc: &str) -> rusqlite::Result<()> {
+        self.conn().execute("UPDATE docs SET enc = 1 WHERE id = ?1", [doc])?;
+        Ok(())
+    }
+
+    /// Einträge mit Nummer größer als `since`.
+    pub fn log_since(&self, doc: &str, since: i64) -> rusqlite::Result<Vec<(i64, Vec<u8>)>> {
+        let c = self.conn();
+        let mut s = c.prepare("SELECT seq, data FROM log WHERE doc = ?1 AND seq > ?2 ORDER BY seq")?;
+        let rows = s.query_map(params![doc, since], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        rows.collect()
+    }
+
+    /// Hängt einen undurchsichtigen Eintrag an. Liefert Nummer und Zahl der Einträge danach.
+    pub fn append_enc(&self, doc: &str, data: &[u8]) -> rusqlite::Result<(i64, i64)> {
+        let c = self.conn();
+        c.execute("INSERT INTO log (doc, seq, data) VALUES (?1, COALESCE((SELECT MAX(seq) FROM log WHERE doc = ?1), 0) + 1, ?2)", params![doc, data])?;
+        c.execute("UPDATE docs SET updated = ?2 WHERE id = ?1", params![doc, now()])?;
+        let seq = c.query_row("SELECT MAX(seq) FROM log WHERE doc = ?1", [doc], |r| r.get(0))?;
+        let n = c.query_row("SELECT COUNT(*) FROM log WHERE doc = ?1", [doc], |r| r.get(0))?;
+        Ok((seq, n))
+    }
+
+    /// Ersetzt alle Einträge bis `upto` durch einen (Gesamtzustand, vom Client erzeugt). Gibt `false` zurück, wenn `upto` unbekannt ist.
+    pub fn compact_enc(&self, doc: &str, upto: i64, data: &[u8]) -> rusqlite::Result<bool> {
+        let mut c = self.conn();
+        let max: Option<i64> = c.query_row("SELECT MAX(seq) FROM log WHERE doc = ?1", [doc], |r| r.get(0))?;
+        if upto < 1 || max.is_none_or(|m| upto > m) { return Ok(false); }
+        let t = c.transaction()?;
+        t.execute("DELETE FROM log WHERE doc = ?1 AND seq <= ?2", params![doc, upto])?;
+        t.execute("INSERT INTO log (doc, seq, data) VALUES (?1, ?2, ?3)", params![doc, upto, data])?;
+        t.commit()?;
+        Ok(true)
+    }
+
+    pub fn put_key(&self, doc: &str, epoch: i64, account: &str, sender: &str, boxed: &str) -> rusqlite::Result<()> {
+        self.conn().execute("INSERT OR IGNORE INTO keys (doc, epoch, account, sender, box) VALUES (?1, ?2, ?3, ?4, ?5)", params![doc, epoch, account, sender, boxed])?;
+        Ok(())
+    }
+
+    /// Kisten für ein Konto: (Epoche, Absender, Kiste)
+    pub fn keys_for(&self, doc: &str, account: &str) -> rusqlite::Result<Vec<(i64, String, String)>> {
+        let c = self.conn();
+        let mut s = c.prepare("SELECT epoch, sender, box FROM keys WHERE doc = ?1 AND account = ?2 ORDER BY epoch")?;
+        let rows = s.query_map(params![doc, account], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+        rows.collect()
+    }
+
+    pub fn max_epoch(&self, doc: &str) -> i64 {
+        self.conn().query_row("SELECT COALESCE(MAX(epoch), 0) FROM keys WHERE doc = ?1", [doc], |r| r.get(0)).unwrap_or(0)
+    }
+
+    /// Konten, die für `epoch` schon eine Kiste haben.
+    pub fn key_holders(&self, doc: &str, epoch: i64) -> rusqlite::Result<Vec<String>> {
+        let c = self.conn();
+        let mut s = c.prepare("SELECT account FROM keys WHERE doc = ?1 AND epoch = ?2")?;
+        let rows = s.query_map(params![doc, epoch], |r| r.get(0))?;
+        rows.collect()
     }
 
     // ---------- Identität des Servers ----------

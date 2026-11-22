@@ -16,6 +16,8 @@ export interface MembersInfo {
   state: AdminState | null
   /** offene Beitrittsanfragen (nur für Admins) */
   requests: JoinRequest[]
+  /** Das Dokument ist auf dem Server als Ende-zu-Ende-verschlüsselt angelegt. */
+  enc: boolean
 }
 
 const fail = async (r: Response, what: string) => {
@@ -27,11 +29,11 @@ export async function fetchMembers(server: string, doc: string): Promise<Members
   const r = await authedFetch(server, `/docs/${doc}/members`)
   if (!r.ok) throw await fail(r, 'Mitglieder')
   const b = await r.json()
-  return { role: b.role, entries: b.entries, requests: b.requests, state: b.entries.length ? replay(doc, b.entries) : null }
+  return { role: b.role, entries: b.entries, requests: b.requests, enc: !!b.enc, state: b.entries.length ? replay(doc, b.entries) : null }
 }
 
-async function post(server: string, doc: string, e: AdminEntry) {
-  const r = await authedFetch(server, `/docs/${doc}/admin`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(e) })
+async function post(server: string, doc: string, e: AdminEntry, enc = false) {
+  const r = await authedFetch(server, `/docs/${doc}/admin`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(enc ? { 'X-Grid-Enc': '1' } : {}) }, body: JSON.stringify(e) })
   if (r.status === 409) return false // zwischendurch hat jemand anderes etwas eingetragen
   if (!r.ok) throw await fail(r, 'Eintrag')
   return true
@@ -95,7 +97,7 @@ export async function requestJoin(server: string, doc: string): Promise<'member'
  * Dokument auf diesem Server anlegen. Ist das Admin-Protokoll aus einem früheren Zuhause bekannt (steht in der Datei),
  * zieht es komplett um, damit Mitglieder und Rollen bleiben; sonst gründet der Ersteller ein neues.
  */
-export async function claimDocument(server: string, doc: string, localLog?: AdminEntry[]): Promise<void> {
+export async function claimDocument(server: string, doc: string, localLog?: AdminEntry[], enc = false): Promise<void> {
   const me = await getIdentity()
   if (localLog && localLog.length > 0) {
     let state: AdminState
@@ -108,7 +110,7 @@ export async function claimDocument(server: string, doc: string, localLog?: Admi
     return
   }
   const genesis = buildEntry(me, emptyState(), doc, 'genesis', { id: me.id, pub: me.publicKey }, 'admin', getAccountName())
-  if (!(await post(server, doc, genesis))) throw new Error('Das Dokument konnte nicht angelegt werden')
+  if (!(await post(server, doc, genesis, enc))) throw new Error('Das Dokument konnte nicht angelegt werden')
 }
 
 /** Umzug auf einen anderen Server ankündigen (Eintrag im Admin-Protokoll, damit alle Mitglieder es sehen und prüfen können). */
