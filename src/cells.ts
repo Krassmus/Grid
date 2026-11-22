@@ -4,11 +4,12 @@
  */
 import * as Y from 'yjs'
 import { reprMap } from './repr'
-import { buildFileIndex, buildLinkIndex, isComputed, tablesOf, type ColumnInfo, type TableInfo, type ViewAgg } from './model'
-import { formatDate } from './dateFormat'
+import { buildFileIndex, buildLinkIndex, isComputed, parseStamp, personIds, personName, tablesOf, type ColumnInfo, type TableInfo, type ViewAgg } from './model'
+import { floatingFromMs, formatDate } from './dateFormat'
 import { decodeGeo, formatGeo } from './geo'
 import { plainText } from './richText'
-import { DATE, FORMULA, GEO, NUMBER, ROLLUP, TEMPLATE, TEXT, effectiveType } from './columnTypes'
+import { DATE, DURATION, FORMULA, GEO, NUMBER, ROLLUP, STAMP, TEMPLATE, TEXT, effectiveType } from './columnTypes'
+import { formatDuration } from './duration'
 import { FormulaSyntaxError, parseFormula, parseTemplate, type Node } from './formula'
 import { allowedAggs, type FooterFn } from './aggregate'
 
@@ -20,6 +21,7 @@ export const compareKeys = (a: number | string, b: number | string): number =>
   typeof a === 'number' && typeof b === 'number' ? a - b : collator.compare(String(a), String(b))
 
 export function fmtNumber(n: number, col: ColumnInfo): string {
+  if (col.type === 'duration') return formatDuration(n, DURATION.config(col).format)
   const cfg = col.type === 'number' ? NUMBER.config(col) : { decimals: -1, unit: '' }
   const s = cfg.decimals >= 0 ? n.toFixed(cfg.decimals) : String(Number(n.toPrecision(12)))
   return cfg.unit ? `${s} ${cfg.unit}` : s
@@ -120,6 +122,24 @@ function plainCells(doc: Y.Doc, tables: TableInfo[], table: TableInfo, col: Colu
         if (g) { text = formatGeo(g, GEO.config(col).format); key = g.lat }
         break
       }
+      case 'duration':
+        if (typeof raw === 'number') { text = fmtNumber(raw, col); key = raw }
+        break
+      case 'stamp': { // Sortierung nach Zeit; der Name steht nur im Text
+        const st = parseStamp(raw)
+        if (st) {
+          const name = STAMP.config(col).by ? personName(doc, st.account) : ''
+          text = formatDate(floatingFromMs(st.at), 'short', true) + (name ? ` · ${name}` : '')
+          key = st.at
+        }
+        break
+      }
+      case 'person': {
+        const names = personIds(raw).map((id) => personName(doc, id) || 'Unbekannt')
+        text = names.join(', ')
+        key = names[0] ?? null
+        break
+      }
       case 'autonumber': { const n = rank!.get(rid)!; out.set(rid, { raw: n, text: String(n), key: n }); continue }
       case 'checkbox': text = raw ? '✓' : ''; key = raw ? 1 : 0; break // nicht angehakt zählt als 0, nie als leer
       case 'relation': {
@@ -165,7 +185,7 @@ function valueOf(col: ColumnInfo, c: Cell | undefined): Val {
   if (!c) return null
   if (c.error) return new FErr(c.text, c.error)
   switch (col.type) {
-    case 'number': return typeof c.key === 'number' ? c.key : null
+    case 'number': case 'duration': return typeof c.key === 'number' ? c.key : null
     case 'checkbox': return !!c.raw
     case 'date': return typeof c.key === 'string' ? c.key : null
     case 'rollup': case 'formula': case 'template': return (c.raw as Val) ?? null
@@ -444,7 +464,7 @@ export function summarizeGroup(cells: Cell[], col: ColumnInfo, agg: ViewAgg): { 
   switch (agg.fn) {
     case 'sum': {
       const sum = cells.reduce((n, c) => n + (typeof c.key === 'number' ? c.key : 0), 0)
-      return { text: col.type === 'number' ? fmtNumber(sum, col) : String(Number(sum.toPrecision(12))), key: sum }
+      return { text: col.type === 'number' || col.type === 'duration' ? fmtNumber(sum, col) : String(Number(sum.toPrecision(12))), key: sum }
     }
     case 'count': {
       const n = cells.filter((c) => c.text !== '').length

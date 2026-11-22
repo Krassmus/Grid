@@ -6,6 +6,8 @@ import { Pill } from './SelectCell'
 import { aggLabel, allowedAggs } from './aggregate'
 import { FormulaEditor, TemplateEditor } from './FormulaEditor'
 import { GEO_FORMATS, type GeoFormat } from './geo'
+import type { DurationFormat } from './duration'
+import type { LinkKind } from './link'
 import { FormulaSyntaxError, inferType, parseFormula } from './formula'
 
 /** Was ein Konfigurationseditor braucht, um die Einstellungen einer Spalte anzuzeigen und zu ändern. */
@@ -297,6 +299,82 @@ class AutonumberColumn extends ColumnType<AutonumberConfig> {
   }
 }
 
+/** Zeitstempel: trägt selbst ein, wann die Zeile angelegt oder zuletzt geändert wurde (und von wem). Nicht bearbeitbar. */
+export interface StampConfig { kind: 'created' | 'modified'; by: boolean }
+class StampColumn extends ColumnType<StampConfig> {
+  readonly type = 'stamp'
+  readonly label = 'Zeitstempel'
+  readonly defaults: StampConfig = { kind: 'created', by: true }
+  renderConfig({ config, set }: ConfigContext<StampConfig>) {
+    return (
+      <>
+        <Field label="Zeitpunkt">
+          <select value={config.kind} onChange={(e) => set({ kind: e.target.value as StampConfig['kind'] })}>
+            <option value="created">Erstellt</option>
+            <option value="modified">Zuletzt geändert</option>
+          </select>
+        </Field>
+        <Check checked={config.by} onChange={(by) => set({ by })}>Name der Person anzeigen</Check>
+        <p className="hint">Wird automatisch eingetragen und lässt sich nicht bearbeiten. Zeilen, die es schon vor dieser Spalte gab, bleiben leer, „Zuletzt geändert“ füllt sich mit der nächsten Änderung. Verknüpfungen und Dateien zählen dabei nicht als Änderung der Zeile.</p>
+      </>
+    )
+  }
+}
+
+/** Person: ein Mitglied (oder mehrere) des Dokuments, mit Avatar. Gespeichert werden die Konto-Kennungen. */
+export interface PersonConfig { multi: boolean }
+class PersonColumn extends ColumnType<PersonConfig> {
+  readonly type = 'person'
+  readonly label = 'Person'
+  readonly defaults: PersonConfig = { multi: false }
+  renderConfig({ config, set }: ConfigContext<PersonConfig>) {
+    return (
+      <>
+        <Check checked={config.multi} onChange={(multi) => set({ multi })}>Mehrere Personen pro Zeile</Check>
+        <p className="hint">Zur Auswahl stehen die Mitglieder, die das Dokument geöffnet haben (Name und Avatar aus dem Konto).</p>
+      </>
+    )
+  }
+}
+
+/** Link: Web-Adresse, E-Mail oder Telefonnummer; ein Klick auf das Symbol öffnet sie. */
+export interface LinkConfig { kind: LinkKind }
+class LinkColumn extends ColumnType<LinkConfig> {
+  readonly type = 'link'
+  readonly label = 'Link'
+  readonly defaults: LinkConfig = { kind: 'url' }
+  renderConfig({ config, set }: ConfigContext<LinkConfig>) {
+    return (
+      <Field label="Art">
+        <select value={config.kind} onChange={(e) => set({ kind: e.target.value as LinkKind })}>
+          <option value="url">Web-Adresse</option>
+          <option value="email">E-Mail-Adresse</option>
+          <option value="phone">Telefonnummer</option>
+        </select>
+      </Field>
+    )
+  }
+}
+
+/** Dauer: gespeichert in Sekunden; Eingabe wie „1:30“, „90m“ oder „1,5 h“. Rechnet wie eine Zahl (Summe in der Fußzeile). */
+export interface DurationConfig { format: DurationFormat }
+class DurationColumn extends ColumnType<DurationConfig> {
+  readonly type = 'duration'
+  readonly label = 'Dauer'
+  readonly defaults: DurationConfig = { format: 'hm' }
+  renderConfig({ config, set }: ConfigContext<DurationConfig>) {
+    return (
+      <Field label="Anzeige">
+        <select value={config.format} onChange={(e) => set({ format: e.target.value as DurationFormat })}>
+          <option value="hm">Stunden:Minuten (1:30)</option>
+          <option value="hms">Stunden:Minuten:Sekunden (1:30:00)</option>
+        </select>
+        <small className="hint">Eingabe zum Beispiel „1:30“, „90m“, „1h 30m“ oder „1,5 h“. Eine nackte Zahl zählt als Minuten. In Formeln zählt die Dauer in Sekunden.</small>
+      </Field>
+    )
+  }
+}
+
 export const TEXT = new TextColumn()
 export const NUMBER = new NumberColumn()
 export const RELATION = new RelationColumn()
@@ -309,8 +387,12 @@ export const FORMULA = new FormulaColumn()
 export const TEMPLATE = new TemplateColumn()
 export const GEO = new GeoColumn()
 export const AUTONUMBER = new AutonumberColumn()
+export const STAMP = new StampColumn()
+export const PERSON = new PersonColumn()
+export const LINK = new LinkColumn()
+export const DURATION = new DurationColumn()
 
-const REGISTRY: Record<ColType, ColumnType<any>> = { text: TEXT, number: NUMBER, relation: RELATION, file: FILE, select: SELECT, date: DATE, checkbox: CHECKBOX, rollup: ROLLUP, formula: FORMULA, template: TEMPLATE, geo: GEO, autonumber: AUTONUMBER }
+const REGISTRY: Record<ColType, ColumnType<any>> = { text: TEXT, number: NUMBER, relation: RELATION, file: FILE, select: SELECT, date: DATE, checkbox: CHECKBOX, rollup: ROLLUP, formula: FORMULA, template: TEMPLATE, geo: GEO, autonumber: AUTONUMBER, stamp: STAMP, person: PERSON, link: LINK, duration: DURATION }
 export const columnTypeOf = (type: ColType): ColumnType<any> => REGISTRY[type]
 
 /**
@@ -320,7 +402,8 @@ export const columnTypeOf = (type: ColType): ColumnType<any> => REGISTRY[type]
 export function effectiveType(col: ColumnInfo, tables: TableInfo[], depth = 0): ColType {
   if (col.type === 'formula') return formulaType(col, tables, depth)
   if (col.type === 'template') return 'text'
-  if (col.type === 'autonumber') return 'number'
+  if (col.type === 'autonumber' || col.type === 'duration') return 'number'
+  if (col.type === 'stamp' || col.type === 'person' || col.type === 'link') return 'text'
   if (col.type !== 'rollup') return col.type
   if (depth > 4) return 'text'
   const cfg = ROLLUP.config(col)

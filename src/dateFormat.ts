@@ -98,3 +98,9 @@ export function parseDateInput(text: string, today: Date = new Date()): { date: 
   const date = isoDate(y, mo, d)
   return date ? { date, time } : null
 }
+
+/** Zeitpunkt (Millisekunden) als schwebender Text in der Ortszeit: `2026-11-17T14:30`. */
+export function floatingFromMs(ms: number): string {
+  const d = new Date(ms)
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`
+}

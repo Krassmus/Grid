@@ -25,6 +25,10 @@ export const OPS_BY_TYPE: Record<ColType, FilterOp[]> = {
   template: [],
   autonumber: [], // zählt mit dem effektiven Typ (Zahl)
   geo: ['contains', 'ncontains', 'empty', 'nempty'], // „contains“ sucht im angezeigten Text
+  stamp: ['contains', 'ncontains', 'empty', 'nempty'],
+  person: ['contains', 'ncontains', 'empty', 'nempty'],
+  link: ['eq', 'ne', 'contains', 'ncontains', 'starts', 'empty', 'nempty'],
+  duration: [], // zählt mit dem effektiven Typ (Zahl)
 }
 
 export const opNeedsValue = (op: FilterOp) => !['empty', 'nempty', 'checked', 'unchecked'].includes(op)

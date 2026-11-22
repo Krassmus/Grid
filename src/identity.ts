@@ -39,7 +39,7 @@ let cached: Promise<Identity> | null = null
 const listeners = new Set<() => void>()
 
 /** Nur für Tests. */
-export function useKeyStore(s: KeyStore | null) { store = s ?? defaultStore; cached = null }
+export function useKeyStore(s: KeyStore | null) { store = s ?? defaultStore; cached = null; known = '' }
 /** Meldet, wenn das Konto ersetzt wurde (Import). */
 export const onIdentityChanged = (fn: () => void) => { listeners.add(fn); return () => { listeners.delete(fn) } }
 
@@ -69,6 +69,10 @@ function parse(text: string): Identity {
 
 // ---------- Konto laden/anlegen ----------
 
+/** Kennung des Kontos, sobald es geladen ist (für Stellen, die nicht warten können, z. B. beim Eintragen von Änderungen); sonst leer. */
+export const accountIdNow = (): string => known
+let known = ''
+
 /** Das Konto dieses Geräts; wird beim ersten Aufruf angelegt. */
 export function getIdentity(): Promise<Identity> {
   cached ??= (async () => {
@@ -77,7 +81,7 @@ export function getIdentity(): Promise<Identity> {
     const fresh = make(crypto.randomUUID(), ed25519.utils.randomSecretKey())
     await store.save(serialize(fresh))
     return fresh
-  })().catch((e) => { cached = null; throw e })
+  })().then((i) => { known = i.id; return i }).catch((e) => { cached = null; throw e })
   return cached
 }
 
@@ -126,7 +130,7 @@ export async function importAccount(text: string, pass: string): Promise<Identit
   } catch { throw new Error('Passwort falsch oder Text beschädigt') }
   const id = parse(new TextDecoder().decode(plain))
   await store.save(serialize(id))
-  cached = Promise.resolve(id)
+  cached = Promise.resolve(id); known = id.id
   listeners.forEach((f) => f())
   return id
 }

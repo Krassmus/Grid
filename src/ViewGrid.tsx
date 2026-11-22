@@ -5,7 +5,7 @@ import { orderByKeys, type SortDir } from './sorting'
 import { computeView } from './viewEngine'
 
 const widthOf = (type: string, w?: number) =>
-  w ? `${w}px` : type === 'relation' || type === 'file' ? '240px' : type === 'number' ? '120px' : type === 'date' ? '170px' : type === 'checkbox' ? '110px' : type === 'select' ? '160px' : '180px'
+  w ? `${w}px` : type === 'relation' || type === 'file' ? '240px' : type === 'number' || type === 'duration' ? '120px' : type === 'stamp' ? '200px' : type === 'person' || type === 'link' ? '190px' : type === 'date' ? '170px' : type === 'checkbox' ? '110px' : type === 'select' ? '160px' : '180px'
 
 /** Schreibgeschützte Darstellung einer abgeleiteten Tabelle; Sortieren ist möglich (nur Ansicht, wie bei normalen Tabellen). */
 export function ViewGrid({ doc, view }: { doc: Y.Doc; view: ViewInfo }) {

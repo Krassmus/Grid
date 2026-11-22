@@ -3,14 +3,16 @@ import * as Y from 'yjs'
 import { addFile, addLink, createRecord, isComputed, removeFile, removeLink, setCell, type CellValue, type ColumnInfo, type FileRef, type TableInfo } from './model'
 import { storeFile, thumbKey } from './blobStore'
 import { useBlobUrl } from './FileCell'
-import { CHECKBOX, DATE, FILE, GEO, NUMBER, TEXT } from './columnTypes'
+import { CHECKBOX, DATE, DURATION, FILE, GEO, LINK, NUMBER, PERSON, TEXT } from './columnTypes'
+import { DurationField, PersonField } from './NewCells'
+import { personIds } from './model'
 import { GEO_FORMATS, encodeGeo, decodeGeo, formatGeo, parseGeo } from './geo'
 import { DatePicker } from './DatePicker'
 import { Modal } from './Modal'
 import { RichField } from './richText'
 
 /** Spalten, die im Formular ausgefüllt werden können; Berechnetes und Ausgeblendetes nicht. */
-export const formColumns = (table: TableInfo): ColumnInfo[] => table.columns.filter((c) => !isComputed(c) && c.type !== 'autonumber' && !c.hidden)
+export const formColumns = (table: TableInfo): ColumnInfo[] => table.columns.filter((c) => !isComputed(c) && c.type !== 'autonumber' && c.type !== 'stamp' && !c.hidden)
 
 /** Zusätzlich zu den Zellwerten: gewählte Dateien und Verknüpfungen, je Spalte. */
 export interface RecordExtras {
@@ -138,6 +140,8 @@ export const firstTextColumn = (table: TableInfo): ColumnInfo | undefined =>
  * Es wird nichts gespeichert, bevor „Anlegen“ gedrückt wird.
  */
 export function RecordForm(props: {
+  /** Für die Personenauswahl */
+  doc?: Y.Doc
   table: TableInfo
   title: string
   initial?: Record<string, CellValue>
@@ -149,7 +153,7 @@ export function RecordForm(props: {
   onSubmit: (values: Record<string, CellValue>, extras: RecordExtras) => void | Promise<void>
   onClose: () => void
 }) {
-  const cols = formColumns(props.table).filter((c) => c.type !== 'relation' || props.relationField)
+  const cols = formColumns(props.table).filter((c) => (c.type !== 'relation' || props.relationField) && (c.type !== 'person' || props.doc))
   const [files, setFiles] = useState<Record<string, File[]>>({})
   const [rels, setRels] = useState<Record<string, string[]>>(() => ({ ...(props.existing?.relations ?? {}) }))
   const [removedFiles, setRemovedFiles] = useState<Record<string, string[]>>({})
@@ -217,6 +221,15 @@ export function RecordForm(props: {
             {(c.options ?? []).map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
           </select>
         )
+      case 'link': {
+        const kind = LINK.config(c).kind
+        return <input autoFocus={first} type="text" value={typeof v === 'string' ? v : ''} spellCheck={false} autoCapitalize="off" inputMode={kind === 'email' ? 'email' : kind === 'phone' ? 'tel' : 'url'}
+          onChange={(e) => set(c.id, e.target.value)} />
+      }
+      case 'duration':
+        return <DurationField autoFocus={first} value={v} format={DURATION.config(c).format} onChange={(n) => set(c.id, n)} />
+      case 'person':
+        return <PersonField doc={props.doc!} multi={PERSON.config(c).multi} ids={personIds(v)} onChange={(ids) => set(c.id, ids.length ? ids.join(',') : null)} />
       case 'checkbox':
         return (
           <label className="cfg-check">

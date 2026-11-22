@@ -81,5 +81,11 @@
 			</dict>
 		</dict>
 	</array>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Grid trägt auf Wunsch Ihren aktuellen Standort in eine Geokoordinate ein.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+	</array>
 </dict>
 </plist>

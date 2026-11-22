@@ -1,3 +1,4 @@
+import { DurationInput, LinkInput, PersonCell } from './NewCells'
 import { currentTracking, stopTracking, useTracking } from './tracking'
 import { useCallback, useLayoutEffect, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import * as Y from 'yjs'
@@ -140,7 +141,7 @@ function Picker(props: {
           <button type="button" onClick={props.onClose}>Fertig</button>
         </div>
         {creating && (
-          <RecordForm table={props.target} title={`Neuer Datensatz in „${props.target.name}“`}
+          <RecordForm doc={props.doc} table={props.target} title={`Neuer Datensatz in „${props.target.name}“`}
             initial={q.trim() && firstTextColumn(props.target) ? { [firstTextColumn(props.target)!.id]: q.trim() } : undefined}
             onClose={() => setCreating(false)}
             relationField={(col, ids, update) => <RelationDraftField doc={props.doc} tables={props.tables} col={col} ids={ids} update={update} />}
@@ -175,7 +176,7 @@ function EditRecordDialog(props: { doc: Y.Doc; tables: TableInfo[]; table: Table
     return { values, existing }
   })
   return (
-    <RecordForm table={table} title={`„${title}“ bearbeiten`} submitLabel="Speichern" initial={snap.values} existing={snap.existing}
+    <RecordForm doc={doc} table={table} title={`„${title}“ bearbeiten`} submitLabel="Speichern" initial={snap.values} existing={snap.existing}
       onClose={props.onClose}
       relationField={(col, ids, update) => <RelationDraftField doc={doc} tables={tables} col={col} ids={ids} update={update} rowId={rowId} />}
       onSubmit={async (values, extras) => {
@@ -452,6 +453,9 @@ function Cell({ doc, table, rowId, col }: { doc: Y.Doc; table: string; rowId: st
   if (col.type === 'geo') return <GeoCell doc={doc} tableId={table} rowId={rowId} col={col} />
   if (col.type === 'checkbox') return <CheckboxInput doc={doc} table={table} rowId={rowId} col={col} value={value} />
   if (col.type === 'date') return <DateInput doc={doc} table={table} rowId={rowId} col={col} value={value} />
+  if (col.type === 'link') return <LinkInput doc={doc} table={table} rowId={rowId} col={col} value={value} />
+  if (col.type === 'duration') return <DurationInput doc={doc} table={table} rowId={rowId} col={col} value={value} />
+  if (col.type === 'person') return <PersonCell doc={doc} table={table} rowId={rowId} col={col} value={value} />
   return <TextInput doc={doc} table={table} rowId={rowId} col={col} value={value} />
 }
 
@@ -736,7 +740,7 @@ export function ClientPane(props: {
     const r = new Map<string, Map<string, Repr>>()
     if (!table) return { cellData: m, reprs: r }
     const ctx = newCtx() // gemeinsamer Zwischenspeicher: jede Spalte (auch von Formeln benutzte) wird nur einmal berechnet
-    for (const c of table.columns) if (isComputed(c) || c.type === 'autonumber' || c.footer) m.set(c.id, columnCells(doc, tables, table, c, ctx))
+    for (const c of table.columns) if (isComputed(c) || c.type === 'autonumber' || c.type === 'stamp' || c.footer) m.set(c.id, columnCells(doc, tables, table, c, ctx))
     // Darstellung der Zeilen für alles, was hier als Kachel erscheint: Ziele der Relationen, Quellen der Rückverweise, die Tabelle selbst
     const wanted = new Set<string>([table.id])
     for (const c of table.columns) if (c.type === 'relation' && c.target) wanted.add(c.target)
@@ -868,7 +872,7 @@ export function ClientPane(props: {
   const template = table
     ? [
         ...shownColumns.map((c, i) =>
-          liveWidth?.id === c.id ? `${liveWidth.w}px` : c.width ? `${c.width}px` : i === 0 ? '200px' : c.type === 'relation' || c.type === 'file' ? '240px' : c.type === 'number' || c.type === 'autonumber' ? '120px' : c.type === 'date' ? '170px' : c.type === 'checkbox' ? '110px' : isComputed(c) ? '150px' : c.type === 'geo' ? (c.config?.format === 'map' ? '240px' : '210px') : c.type === 'select' ? '160px' : '180px'),
+          liveWidth?.id === c.id ? `${liveWidth.w}px` : c.width ? `${c.width}px` : i === 0 ? '200px' : c.type === 'relation' || c.type === 'file' ? '240px' : c.type === 'number' || c.type === 'autonumber' ? '120px' : c.type === 'duration' ? '110px' : c.type === 'stamp' ? '200px' : c.type === 'person' || c.type === 'link' ? '190px' : c.type === 'date' ? '170px' : c.type === 'checkbox' ? '110px' : isComputed(c) ? '150px' : c.type === 'geo' ? (c.config?.format === 'map' ? '240px' : '210px') : c.type === 'select' ? '160px' : '180px'),
         ...backlinks.map(() => '220px'),
         'minmax(120px, 1fr)',
       ].join(' ')
@@ -998,7 +1002,7 @@ export function ClientPane(props: {
                 <div key={rid} className="row-outer" data-row={rid}>
                   <div className="row-inner">
                     {shownColumns.map((c, i) =>
-                      isComputed(c) || c.type === 'autonumber'
+                      isComputed(c) || c.type === 'autonumber' || c.type === 'stamp'
                         ? (() => {
                             const cell = cellData.get(c.id)?.get(rid)
                             return (
@@ -1223,6 +1227,10 @@ function Dialog(props: {
             <option value="formula">Formel (Berechnung aus anderen Spalten)</option>
             <option value="geo">Geokoordinate</option>
             <option value="autonumber">Aufsteigende Zahl (nicht bearbeitbar)</option>
+            <option value="stamp">Zeitstempel (erstellt / geändert, automatisch)</option>
+            <option value="person">Person (Mitglied des Dokuments)</option>
+            <option value="link">Link (Web, E-Mail, Telefon)</option>
+            <option value="duration">Dauer (Stunden:Minuten)</option>
             <option value="template">Text mit Platzhaltern {'({{…}})'}</option>
             <option value="rollup" disabled={!props.table || relations.length === 0}>Rollup (Summe u. a. über verknüpfte Zeilen)</option>
           </select>

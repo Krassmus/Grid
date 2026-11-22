@@ -1,4 +1,5 @@
 import * as Y from 'yjs'
+import { accountIdNow, getAccountName } from './identity'
 
 /**
  * Datenmodell im Yjs-Dokument:
@@ -26,7 +27,7 @@ import * as Y from 'yjs'
  *     (siehe blobStore.ts) und werden später separat mit dem Server abgeglichen.
  */
 
-export type ColType = 'text' | 'number' | 'relation' | 'file' | 'select' | 'date' | 'checkbox' | 'rollup' | 'formula' | 'template' | 'geo' | 'autonumber'
+export type ColType = 'text' | 'number' | 'relation' | 'file' | 'select' | 'date' | 'checkbox' | 'rollup' | 'formula' | 'template' | 'geo' | 'autonumber' | 'stamp' | 'person' | 'link' | 'duration'
 export type CellValue = string | number | null
 
 export interface SelectOption { id: string; name: string; color: string }
@@ -153,6 +154,7 @@ export function addRow(doc: Y.Doc, tableId: string): string {
     t.get('rows').set(id, row)
     t.get('rowOrder').push([id])
     for (const [cid, c] of t.get('cols').entries()) if ((c as Y.Map<any>).get('type') === 'autonumber') row.set(cid, nextStamp(t.get('rows'), cid))
+    touchStamps(t, row, true)
   })
   return id
 }
@@ -168,8 +170,39 @@ export function deleteRow(doc: Y.Doc, tableId: string, rowId: string) {
 }
 
 export function setCell(doc: Y.Doc, tableId: string, rowId: string, colId: string, value: CellValue) {
-  const row: Y.Map<any> | undefined = tablesOf(doc).get(tableId)?.get('rows').get(rowId)
-  row?.set(colId, value)
+  const t = tablesOf(doc).get(tableId)
+  const row: Y.Map<any> | undefined = t?.get('rows').get(rowId)
+  if (!t || !row) return
+  doc.transact(() => {
+    row.set(colId, value)
+    if (t.get('cols').get(colId)?.get('type') !== 'stamp') touchStamps(t, row, false)
+  })
+}
+
+// ---------- Zeitstempel („Erstellt“ / „Zuletzt geändert“, mit Konto) ----------
+
+/** Wert einer Zeitstempel-Zelle: `<Millisekunden>|<Konto>` (so steht auch dabei, wer es war). */
+export const stampValue = (at: number, account: string) => `${at}|${account}`
+export function parseStamp(v: unknown): { at: number; account: string } | null {
+  if (typeof v !== 'string') return null
+  const i = v.indexOf('|')
+  const at = Number(i < 0 ? v : v.slice(0, i))
+  return Number.isFinite(at) && at > 0 ? { at, account: i < 0 ? '' : v.slice(i + 1) } : null
+}
+/** „Zuletzt geändert“ wird höchstens so oft neu geschrieben (Tippen erzeugt sonst bei jedem Zeichen eine zweite Änderung). */
+const STAMP_MIN_MS = 30_000
+
+/** Trägt in alle Zeitstempel-Spalten der Zeile die aktuelle Zeit ein: beim Anlegen alle, bei Änderungen nur „Zuletzt geändert“. */
+function touchStamps(t: Y.Map<any>, row: Y.Map<any>, creating: boolean) {
+  const now = Date.now(), me = accountIdNow()
+  for (const [cid, c] of t.get('cols').entries() as Iterable<[string, Y.Map<any>]>) {
+    if (c.get('type') !== 'stamp') continue
+    const kind = c.get(CFG + 'kind') ?? 'created'
+    if (kind === 'created' && !creating) continue
+    const cur = parseStamp(row.get(cid))
+    if (!creating && cur && cur.account === me && now - cur.at < STAMP_MIN_MS) continue
+    row.set(cid, stampValue(now, me))
+  }
 }
 
 export function getCell(doc: Y.Doc, tableId: string, rowId: string, colId: string): CellValue {
@@ -452,7 +485,7 @@ export interface RowSummary { title: string; subs: string[] }
 export function summarize(doc: Y.Doc, table: TableInfo, rowId: string): RowSummary {
   const row: Y.Map<any> | undefined = tablesOf(doc).get(table.id)?.get('rows').get(rowId)
   const vals = table.columns
-    .filter((c) => c.type !== 'relation' && c.type !== 'file' && c.type !== 'checkbox' && c.type !== 'geo' && c.type !== 'autonumber' && !isComputed(c))
+    .filter((c) => c.type !== 'relation' && c.type !== 'file' && c.type !== 'checkbox' && c.type !== 'geo' && c.type !== 'autonumber' && c.type !== 'stamp' && c.type !== 'person' && c.type !== 'duration' && !isComputed(c))
     .map((c) => {
       const v = row?.get(c.id)
       if (c.type === 'select') return c.options?.find((o) => o.id === v)?.name ?? ''
@@ -662,3 +695,13 @@ export function publishProfile(doc: Y.Doc, account: string, p: MemberProfile) {
   if (cur && cur.name === p.name && cur.avatar === p.avatar) return
   profilesOf(doc).set(account, { name: p.name, avatar: p.avatar })
 }
+
+/** Anzeigename eines Kontos im Dokument: das eingetragene Profil, für das eigene Konto notfalls der lokale Name. */
+export function personName(doc: Y.Doc, account: string): string {
+  const n = profilesOf(doc).get(account)?.name
+  if (n) return n
+  return account && account === accountIdNow() ? getAccountName() : ''
+}
+
+/** Kennungen aus einer Personen-Zelle (kommagetrennt gespeichert). */
+export const personIds = (v: unknown): string[] => (typeof v === 'string' ? v.split(',').filter(Boolean) : [])
