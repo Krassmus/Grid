@@ -101,11 +101,21 @@ function Picker(props: {
   const [q, setQ] = useState('')
   const [creating, setCreating] = useState(false)
   const reprs = useReprs()
+  // Gesucht wird in der Darstellung (Titel, Untertitel) und in allen Spalten des Datensatzes, auch in ausgeblendeten
+  const needle = q.trim().toLowerCase()
+  const columnTexts = useMemo(() => {
+    if (!needle) return null
+    const ctx = newCtx()
+    return props.target.columns.map((c) => columnCells(props.doc, props.tables, props.target, c, ctx))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.doc, props.target, props.tables, needle])
   const rows = props.target.rowIds
     .filter((id) => !props.linked.includes(id) && !props.unavailable?.includes(id))
     .filter((id) => {
+      if (!needle) return true
       const s = reprs(props.target.id)?.get(id) ?? summarize(props.doc, props.target, id)
-      return [s.title, ...s.subs].join(' ').toLowerCase().includes(q.toLowerCase())
+      return [s.title, ...s.subs].join(' ').toLowerCase().includes(needle)
+        || !!columnTexts?.some((m) => (m.get(id)?.text ?? '').toLowerCase().includes(needle))
     })
   return (
     <Modal onClose={props.onClose}>

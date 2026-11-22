@@ -658,3 +658,7 @@ main.single { padding-top: env(safe-area-inset-top); padding-left: env(safe-area
 .item-menu button.danger { color: var(--c-c0392b); }
 .item-menu button:active { background: var(--c-e9edef); }
 @media (pointer: coarse) { .filechip, .tile { -webkit-touch-callout: none; } }
+
+/* Erste Spalte (Kopf, Zellen, Fuß) mit etwas mehr Abstand zum linken Rand */
+.grid-head > :first-child, .row-inner > :first-child { padding-left: 12px; }
+.addrow-bar { padding-left: 13px; } /* die Tabelle beginnt 1 px weiter rechts als die Leiste */
