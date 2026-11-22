@@ -14,6 +14,7 @@ import { ColumnDialog } from './ColumnDialog'
 import { DatePicker } from './DatePicker'
 import { SheetIcon } from './icons'
 import { useVirtualRows } from './virtualRows'
+import { useRowTransitions } from './rowTransitions'
 import { allowsMultiTarget, targetAvailable } from './relationRules'
 import { beginTileDrag, registerDropTarget, type DragPayload } from './tileDrag'
 import { computeView } from './viewEngine'
@@ -588,6 +589,8 @@ function SyncButton(props: { control: SyncControl; onClick: () => void }) {
 
 // ---------- Pane ----------
 
+const NO_ROWS: string[] = []
+
 export function ClientPane(props: {
   title: string
   doc: Y.Doc
@@ -849,6 +852,8 @@ export function ClientPane(props: {
   const visibleIds = useMemo(() => (matching ? rowIds.filter((id) => matching.has(id)) : rowIds), [rowIds, matching])
   // Große Tabellen: nur die Zeilen in und um den sichtbaren Bereich zeichnen
   const virt = useVirtualRows(visibleIds)
+  // Neue und gelöschte Zeilen gleiten ein bzw. aus (auch wenn sie von einem Abgleich kommen)
+  useRowTransitions(sectionRef, table?.id, table?.rowIds ?? NO_ROWS, visibleIds.slice(virt.start, virt.end).join('|'))
 
   // Nach „+ Zeile“: zur neuen Zeile scrollen und ihre erste Zelle fokussieren
   // `col`: Position der Spalte, deren Zelle den Fokus bekommt (ohne Angabe die erste)
