@@ -33,6 +33,7 @@ import { CHECKBOX, DATE, FILE, ROLLUP, NUMBER, RELATION, TEXT } from './columnTy
 import { RichPreview, RichTextDialog } from './richText'
 import { SyncDialog, syncLabel, type SyncControl } from './SyncDialog'
 import { isMobileUI } from './platform'
+import { ItemMenu, beginLongPress } from './ItemMenu'
 import { AnimItem, useAnimatedList } from './animatedList'
 import { ConfirmDialog, Modal } from './Modal'
 import { TableDialog } from './TableDialog'
@@ -57,6 +58,8 @@ function Tile(props: {
   display?: 'avatar' | 'full'
 }) {
   const { doc, table, rowId } = props
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
+  const touchMenu = isMobileUI && !!props.onRemove // statt des Kreuzes: langes Drücken öffnet ein Menü
   useRowVersion(doc, table?.id ?? '', rowId)
   const exists = !!table && rowExists(doc, table.id, rowId)
   const reprs = useReprs()
@@ -70,9 +73,12 @@ function Tile(props: {
     <div className={`tile ${tileClasses(s)} ${exists ? '' : 'deleted'} ${props.onClick ? 'clickable' : ''} ${props.muted ? 'muted' : ''} ${props.drag ? 'draggable' : ''}`}
       title={s && exists ? [s.title, ...s.subs].join('\n') : undefined} // Text der Darstellung als Tooltip (wichtig bei „nur Avatar“)
       onClick={props.onClick}
-      onPointerDown={props.drag ? (e) => beginTileDrag(e.nativeEvent, e.currentTarget, { slot: props.drag!.slot, targetRow: rowId, targetTable: props.drag!.targetTable }) : undefined}>
+      onContextMenu={touchMenu ? (e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY }) } : undefined}
+      onPointerDown={props.drag ? (e) => beginTileDrag(e.nativeEvent, e.currentTarget, { slot: props.drag!.slot, targetRow: rowId, targetTable: props.drag!.targetTable }, touchMenu ? (x, y) => setMenu({ x, y }) : undefined)
+        : touchMenu ? (e) => beginLongPress(e.nativeEvent, (x, y) => setMenu({ x, y })) : undefined}>
       {s ? <TileContent repr={s} /> : <div className="tile-body"><div className="tile-title">gelöscht</div></div>}
-      {props.onRemove && (
+      {menu && <ItemMenu x={menu.x} y={menu.y} label="Verknüpfung entfernen" onRemove={props.onRemove!} onClose={() => setMenu(null)} />}
+      {props.onRemove && !isMobileUI && (
         <button type="button" className="tile-x" title="Verknüpfung entfernen"
           onClick={(e) => { e.stopPropagation(); props.onRemove!() }}>✕</button>
       )}

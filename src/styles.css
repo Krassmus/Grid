@@ -651,3 +651,10 @@ main.single { padding-top: env(safe-area-inset-top); padding-left: env(safe-area
 @keyframes geo-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes geo-out { from { opacity: 1; } to { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .mapview .geo-tag-host.appearing > .geo-tag, .mapview .geo-tag-host.appearing > .geo-pin, .mapview .geo-tag-host.appearing::after, .mapview .geo-tag-host.leaving { animation: none; } }
+
+/* Kontextmenü zu einer Kachel / Datei (Touch: langes Drücken) */
+.item-menu { position: fixed; z-index: 2000; padding: 4px; background: var(--c-ffffff); border: 1px solid var(--c-d5dce0); border-radius: 12px; box-shadow: 0 8px 24px #0003; }
+.item-menu button { display: block; width: 100%; text-align: left; border: none; background: none; padding: 12px 18px; border-radius: 8px; font: inherit; font-size: 16px; color: var(--c-1f2a30); white-space: nowrap; }
+.item-menu button.danger { color: var(--c-c0392b); }
+.item-menu button:active { background: var(--c-e9edef); }
+@media (pointer: coarse) { .filechip, .tile { -webkit-touch-callout: none; } }

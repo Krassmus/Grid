@@ -50,7 +50,7 @@ const scrollParent = (el: Element | null): HTMLElement | null => {
  * Mit dem Finger: Kachel gedrückt halten, bis sie „abhebt“, dann ziehen; wer gleich wegwischt, scrollt nur. Ein zweiter Finger
  * auf dem Bildschirm wirkt wie die Umschalttaste (Kopieren).
  */
-export function beginTileDrag(down: PointerEvent, tile: HTMLElement, payload: DragPayload) {
+export function beginTileDrag(down: PointerEvent, tile: HTMLElement, payload: DragPayload, onHold?: (x: number, y: number) => void) {
   if (down.button !== 0) return
   const touch = down.pointerType === 'touch'
   if ((down.target as HTMLElement).closest('.tile-x')) return
@@ -148,8 +148,8 @@ export function beginTileDrag(down: PointerEvent, tile: HTMLElement, payload: Dr
     if (!touch) copy = e.shiftKey || e.altKey // maßgeblich ist der Zustand beim Loslassen
     // Touch: wer die Kachel nur hochgehoben und wieder losgelassen hat, lässt sie, wo sie ist
     const found = ghost && (!touch || travelled) ? targetAt(pos.x, pos.y, payload) : null
-    if (ghost) found?.t.drop(pos.x, pos.y, copy, payload)
-    hover = null // schon abgeschlossen: kein leave() mehr
+    if (ghost && found) { found.t.drop(pos.x, pos.y, copy, payload); hover = null } // abgeschlossen: kein leave() mehr
+    if (ghost && touch && !travelled) onHold?.(pos.x, pos.y) // nur hochgehalten und losgelassen: Kontextmenü
     end()
   }
   const cancel = (e?: PointerEvent) => { if (!e || e.pointerId === down.pointerId) end() }

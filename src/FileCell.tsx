@@ -4,6 +4,8 @@ import * as Y from 'yjs'
 import { addFile, moveFile, removeFile, type CellSlot, type ColumnInfo, type FileRef } from './model'
 import { getBlob, onBlobStored, storeFile, thumbKey, typedBlob } from './blobStore'
 import { ConfirmDialog, Modal } from './Modal'
+import { ItemMenu, beginLongPress } from './ItemMenu'
+import { isMobileUI } from './platform'
 import { AnimItem, useAnimatedList } from './animatedList'
 
 /** Aktuell gezogene Datei (dataTransfer ist in dragover nicht lesbar, daher Modulvariable). */
@@ -51,6 +53,7 @@ async function download(ref: FileRef): Promise<boolean> {
 
 function FileChip(props: { file: FileRef; slot: CellSlot; onOpen: () => void; onRemove: () => void }) {
   const { file } = props
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null) // Touch: langes Drücken statt Kreuz
   const [isDragging, setIsDragging] = useState(false)
   const isImage = file.mime.startsWith('image/')
   const { url, missing } = useBlobUrl(isImage ? [thumbKey(file.hash), file.hash] : [file.hash])
@@ -58,7 +61,9 @@ function FileChip(props: { file: FileRef; slot: CellSlot; onOpen: () => void; on
   const imageOnly = isImage && !!url
   return (
     <div className={`filechip ${imageOnly ? 'image-only' : ''} ${missing ? 'missing' : ''} ${isDragging ? 'dragging' : ''}`} onClick={props.onOpen}
-      draggable
+      draggable={!isMobileUI}
+      onPointerDown={isMobileUI ? (e) => beginLongPress(e.nativeEvent, (x, y) => setMenu({ x, y })) : undefined}
+      onContextMenu={isMobileUI ? (e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY }) } : undefined}
       onDragStart={(e) => {
         draggingFile = { slot: props.slot, file }
         e.dataTransfer.effectAllowed = 'copyMove'
@@ -71,8 +76,9 @@ function FileChip(props: { file: FileRef; slot: CellSlot; onOpen: () => void; on
         ? <img className="thumb" src={url!} alt={file.name} />
         : <div className="ext">{isImage ? 'BILD' : ext(file.name)}</div>}
       {!imageOnly && !isImage && <div className="file-name">{file.name}</div>}
-      <button type="button" className="tile-x" title="Datei entfernen"
-        onClick={(e) => { e.stopPropagation(); props.onRemove() }}>✕</button>
+      {menu && <ItemMenu x={menu.x} y={menu.y} label="Datei entfernen" onRemove={props.onRemove} onClose={() => setMenu(null)} />}
+      {!isMobileUI && <button type="button" className="tile-x" title="Datei entfernen"
+        onClick={(e) => { e.stopPropagation(); props.onRemove() }}>✕</button>}
     </div>
   )
 }
