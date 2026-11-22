@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
+import { useCallback, useLayoutEffect, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import * as Y from 'yjs'
 import { IndexeddbPersistence } from 'y-indexeddb'
 import {
@@ -187,6 +187,15 @@ function RelationDraftField(props: { doc: Y.Doc; tables: TableInfo[]; col: Colum
   )
 }
 
+function DropGap({ width, height }: { width: number; height: number }) {
+  const ref = useRef<HTMLElement>(null)
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (el && typeof el.animate === 'function') el.animate([{ width: '0px', opacity: 0 }, { width: `${width}px`, opacity: 1 }], { duration: 160, easing: 'ease-out' })
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  return <i ref={ref} className="drop-gap" style={{ width, height }} />
+}
+
 function RelationCell(props: {
   doc: Y.Doc
   tables: TableInfo[]
@@ -208,12 +217,12 @@ function RelationCell(props: {
   const sameSlot = (p: DragPayload) => p.slot.tableId === table.id && p.slot.rowId === rowId && p.slot.colId === col.id
   const cellRef = useRef<HTMLDivElement>(null)
   const tilesEl = useRef<HTMLDivElement>(null)
-  const [ins, setIns] = useState<{ left: number; top: number; height: number } | null>(null)
+  const [ins, setIns] = useState<{ index: number; width: number; height: number; lift: boolean } | null>(null)
   /** Einfügestelle unter dem Mauszeiger: Index unter den angezeigten Kacheln und die Zeile, vor der eingefügt wird (null = ans Ende). */
   const dropSpot = (x: number, y: number, p: DragPayload) => {
     const box = tilesEl.current
     if (!box) return null
-    const items = Array.from(box.children).filter((el) => !el.classList.contains('add-tile') && !el.classList.contains('drop-line')) as HTMLElement[]
+    const items = Array.from(box.children).filter((el) => !el.classList.contains('add-tile') && !el.classList.contains('drop-gap')) as HTMLElement[]
     const rects = items.map((el) => el.getBoundingClientRect())
     let i = rects.length
     for (let k = 0; k < rects.length; k++) {
@@ -224,14 +233,43 @@ function RelationCell(props: {
     const entries = anim.entries
     let before: string | null = null
     for (let k = i; k < entries.length; k++) if (entries[k].phase !== 'exit' && !(sameSlot(p) && entries[k].item === dragged)) { before = entries[k].item; break }
-    const c = box.getBoundingClientRect()
-    let line = null
-    if (rects.length) {
-      const r = rects[Math.min(i, rects.length - 1)]
-      line = { left: (i < rects.length ? r.left - 4 : r.right + 4) - c.left, top: r.top - c.top, height: r.height }
-    }
-    return { before, line }
+    // Platzhalter in Größe der gezogenen Kachel; liegt der Zeiger schon darauf, bleibt er, wo er ist (sonst zappelt er)
+    const ghost = document.querySelector('.tile-ghost')?.getBoundingClientRect()
+    const gap = box.querySelector('.drop-gap')?.getBoundingClientRect()
+    const onGap = !!gap && x >= gap.left && x <= gap.right && y >= gap.top && y <= gap.bottom
+    // das einzige Objekt der Zelle lässt sich nirgends sonst einsortieren: kein Platzhalter
+    const alone = sameSlot(p) && entries.filter((e) => e.phase !== 'exit').length <= 1
+    const line = ghost && !alone ? { index: i, width: ghost.width, height: ghost.height, lift: sameSlot(p) } : null
+    if (onGap) return { before, line: null, keep: true }
+    return { before, line, keep: false }
   }
+
+  // Beim Umsortieren in dieser Zelle verschwindet die Kachel in der Hand von ihrem Platz (der Platzhalter vertritt sie);
+  // alles, was der Platzhalter verschiebt, gleitet an seine neue Stelle.
+  const lifted = !!ins?.lift
+  useLayoutEffect(() => {
+    const el = tilesEl.current?.querySelector('.tile.dragging')?.closest('.anim-item')
+    if (!el || !lifted) return
+    el.classList.add('lifted')
+    return () => el.classList.remove('lifted')
+  }, [lifted])
+  const placed = useRef(new Map<Element, { x: number; y: number }>())
+  const wasIns = useRef(false)
+  useLayoutEffect(() => {
+    const box = tilesEl.current
+    if (!box) return
+    const next = new Map<Element, { x: number; y: number }>()
+    const calm = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
+    for (const el of Array.from(box.children) as HTMLElement[]) {
+      const at = { x: el.offsetLeft, y: el.offsetTop }
+      next.set(el, at)
+      const was = placed.current.get(el)
+      if (was && (ins || wasIns.current) && !calm && (Math.abs(was.x - at.x) > 1 || Math.abs(was.y - at.y) > 1))
+        el.animate([{ transform: `translate(${was.x - at.x}px, ${was.y - at.y}px)` }, { transform: 'none' }], { duration: 180, easing: 'ease-out' })
+    }
+    placed.current = next
+    wasIns.current = !!ins
+  })
 
   // Ohne „Zieldatensatz darf mehrfach verknüpft werden“ gehört ein Ziel zu höchstens einer Zeile: Ablegen nur, wenn es frei ist
   // (oder von der Quelle einer Verschiebung innerhalb derselben Spalte kommt)
@@ -242,7 +280,7 @@ function RelationCell(props: {
   // greifen auf den aktuellen Stand zu, darum wird bei jedem Zeichnen neu angemeldet.
   useEffect(() => cellRef.current ? registerDropTarget(cellRef.current, {
     accepts: (p) => !!col.target && p.targetTable === col.target && (sameSlot(p) || targetAvailable(index, col, p.targetRow, ignoreFor(p), exists)),
-    hover: (x, y, _copy, p) => { setOver(!sameSlot(p)); setIns(dropSpot(x, y, p)?.line ?? null) },
+    hover: (x, y, _copy, p) => { setOver(false); const s = dropSpot(x, y, p); if (s && !s.keep) setIns((o) => (o && s.line && o.index === s.line.index && o.lift === s.line.lift ? o : s.line)) },
     leave: () => { setOver(false); setIns(null) },
     drop: (x, y, copy, p) => {
       setOver(false)
@@ -256,16 +294,19 @@ function RelationCell(props: {
   return (
     <div ref={cellRef} className={`c rel ${over ? 'drop-over' : ''}`}>
       <div className="tiles" ref={tilesEl}>
-        {ins && <i className="drop-line" style={ins} />}
-        {anim.entries.map((e) => (
-          <AnimItem key={e.key} phase={e.phase} onExited={() => anim.done(e.key)}>
-            <Tile doc={doc} table={target} rowId={e.item}
-              display={RELATION.config(col).display === 'avatar' ? 'avatar' : undefined}
-              drag={{ slot, targetTable: col.target }}
-              onClick={() => setEditingRow(e.item)}
-              onRemove={() => removeLink(doc, table.id, rowId, col.id, e.item)} />
-          </AnimItem>
-        ))}
+        {(() => {
+          const nodes = anim.entries.map((e) => (
+            <AnimItem key={e.key} phase={e.phase} onExited={() => anim.done(e.key)}>
+              <Tile doc={doc} table={target} rowId={e.item}
+                display={RELATION.config(col).display === 'avatar' ? 'avatar' : undefined}
+                drag={{ slot, targetTable: col.target }}
+                onClick={() => setEditingRow(e.item)}
+                onRemove={() => removeLink(doc, table.id, rowId, col.id, e.item)} />
+            </AnimItem>
+          ))
+          if (ins) nodes.splice(Math.min(ins.index, nodes.length), 0, <DropGap key="drop-gap" width={ins.width} height={ins.height} />)
+          return nodes
+        })()}
         {!(RELATION.config(col).single && ids.length >= 1) && <button type="button" className="add-tile" onClick={() => setPicking(true)} disabled={!target}
           title={target ? 'Datensatz verknüpfen' : 'Zieltabelle fehlt'}>+</button>}
       </div>

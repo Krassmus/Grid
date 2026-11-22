@@ -423,7 +423,7 @@ textarea.cell { resize: none; line-height: 1.35; overflow: hidden; display: bloc
 .mapview .geo-tag-host::before { content: ''; position: absolute; left: 50%; bottom: -12px; width: 26px; height: 26px; margin-left: -13px; cursor: move; }
 .mapview .geo-tag-host::after { cursor: move; }
 .tiles { position: relative; }
-.tiles > .drop-line { position: absolute; width: 3px; margin-left: -1px; border-radius: 2px; background: #0a84ff; pointer-events: none; z-index: 2; }
+.tiles > .drop-gap { flex: none; margin-right: 6px; box-sizing: border-box; border: 2px dashed #0a84ff; border-radius: 10px; background: color-mix(in srgb, #0a84ff 8%, transparent); pointer-events: none; }
 /* Entfernen-Kreuz als Marke oben rechts an der Kachel: der Rahmen bleibt symmetrisch */
 .tile:has(> .tile-x) { position: relative; }
 .tile > .tile-x { position: absolute; top: -7px; right: -7px; width: 18px; height: 18px; border-radius: 50%; background: var(--c-ffffff); border: 1px solid var(--c-d5dce0); color: var(--c-666677); font-size: 10px; line-height: 1; padding: 0; box-shadow: 0 1px 2px #0002; cursor: pointer; z-index: 1; }
@@ -466,9 +466,12 @@ textarea.cell { resize: none; line-height: 1.35; overflow: hidden; display: bloc
 /* Kacheln ziehen (tileDrag.ts): Geisterbild am Zeiger, grünes Plus beim Kopieren (Umschalt/Alt) */
 .tile.draggable { cursor: grab; touch-action: manipulation; }
 .tile.draggable.dragging { opacity: .35; }
-.tile-ghost { position: fixed; left: 0; top: 0; z-index: 1000; margin: 0; pointer-events: none; opacity: .92; box-shadow: 0 6px 18px #0004; transition: none; }
+.anim-item.lifted { display: none; }
+.tile-ghost-host { position: fixed; left: 0; top: 0; z-index: 1000; pointer-events: none; padding: 0; margin: 0; border: 0; background: none; box-shadow: none; outline: none; min-width: 0; width: auto; display: block; }
+.tile-ghost-host .tiles { display: block; }
+.tile.tile-ghost { box-sizing: border-box; margin: 0; pointer-events: none; opacity: .7; box-shadow: 0 8px 22px #0004; transition: none; }
 .tile-ghost .tile-x { display: none; }
-.tile-ghost.copy::after { content: '+'; position: absolute; right: -9px; top: -9px; width: 20px; height: 20px; border-radius: 50%; background: #2e9e4f; color: #fff; font: 700 15px/20px system-ui, sans-serif; text-align: center; box-shadow: 0 1px 3px #0005; }
+.tile.tile-ghost.copy::after { content: '+'; position: absolute; right: -9px; top: -9px; width: 20px; height: 20px; border-radius: 50%; background: #2e9e4f; color: #fff; font: 700 15px/20px system-ui, sans-serif; text-align: center; box-shadow: 0 1px 3px #0005; }
 body.tile-dragging, body.tile-dragging * { cursor: grabbing !important; user-select: none !important; -webkit-user-select: none !important; }
 body.tile-dragging.tile-copy, body.tile-dragging.tile-copy * { cursor: copy !important; }
 

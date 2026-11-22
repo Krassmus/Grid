@@ -57,6 +57,7 @@ export function beginTileDrag(down: PointerEvent, tile: HTMLElement, payload: Dr
   const rect = tile.getBoundingClientRect()
   const grab = { x: down.clientX - rect.left, y: down.clientY - rect.top }
   let ghost: HTMLElement | null = null
+  let host: HTMLElement | null = null // trägt das Aussehen einer Zelle (.c .tiles), damit die Kopie genauso gestaltet ist wie das Original
   let hover: { el: Element; t: DropTarget } | null = null
   let pos = { x: down.clientX, y: down.clientY }
   let copy = false
@@ -71,7 +72,7 @@ export function beginTileDrag(down: PointerEvent, tile: HTMLElement, payload: Dr
   }
   const refresh = () => {
     if (!ghost) return
-    ghost.style.transform = `translate(${pos.x - grab.x}px, ${pos.y - grab.y}px)`
+    if (host) host.style.transform = `translate(${pos.x - grab.x}px, ${pos.y - grab.y}px)`
     ghost.classList.toggle('copy', copy)
     document.body.classList.toggle('tile-copy', copy)
     const found = targetAt(pos.x, pos.y, payload)
@@ -93,7 +94,13 @@ export function beginTileDrag(down: PointerEvent, tile: HTMLElement, payload: Dr
     ghost.classList.add('tile-ghost')
     ghost.style.width = `${rect.width}px`
     ghost.style.height = `${rect.height}px`
-    document.body.appendChild(ghost)
+    host = document.createElement('div')
+    host.className = 'c tile-ghost-host'
+    const row = document.createElement('div')
+    row.className = 'tiles'
+    row.appendChild(ghost)
+    host.appendChild(row)
+    document.body.appendChild(host)
     tile.classList.add('dragging')
     document.body.classList.add('tile-dragging')
     window.getSelection()?.removeAllRanges()
@@ -109,7 +116,8 @@ export function beginTileDrag(down: PointerEvent, tile: HTMLElement, payload: Dr
     window.removeEventListener('keyup', key)
     cancelAnimationFrame(frame)
     setHover(null)
-    ghost?.remove()
+    host?.remove()
+    host = null
     tile.classList.remove('dragging')
     document.body.classList.remove('tile-dragging', 'tile-copy')
     if (ghost) {
