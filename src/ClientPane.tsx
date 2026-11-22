@@ -910,7 +910,6 @@ export function ClientPane(props: {
                 {...reorderProps('table', t.id, t.name)}>
                 <SheetIcon icon={t.icon} kind={t.kind} />
                 <span className="tab-name">{t.name}</span>
-                {t.count !== undefined && <span className="tab-count">{t.count}</span>}
                 {current && <span className="tab-caret">▾</span>}</button>
               {current && menuOpen && (
                 <div className="tab-popup" role="menu">
