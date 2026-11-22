@@ -482,7 +482,7 @@ function NumberInput({ doc, table, rowId, col, value }: { doc: Y.Doc; table: str
   const round = (n: number) => (cfg.decimals >= 0 ? Number(n.toFixed(cfg.decimals)) : n)
   return (
     <div className="c">
-      <input className="cell" type="number" value={(value as number | null) ?? ''} placeholder={col.name}
+      <input className="cell" type="number" enterKeyHint="next" value={(value as number | null) ?? ''} placeholder={col.name}
         step={cfg.decimals >= 0 ? 1 / 10 ** cfg.decimals : 'any'}
         onChange={(e) => setCell(doc, table, rowId, col.id, e.target.value === '' ? null : Number(e.target.value))}
         onBlur={() => { if (typeof value === 'number' && round(value) !== value) setCell(doc, table, rowId, col.id, round(value)) }} />
@@ -517,7 +517,7 @@ function TextInput({ doc, table, rowId, col, value }: { doc: Y.Doc; table: strin
     <div className="c">
       {cfg.mode === 'multi'
         ? <textarea ref={area} className={cls} rows={1} value={text} placeholder={col.name} onChange={(e) => change(e.target.value)} />
-        : <input className={cls} type="text" value={text} placeholder={col.name} onChange={(e) => change(e.target.value)} />}
+        : <input className={cls} type="text" enterKeyHint="next" value={text} placeholder={col.name} onChange={(e) => change(e.target.value)} />}
     </div>
   )
 }
@@ -814,7 +814,10 @@ export function ClientPane(props: {
   const virt = useVirtualRows(visibleIds)
 
   // Nach „+ Zeile“: zur neuen Zeile scrollen und ihre erste Zelle fokussieren
-  const [focusRow, setFocusRow] = useState<string | null>(null)
+  // `col`: Position der Spalte, deren Zelle den Fokus bekommt (ohne Angabe die erste)
+  const [focusTarget, setFocusTarget] = useState<{ id: string; col?: number } | null>(null)
+  const focusRow = focusTarget?.id ?? null
+  const setFocusRow = (id: string | null, col?: number) => setFocusTarget(id ? { id, col } : null)
   useEffect(() => {
     if (!focusRow) return
     const row = sectionRef.current?.querySelector<HTMLElement>(`[data-row="${focusRow}"]`)
@@ -825,7 +828,9 @@ export function ClientPane(props: {
       return
     }
     row.scrollIntoView({ block: 'nearest' })
-    row.querySelector<HTMLElement>('input, textarea, button')?.focus({ preventScroll: true })
+    const focusable = 'input, textarea, button, select'
+    const cell = focusTarget?.col != null ? row.querySelector<HTMLElement>(`.row-inner > :nth-child(${focusTarget.col + 1})`) : null
+    ;(cell?.querySelector<HTMLElement>(focusable) ?? row.querySelector<HTMLElement>(focusable))?.focus({ preventScroll: true })
     setFocusRow(null)
   }, [focusRow, rowIds, visibleIds, virt.start, virt.end])
   const template = table
@@ -909,6 +914,19 @@ export function ClientPane(props: {
       {table && (
         <>
           <div className="gridwrap" ref={wrapRef}
+            onKeyDown={(e) => {
+              // Enter in einer Zelle springt in dieselbe Spalte der nächsten Zeile; nach der letzten Zeile entsteht eine neue
+              const el = e.target as HTMLElement
+              if (e.key !== 'Enter' || e.shiftKey || e.altKey || e.ctrlKey || e.metaKey || e.nativeEvent.isComposing || !(el instanceof HTMLInputElement)) return
+              if (!el.classList.contains('cell') || (el.type !== 'text' && el.type !== 'number')) return
+              const rowEl = el.closest<HTMLElement>('[data-row]'), cellEl = el.closest<HTMLElement>('.row-inner > *')
+              if (!rowEl || !cellEl || !table) return
+              e.preventDefault()
+              const col = Array.from(cellEl.parentElement!.children).indexOf(cellEl)
+              const next = visibleIds[visibleIds.indexOf(rowEl.dataset.row!) + 1]
+              if (next) setFocusRow(next, col)
+              else { setSearches((s) => ({ ...s, [table.id]: '' })); setFocusRow(addRow(doc, table.id), col) }
+            }}
             onFocus={() => { editingInGrid.current = true }}
             onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) { editingInGrid.current = false; setSortTick((n) => n + 1) } }}>
             <div className="grid" style={{ ['--cols' as any]: template }}>
