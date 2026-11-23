@@ -27,6 +27,7 @@ export interface AuditEntry {
   /** nachher (bei „verschoben“: Ziel) */ n?: string
   /** Anzahl (bei „bulk“) */ x?: number
   /** Gegenschritte (in der Reihenfolge der Änderung; zum Zurückrechnen rückwärts anwenden) */ u?: Op[]
+  /** Schritte vorwärts (derselbe Aufbau wie `u`, mit den neuen Werten; in dieser Reihenfolge anwenden) */ f?: Op[]
 }
 
 /** Ein Gegenschritt. `v` fehlt = der Wert war nicht vorhanden (beim Zurückrechnen löschen). */
@@ -79,14 +80,14 @@ export function setAuditSettings(doc: Y.Doc, s: AuditSettings) {
 }
 
 // ---------- Inhalte gerade gelöschter Typen lesen ----------
-const aliveBefore = (item: any, tr: Y.Transaction) => !item.deleted || Y.isDeleted(tr.deleteSet, item.id)
-const unwrap = (item: any, tr: Y.Transaction): unknown => {
+const aliveBefore = (item: any, tr?: Y.Transaction) => !item.deleted || (!!tr && Y.isDeleted(tr.deleteSet, item.id))
+const unwrap = (item: any, tr?: Y.Transaction): unknown => {
   const c = item.content
   const v = c.type !== undefined ? c.type : c.getContent()[0]
   return v instanceof Y.AbstractType ? peek(v, tr) : v
 }
 /** Inhalt eines (in dieser Änderung) gelöschten oder noch lebenden Typs als einfache Daten. */
-function peek(type: Y.AbstractType<any>, tr: Y.Transaction): unknown {
+function peek(type: Y.AbstractType<any>, tr?: Y.Transaction): unknown {
   if (type instanceof Y.Map) {
     const out: Record<string, unknown> = {}
     ;(type as any)._map.forEach((item: any, k: string) => { if (aliveBefore(item, tr)) { const v = unwrap(item, tr); if (v !== undefined) out[k] = v } })
@@ -114,6 +115,34 @@ function oldIndexes(event: Y.YEvent<any>, tr: Y.Transaction): Map<unknown, numbe
     }
   } catch { /* ohne Stelle: die Zeile kommt beim Zurückrechnen ans Ende */ }
   return out
+}
+
+/** Der Schritt vorwärts zu einem Gegenschritt: dasselbe Ziel mit dem Wert, der jetzt im Dokument gilt. */
+export function forwardOp(doc: Y.Doc, op: Op, tr?: Y.Transaction, orderIndex: Map<string, Map<string, number>> = new Map()): Op {
+  const tables = tablesOf(doc)
+  const t = op.ti ? tables.get(op.ti) : undefined
+  const indexIn = (tb: string, key: 'rowOrder' | 'colOrder', id: string) => {
+    const k = `${tb}.${key}`
+    let m = orderIndex.get(k)
+    if (!m) { m = new Map((tables.get(tb)?.get(key)?.toArray() ?? []).map((x: string, i: number) => [x, i] as [string, number])); orderIndex.set(k, m) }
+    return m.get(id)
+  }
+  switch (op.m) {
+    case 'cell': return { m: 'cell', ti: op.ti, ri: op.ri, ci: op.ci, v: t?.get('rows')?.get(op.ri!)?.get(op.ci!) }
+    case 'row-del': { const row = t?.get('rows')?.get(op.ri!); return row ? { m: 'row-put', ti: op.ti, ri: op.ri, j: peek(row, tr), ix: indexIn(op.ti!, 'rowOrder', op.ri!) } : { m: 'row-del', ti: op.ti, ri: op.ri } }
+    case 'row-put': return { m: 'row-del', ti: op.ti, ri: op.ri }
+    case 'col-del': { const col = t?.get('cols')?.get(op.ci!); return col ? { m: 'col-put', ti: op.ti, ci: op.ci, j: peek(col, tr), ix: indexIn(op.ti!, 'colOrder', op.ci!) } : { m: 'col-del', ti: op.ti, ci: op.ci } }
+    case 'col-put': return { m: 'col-del', ti: op.ti, ci: op.ci }
+    case 'colp': {
+      const col = t?.get('cols')?.get(op.ci!)
+      const v = op.k!.startsWith('options.') ? col?.get('options')?.get(op.k!.slice(8)) : col?.get(op.k!)
+      return { m: 'colp', ti: op.ti, ci: op.ci, k: op.k, v }
+    }
+    case 'tab-del': return t ? { m: 'tab-put', ti: op.ti, j: peek(t, tr) } : { m: 'tab-del', ti: op.ti }
+    case 'tab-put': return { m: 'tab-del', ti: op.ti }
+    case 'tabp': return { m: 'tabp', ti: op.ti, k: op.k, v: t?.get(op.k!) }
+    case 'link': return { m: 'link', k: op.k, v: linksOf(doc).get(op.k!) }
+  }
 }
 
 const installed = new WeakSet<Y.Doc>()
@@ -340,7 +369,10 @@ export function installAudit(doc: Y.Doc): () => void {
       if (entries.length) entries[0] = { ...entries[0], u: [...(entries[0].u ?? []), ...hidden] }
       else entries = [{ t: Date.now(), a: accountIdNow(), k: 'ops', u: hidden }]
     }
-    if (entries.length > MAX_PER_CHANGE) entries = [{ t: entries[0].t, a: entries[0].a, k: 'bulk', x: entries.length, u: entries.flatMap((e) => e.u ?? []) }]
+    // Schritte vorwärts: dieselben Ziele wie die Gegenschritte, mit dem Wert, der nach der Änderung gilt
+    const orderIndex = new Map<string, Map<string, number>>()
+    entries = entries.map((e) => ({ ...e, f: (e.u ?? []).map((op) => forwardOp(doc, op, tr, orderIndex)) }))
+    if (entries.length > MAX_PER_CHANGE) entries = [{ t: entries[0].t, a: entries[0].a, k: 'bulk', x: entries.length, u: entries.flatMap((e) => e.u ?? []), f: entries.flatMap((e) => e.f ?? []) }]
     if (entries.length) doc.transact(() => append(entries), AUDIT)
     if (tr.local) refreshNames()
   }
@@ -357,4 +389,13 @@ export const KIND_LABEL: Record<AuditKind, string> = {
   'col~': 'Spalte umbenannt', 'col*': 'Spalteneinstellung geändert', 'tab+': 'Tabelle angelegt', 'tab-': 'Tabelle gelöscht', 'tab~': 'Tabelle umbenannt',
   'tab*': 'Tabelleneinstellung geändert', 'lnk+': 'Verknüpfung hinzugefügt', 'lnk-': 'Verknüpfung entfernt', 'lnk~': 'Verknüpfung umsortiert',
   'lnk>': 'Verknüpfung verschoben', ops: 'Hintergrundänderung', bulk: 'Viele Änderungen',
+}
+
+/** Ein Eintrag als Satz für die Anzeige, z. B. „Anna · Zelle geändert · Kunden / Meier / Name: Meier → Müller“. */
+export function describeEntry(e: AuditEntry, who: string): string {
+  const place = [e.tb, e.r, e.c].filter(Boolean).join(' / ')
+  const change = e.k === 'cell' || e.k === 'col~' || e.k === 'tab~' || e.k === 'tab*' || e.k === 'col*' || e.k === 'lnk>'
+    ? `: ${e.o || 'leer'} → ${e.n || 'leer'}`
+    : e.k === 'lnk+' ? `: ${e.n}` : e.k === 'lnk-' ? `: ${e.o}` : e.k === 'bulk' ? ` (${e.x})` : ''
+  return `${who} · ${KIND_LABEL[e.k]}${place ? ` · ${place}` : ''}${change}`
 }

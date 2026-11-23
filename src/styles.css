@@ -823,3 +823,15 @@ button.invite-row:hover .plus-avatar { border-color: #0a84ff; color: #0a84ff; }
 .asof-bar .asof-note { color: var(--c-666677); font-size: 13px; }
 .asof-bar .asof-warn { color: color-mix(in srgb, #ff9f0a 75%, var(--c-3b4a52)); font-size: 13px; }
 .clientpane.asof .add-row, .clientpane.asof .del, .clientpane.asof .actions-c { display: none; }
+
+/* Zeitleiste */
+.asof-timeline { padding: 8px 14px 2px; background: color-mix(in srgb, #0a84ff 5%, transparent); border-top: 1px solid var(--c-e1e7ea); }
+.asof-caption { font-size: 13px; min-height: 18px; margin-bottom: 6px; }
+.asof-caption small { color: var(--c-666677); }
+.asof-track { position: relative; height: 46px; border: 1px solid var(--c-d5dce0); border-radius: 8px; background: var(--c-ffffff); cursor: pointer; touch-action: none; overflow: hidden; }
+.asof-track:focus-visible { outline: 2px solid #0a84ff; outline-offset: 2px; }
+.asof-bars { position: absolute; inset: 3px 4px 0; display: flex; align-items: flex-end; gap: 1px; }
+.asof-bars span { flex: 1; min-width: 1px; height: 0; border-radius: 2px 2px 0 0; }
+.asof-bars span.has { background: color-mix(in srgb, #0a84ff 55%, transparent); }
+.asof-marker { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: #0a84ff; pointer-events: none; }
+.asof-axis { display: flex; justify-content: space-between; color: var(--c-666677); font-size: 11px; margin-top: 2px; }

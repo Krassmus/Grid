@@ -14,7 +14,9 @@ import { SettingsDialog } from './SettingsDialog'
 import { LogDialog } from './LogDialog'
 import { installAudit } from './audit'
 import { RetentionDialog } from './RetentionDialog'
-import { buildAsOf } from './timeTravel'
+import { TimeMachine } from './timeTravel'
+import { describeEntry } from './audit'
+import { personName } from './model'
 import { useProfiles } from './useTables'
 import { JoinDialog } from './MembersDialog'
 import type { MembersInfo } from './members'
@@ -55,16 +57,60 @@ function Single() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [logsOpen, setLogsOpen] = useState(false)
   const [retentionOpen, setRetentionOpen] = useState(false)
-  const [asOfAt, setAsOfAt] = useState<number | null>(null)
+  // Ansicht eines früheren Standes: Zeitpunkt (ms) und, wenn per Schritt gewählt, die genaue Stelle im Protokoll
+  const [asOfState, setAsOfState] = useState<{ at: number; pos: number | null } | null>(null)
+  const [playing, setPlaying] = useState(false)
+  const [speed, setSpeed] = useState(2)
   const [asOfTick, setAsOfTick] = useState(0)
   const [members, setMembers] = useState<MembersInfo | null>(null)
   const profiles = useProfiles(session?.doc ?? NO_DOC)
   useEffect(() => (session ? installAudit(session.doc) : undefined), [session?.doc]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { if (!session) { setLogsOpen(false); setRetentionOpen(false) } setAsOfAt(null) }, [session])
-  // Ansicht eines früheren Standes: eine Kopie des Dokuments, zurückgerechnet; Änderungsversuche verwerfen sie wieder
-  const asOf = useMemo(() => (session && asOfAt !== null ? buildAsOf(session.doc, asOfAt, () => setTimeout(() => setAsOfTick((n) => n + 1), 0)) : null),
+  useEffect(() => { if (!session) { setLogsOpen(false); setRetentionOpen(false) } setAsOfState(null) }, [session])
+  // Eine Kopie des Dokuments, die sich in der Zeit bewegen lässt; Änderungsversuche verwerfen sie wieder (neu aufbauen)
+  const asOfOn = asOfState !== null
+  const machine = useMemo(() => (session && asOfOn ? new TimeMachine(session.doc, () => setTimeout(() => setAsOfTick((n) => n + 1), 0)) : null),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [session?.doc, asOfAt, asOfTick])
+    [session?.doc, asOfOn, asOfTick])
+  const asOfView = useMemo(() => {
+    if (!machine || !asOfState) return null
+    machine.moveTo(asOfState.pos ?? machine.positionAt(asOfState.at))
+    return { doc: machine.doc, version: machine.version, pos: machine.pos }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [machine, asOfState])
+  useEffect(() => { if (!asOfOn) setPlaying(false) }, [asOfOn])
+  // Film: im Takt zum nächsten Eintrag; am Ende hält er an
+  useEffect(() => {
+    if (!playing || !machine || !asOfView) return
+    const id = setTimeout(() => {
+      const next = machine.step(1)
+      if (next === null) { setPlaying(false); return }
+      setAsOfState({ at: machine.entries[next - 1].t, pos: next })
+    }, 900 / speed)
+    return () => clearTimeout(id)
+  }, [playing, speed, machine, asOfView])
+  const asOfInfo = machine && asOfView && asOfState ? (() => {
+    const cur = machine.current()
+    return {
+      at: asOfState.at, earliest: machine.earliest, latest: machine.latest, incomplete: machine.incomplete,
+      pos: asOfView.pos, total: machine.entries.length, histogram: machine.histogram(80),
+      caption: cur && session ? describeEntry(cur, cur.a ? personName(session.doc, cur.a) || cur.a.slice(0, 8) : 'Unbekannt') : null, captionTime: cur?.t ?? null,
+      playing, speed,
+      onChange: (at: number) => setAsOfState({ at, pos: null }),
+      onSeek: (at: number) => { setPlaying(false); setAsOfState({ at, pos: null }) },
+      onStep: (dir: 1 | -1) => {
+        setPlaying(false)
+        const to = machine.step(dir)
+        if (to !== null) setAsOfState({ at: to === 0 ? (machine.earliest ?? Date.now()) - 1 : machine.entries[to - 1].t, pos: to })
+      },
+      onPlay: () => {
+        if (playing) { setPlaying(false); return }
+        if (machine.pos >= machine.entries.length) setAsOfState({ at: (machine.earliest ?? Date.now()) - 1, pos: 0 }) // am Ende: von vorn
+        setPlaying(true)
+      },
+      onSpeed: setSpeed,
+      onExit: () => { setPlaying(false); setAsOfState(null) },
+    }
+  })() : null
   const [listVersion, setListVersion] = useState(0)
 
   const unsaved = () => new FileSession(++counter.current, new Y.Doc(), null, newMeta(), new Set(), setError)
@@ -206,7 +252,7 @@ function Single() {
         await cur.flush()
       }
 
-      const actions: Record<string, () => Promise<void>> = { open, new: create, save, save_as: saveAs, open_cloud: async () => setCloudOpen(true), join: async () => setJoinOpen(true), account: async () => setProfileOpen(true), settings: async () => setSettingsOpen(true), logs_all: async () => { if (current.current) setLogsOpen(true) }, logs_asof: async () => { if (current.current) setAsOfAt(Date.now()) }, logs_settings: async () => { if (current.current) setRetentionOpen(true) } }
+      const actions: Record<string, () => Promise<void>> = { open, new: create, save, save_as: saveAs, open_cloud: async () => setCloudOpen(true), join: async () => setJoinOpen(true), account: async () => setProfileOpen(true), settings: async () => setSettingsOpen(true), logs_all: async () => { if (current.current) setLogsOpen(true) }, logs_asof: async () => { if (current.current) setAsOfState({ at: Date.now(), pos: null }) }, logs_settings: async () => { if (current.current) setRetentionOpen(true) } }
       const unlisten = await listen<string>('menu', (e) => {
         if (e.payload === 'clear_recent') { writeRecent([]); return }
         if (e.payload === 'undo' || e.payload === 'redo') { runUndoCommand(e.payload); return }
@@ -270,11 +316,10 @@ function Single() {
     moved: session.movedTo,
     followMove: () => { const m = session.movedTo; if (m) { session.connect(m.server, m.key, !!session.meta.sync?.enc); bump((n) => n + 1) } },
   }
-  if (asOf && asOfAt !== null) {
+  if (asOfView && asOfInfo) {
     return (
       <>
-        <ClientPane key="asof" title={UNSAVED_TITLE} doc={asOf.doc} persist={null}
-          asOf={{ at: asOfAt, earliest: asOf.earliest, incomplete: asOf.incomplete, onChange: setAsOfAt, onExit: () => setAsOfAt(null) }} />
+        <ClientPane key="asof" title={UNSAVED_TITLE} doc={asOfView.doc} persist={null} asOf={asOfInfo} />
         {dialogs}
       </>
     )

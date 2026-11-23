@@ -573,23 +573,79 @@ function TrackingChip({ doc }: { doc: Y.Doc }) {
 /** Wolke unten rechts: zeigt den Stand der Synchronisation, ein Klick öffnet die Einstellungen. */
 export interface AsOfInfo {
   /** Gewählter Zeitpunkt (ms) */ at: number
-  /** Ältester Eintrag im Protokoll (ms) oder null */ earliest: number | null
+  /** Ältester und neuester Eintrag im Protokoll (ms) oder null */ earliest: number | null
+  latest: number | null
   /** Stand eventuell ungenau (Einträge ohne Gegenschritte) */ incomplete: boolean
+  /** Anzahl der Einträge im Stand und insgesamt */ pos: number
+  total: number
+  /** Einträge je Abschnitt der Zeitleiste */ histogram: number[]
+  /** Letzte Änderung im Stand, als Satz, und ihre Zeit */ caption: string | null
+  captionTime: number | null
+  playing: boolean
+  speed: number
   onChange: (at: number) => void
+  onSeek: (at: number) => void
+  onStep: (dir: 1 | -1) => void
+  onPlay: () => void
+  onSpeed: (speed: number) => void
   onExit: () => void
 }
 
-/** Auswahl des Zeitpunkts in der Fußzeile der Ansicht eines früheren Standes (derselbe Datumsfeld-Auswahldialog wie bei Datumsspalten). */
+const SPEEDS = [1, 2, 5, 10, 25]
+const stamp = (ms: number) => new Date(ms).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })
+
+/** Zeitleiste: Säulen zeigen, wann viel passiert ist; Klick oder Ziehen springt in die Zeit. */
+function AsOfTimeline({ info }: { info: AsOfInfo }) {
+  const track = useRef<HTMLDivElement>(null)
+  const { earliest, latest } = info
+  const span = earliest !== null && latest !== null ? Math.max(1, latest - earliest) : 1
+  const max = Math.max(1, ...info.histogram)
+  const frac = earliest === null ? 0 : Math.min(1, Math.max(0, (info.at - earliest) / span))
+  const seek = (e: ReactPointerEvent) => {
+    if (earliest === null || !track.current) return
+    const r = track.current.getBoundingClientRect()
+    info.onSeek(Math.round(earliest + Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)) * span))
+  }
+  return (
+    <div className="asof-timeline">
+      <div className="asof-caption" aria-live="polite">
+        {info.total === 0 ? 'Das Protokoll ist noch leer.' : info.caption
+          ? <>{info.caption}{info.captionTime !== null && <small> · {stamp(info.captionTime)}</small>}</>
+          : 'Bis zu diesem Zeitpunkt gab es noch keine Änderung im Protokoll.'}
+        {info.total > 0 && <small className="asof-count"> {info.pos} von {info.total}</small>}
+      </div>
+      <div ref={track} className="asof-track" role="slider" aria-label="Zeitleiste" aria-valuemin={earliest ?? 0} aria-valuemax={latest ?? 0} aria-valuenow={info.at}
+        tabIndex={0}
+        onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); seek(e) }}
+        onPointerMove={(e) => { if (e.currentTarget.hasPointerCapture(e.pointerId)) seek(e) }}
+        onKeyDown={(e) => { if (e.key === 'ArrowLeft') { e.preventDefault(); info.onStep(-1) } else if (e.key === 'ArrowRight') { e.preventDefault(); info.onStep(1) } }}>
+        <div className="asof-bars">
+          {info.histogram.map((n, i) => <span key={i} className={n ? 'has' : ''} style={{ height: n ? `${Math.max(12, Math.round((n / max) * 100))}%` : undefined }} title={n ? `${n} Änderungen` : undefined} />)}
+        </div>
+        <div className="asof-marker" style={{ left: `${frac * 100}%` }} />
+      </div>
+      {earliest !== null && latest !== null && <div className="asof-axis"><span>{stamp(earliest)}</span><span>{stamp(latest)}</span></div>}
+    </div>
+  )
+}
+
+/** Steuerung in der Fußzeile der Ansicht eines früheren Standes: Schritte, Film und Zeitpunkt (derselbe Auswahldialog wie bei Datumsspalten). */
 function AsOfPicker({ info }: { info: AsOfInfo }) {
-  const tooEarly = info.earliest !== null && info.at < info.earliest
+  const tooEarly = info.earliest !== null && info.at < info.earliest - 1 // „ganz am Anfang“ (Stand vor dem ersten Eintrag) ist ein gültiger Stand
   return (
     <>
+      <button type="button" onClick={() => info.onStep(-1)} disabled={info.pos === 0} title="Vorherige Änderung">‹ Zurück</button>
+      <button type="button" className={info.playing ? 'on' : ''} onClick={info.onPlay} disabled={info.total === 0} aria-pressed={info.playing}>{info.playing ? '❚❚ Pause' : '▶ Abspielen'}</button>
+      <button type="button" onClick={() => info.onStep(1)} disabled={info.pos >= info.total} title="Nächste Änderung">Weiter ›</button>
+      <select value={info.speed} onChange={(e) => info.onSpeed(Number(e.target.value))} aria-label="Geschwindigkeit">
+        {SPEEDS.map((s) => <option key={s} value={s}>{s}×</option>)}
+      </select>
       <span className="asof-label">Stand vom</span>
       <DatePicker className="asof-date" value={floatingFromMs(info.at)} withTime style="short" placeholder="Zeitpunkt wählen"
         onChange={(v) => { const ms = v ? new Date(v).getTime() : NaN; if (Number.isFinite(ms) && ms <= Date.now() && ms !== info.at) info.onChange(ms) }} />
       <button type="button" onClick={info.onExit}>Zur aktuellen Ansicht</button>
-      <span className="asof-note">Nur Lesen{info.earliest === null ? ' · Das Protokoll ist noch leer.' : ''}</span>
-      {tooEarly && <span className="asof-warn">Das Protokoll reicht nur bis {new Date(info.earliest!).toLocaleString('de-DE')}; davor ist der Stand nicht mehr bekannt.</span>}
+      <span className="asof-note">Nur Lesen</span>
+      {tooEarly && <span className="asof-warn">Zurückgerechnet werden kann nur ab {stamp(info.earliest!)}; davor ist der Stand nicht bekannt.</span>}
       {info.incomplete && <span className="asof-warn">Einige ältere Einträge enthalten keine Gegenschritte; der Stand kann ungenau sein.</span>}
     </>
   )
@@ -1117,6 +1173,7 @@ export function ClientPane(props: {
         </>
       )}
       </div>
+      {props.asOf && <AsOfTimeline info={props.asOf} />}
       {props.asOf && (
         <div className="addrow-bar asof-bar">
           <AsOfPicker info={props.asOf} />
