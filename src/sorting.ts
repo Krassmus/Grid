@@ -1,5 +1,5 @@
 import * as Y from 'yjs'
-import { readTables, type ColumnInfo, type TableInfo } from './model'
+import { readTables, tablesOf, type ColumnInfo, type TableInfo } from './model'
 import { columnCells, compareKeys, type Key } from './cells'
 
 export type SortDir = 'asc' | 'desc'
@@ -33,4 +33,31 @@ export function sortedRowIds(doc: Y.Doc, tableId: string, colId: string, dir: So
   const col = table?.columns.find((c) => c.id === colId)
   if (!table || !col) return table?.rowIds ?? []
   return orderByKeys(table.rowIds, sortKeys(doc, table, col, tables), dir)
+}
+
+/** Spaltentypen, deren Sortierwert nur von der eigenen Zelle abhängt (kein Verweis, keine Formel). */
+const OWN_VALUE = new Set(['text', 'number', 'date', 'select', 'checkbox', 'link', 'duration'])
+
+/**
+ * Muss nach dieser Änderung neu sortiert (bzw. gesucht) werden? Nein, nur wenn sicher ist, dass sie die Sortierspalte nicht berührt:
+ * Die Sortierspalte hängt nur von der eigenen Zelle ab, und geändert wurden ausschließlich Zellen anderer Spalten bestehender Zeilen dieser Tabelle
+ * (oder gar nichts in dieser Tabelle).
+ */
+export function sortRelevant(doc: Y.Doc, tr: Y.Transaction, tableId: string | undefined, colId: string | undefined): boolean {
+  if (!tableId || !colId) return true
+  const table = tablesOf(doc).get(tableId)
+  const type = table?.get('cols')?.get(colId)?.get('type')
+  if (!table || !OWN_VALUE.has(type)) return true
+  const rows: Y.Map<Y.Map<unknown>> | undefined = table.get('rows')
+  if (!rows) return true
+  for (const [changed, keys] of tr.changed) {
+    if ((changed as unknown) === rows || (changed as unknown) === table) return true
+    const inRows = (changed as Y.AbstractType<unknown>).parent === rows
+    if (inRows) { if (keys.has(colId)) return true; continue }
+    // Änderungen außerhalb dieser Tabelle betreffen eine Sortierung nach der eigenen Zelle nicht
+    let p: Y.AbstractType<unknown> | null = changed as Y.AbstractType<unknown>
+    while (p && p !== table) p = p.parent as Y.AbstractType<unknown> | null
+    if (p === table) return true
+  }
+  return false
 }

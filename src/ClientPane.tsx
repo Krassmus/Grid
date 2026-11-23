@@ -31,7 +31,7 @@ import { ViewGrid } from './ViewGrid'
 import { MapView } from './MapView'
 import { MapDialog } from './MapDialog'
 import { aggLabel, allowedAggs, defaultAgg } from './aggregate'
-import { sortedRowIds, type SortDir } from './sorting'
+import { sortedRowIds, sortRelevant, type SortDir } from './sorting'
 import { CHECKBOX, DATE, FILE, ROLLUP, NUMBER, RELATION, TEXT } from './columnTypes'
 import { RichPreview, RichTextDialog } from './richText'
 import { SyncDialog, syncLabel, type SyncControl } from './SyncDialog'
@@ -745,10 +745,20 @@ export function ClientPane(props: {
   const [sortTick, setSortTick] = useState(0)
   const editingInGrid = useRef(false)
   useEffect(() => {
-    const h = () => { if (!editingInGrid.current) setSortTick((n) => n + 1) }
-    doc.on('update', h)
-    return () => { doc.off('update', h) }
-  }, [doc])
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const bump = () => {
+      // Folgen mehrere Änderungen dicht aufeinander (Synchronisation), wird nur einmal neu sortiert
+      if (timer) return
+      timer = setTimeout(() => { timer = undefined; setSortTick((n) => n + 1) }, 120)
+    }
+    const h = (tr: Y.Transaction) => {
+      if (editingInGrid.current) return
+      if (!sortRelevant(doc, tr, table?.id, sort?.colId)) return
+      bump()
+    }
+    doc.on('afterTransaction', h)
+    return () => { doc.off('afterTransaction', h); if (timer) clearTimeout(timer) }
+  }, [doc, table?.id, sort?.colId])
   const rowIds = useMemo(
     () => (table && sort ? sortedRowIds(doc, table.id, sort.colId, sort.dir) : table?.rowIds ?? []),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -825,7 +835,16 @@ export function ClientPane(props: {
   // Suche: nur Zeilen, bei denen der Suchtext (ohne Beachtung der Groß-/Kleinschreibung) in einer sichtbaren Spalte vorkommt.
   // Wie die Sortierung wird sie während der Eingabe in der Tabelle nicht neu ausgewertet, damit Zeilen nicht unter dem Cursor verschwinden.
   const [searches, setSearches] = useState<Record<string, string>>({})
-  const query = (table && searches[table.id]?.trim().toLowerCase()) || ''
+  const rawQuery = (table && searches[table.id]?.trim().toLowerCase()) || ''
+  // Große Tabellen: erst suchen, wenn kurz nicht getippt wurde (sonst ruckelt jeder Tastendruck)
+  const slowSearch = (table?.rowIds.length ?? 0) > 2000
+  const [lateQuery, setLateQuery] = useState(rawQuery)
+  useEffect(() => {
+    if (!slowSearch) return
+    const id = setTimeout(() => setLateQuery(rawQuery), rawQuery ? 200 : 0)
+    return () => clearTimeout(id)
+  }, [rawQuery, slowSearch])
+  const query = slowSearch ? lateQuery : rawQuery
   // Tippen ohne Fokus (kein Feld, kein Dialog) landet in der Suche
   const searchRef = useRef<HTMLInputElement>(null)
   // Haftet die Kopfzeile am oberen Rand (Tabelle ist angescrollt), verliert sie ihre runden Ecken: sonst scheinen dahinter die Zeilen durch
@@ -857,12 +876,18 @@ export function ClientPane(props: {
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
   }, [tableId])
+  // Wird die Suche länger getippt, genügt es, die bisherigen Treffer zu prüfen (gleiche Daten vorausgesetzt)
+  const lastSearch = useRef<{ key: unknown[]; query: string; hits: Set<string> } | null>(null)
   const matching = useMemo(() => {
-    if (!table || !query) return null
+    if (!table || !query) { lastSearch.current = null; return null }
+    const key = [doc, table.id, sortTick, table.rowIds.length, index, fileIndex, tables]
+    const prev = lastSearch.current
+    const narrowing = !!prev && prev.query.length > 0 && query.startsWith(prev.query) && prev.key.length === key.length && prev.key.every((k, i) => k === key[i])
     const ctx = newCtx()
     const texts = shownColumns.map((c) => columnCells(doc, tables, table, c, ctx))
     const ok = new Set<string>()
-    for (const rid of table.rowIds) if (texts.some((m) => (m.get(rid)?.text ?? '').toLowerCase().includes(query))) ok.add(rid)
+    for (const rid of narrowing ? prev!.hits : table.rowIds) if (texts.some((m) => (m.get(rid)?.text ?? '').toLowerCase().includes(query))) ok.add(rid)
+    lastSearch.current = { key, query, hits: ok }
     return ok
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doc, table?.id, query, sortTick, table?.rowIds.length, index, fileIndex])
