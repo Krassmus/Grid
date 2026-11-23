@@ -1,6 +1,6 @@
 import * as Y from 'yjs'
 import { readTables, tablesOf, type ColumnInfo, type TableInfo } from './model'
-import { columnCells, compareKeys, type Key } from './cells'
+import { cellDelta, columnCells, compareKeys, type Cell, type Key } from './cells'
 
 export type SortDir = 'asc' | 'desc'
 export { compareKeys }
@@ -26,14 +26,46 @@ export function orderByKeys(ids: string[], keys: Map<string, Key>, dir: SortDir)
     .map((x) => x.id)
 }
 
-/** Zeilen-IDs der Tabelle, nach der Spalte sortiert. */
+const sortedCache = new WeakMap<Map<string, Cell>, { rowIds: string[]; asc?: string[]; desc?: string[] }>()
+const MAX_INCREMENTAL = 64
+
+/** Zeilen-IDs der Tabelle, nach der Spalte sortiert. Das Ergebnis wird gemerkt; ändern sich nur wenige Zellen, werden nur diese Zeilen neu eingeordnet. */
 export function sortedRowIds(doc: Y.Doc, tableId: string, colId: string, dir: SortDir): string[] {
   const tables = readTables(doc)
   const table = tables.find((t) => t.id === tableId)
   const col = table?.columns.find((c) => c.id === colId)
   if (!table || !col) return table?.rowIds ?? []
-  return orderByKeys(table.rowIds, sortKeys(doc, table, col, tables), dir)
+  const cells = columnCells(doc, tables, table, col)
+  const hit = sortedCache.get(cells)
+  if (hit && sameRows(hit.rowIds, table.rowIds) && hit[dir]) return hit[dir]!
+  const sign = dir === 'asc' ? 1 : -1
+  const keyOf = (id: string): Key => cells.get(id)?.key ?? null
+  let ids: string[] | undefined
+  const delta = cellDelta(cells)
+  const before = delta && sortedCache.get(delta.prev)
+  if (delta && before && delta.dirty.length <= MAX_INCREMENTAL && sameRows(before.rowIds, table.rowIds) && before[dir]) {
+    const index = new Map(table.rowIds.map((id, i) => [id, i]))
+    const cmp = (a: string, b: string) => {
+      const ka = keyOf(a), kb = keyOf(b)
+      if (ka === null || kb === null) return ka === kb ? index.get(a)! - index.get(b)! : ka === null ? 1 : -1
+      const c = compareKeys(ka, kb)
+      return c ? c * sign : index.get(a)! - index.get(b)!
+    }
+    const moved = new Set(delta.dirty.filter((id) => index.has(id)))
+    ids = before[dir]!.filter((id) => !moved.has(id))
+    for (const id of [...moved].sort(cmp)) {
+      let lo = 0, hi = ids.length
+      while (lo < hi) { const mid = (lo + hi) >> 1; if (cmp(ids[mid], id) < 0) lo = mid + 1; else hi = mid }
+      ids.splice(lo, 0, id)
+    }
+  }
+  ids ??= orderByKeys(table.rowIds, new Map(table.rowIds.map((id) => [id, keyOf(id)])), dir)
+  const entry = hit && sameRows(hit.rowIds, table.rowIds) ? hit : { rowIds: table.rowIds }
+  entry[dir] = ids
+  sortedCache.set(cells, entry)
+  return ids
 }
+const sameRows = (a: string[], b: string[]) => a === b || (a.length === b.length && a.every((x, i) => x === b[i]))
 
 /** Spaltentypen, deren Sortierwert nur von der eigenen Zelle abhängt (kein Verweis, keine Formel). */
 const OWN_VALUE = new Set(['text', 'number', 'date', 'select', 'checkbox', 'link', 'duration'])

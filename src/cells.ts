@@ -51,6 +51,9 @@ export function columnCells(doc: Y.Doc, tables: TableInfo[], table: TableInfo, c
   }
   const hit = ctx.cache.get(me)
   if (hit) return hit
+  const cacheable = OWN_VALUE.has(col.type)
+  const kept = cacheable ? persistent(doc).read(table, col, (only, base) => plainCells(doc, tables, table, col, ctx, only, base)) : null
+  if (kept) { ctx.cache.set(me, kept); return kept }
   const out = col.type === 'rollup' ? rollupCells(doc, tables, table, col, ctx, [...stack, me])
     : col.type === 'formula' || col.type === 'template' ? formulaCells(doc, tables, table, col, ctx, [...stack, me])
     : plainCells(doc, tables, table, col, ctx)
@@ -87,8 +90,62 @@ function rollupCells(doc: Y.Doc, tables: TableInfo[], table: TableInfo, col: Col
   return out
 }
 
-function plainCells(doc: Y.Doc, tables: TableInfo[], table: TableInfo, col: ColumnInfo, ctx: CellCtx): Map<string, Cell> {
-  const out = new Map<string, Cell>()
+// ---------- Dauerhafter Zwischenspeicher ----------
+// Spalten, deren Werte nur von der eigenen Zelle abhängen, bleiben zwischen den Auswertungen erhalten. Eine Änderung an einer Zelle
+// merkt nur diese Zeile zum Neuberechnen vor; jede andere Änderung (Zeilen, Spalten, Verknüpfungen, Profile …) leert alles.
+
+const OWN_VALUE = new Set(['text', 'number', 'date', 'select', 'checkbox', 'link', 'duration', 'geo'])
+
+interface Kept { sig: string; rowIds: string[]; cells: Map<string, Cell>; dirty: Set<string> }
+
+class Persistent {
+  private entries = new Map<string, Kept>()
+  constructor(private doc: Y.Doc) {
+    doc.on('afterTransaction', (tr: Y.Transaction) => this.changed(tr))
+  }
+  private changed(tr: Y.Transaction) {
+    if (this.entries.size === 0) return
+    const tables = tablesOf(this.doc)
+    for (const [type, keys] of tr.changed) {
+      const rows = type.parent as Y.AbstractType<unknown> | null
+      const table = rows?.parent as Y.AbstractType<unknown> | null
+      const isRow = !!rows && !!table && table.parent === (tables as unknown) && (table as Y.Map<any>).get('rows') === (rows as unknown)
+      if (!isRow) { this.entries.clear(); return }
+      const rowId = type._item?.parentSub, tableId = table._item?.parentSub
+      if (!rowId || !tableId) { this.entries.clear(); return }
+      for (const colId of keys) this.entries.get(`${tableId}.${colId}`)?.dirty.add(rowId)
+    }
+  }
+  /** Gespeicherte Werte der Spalte (aufgefrischt) oder, nach einer Neuberechnung mit `compute`, die frischen. */
+  read(table: TableInfo, col: ColumnInfo, compute: (only?: string[], base?: Map<string, Cell>) => Map<string, Cell>): Map<string, Cell> {
+    const key = `${table.id}.${col.id}`
+    const sig = JSON.stringify(col)
+    const e = this.entries.get(key)
+    if (e && e.sig === sig && sameIds(e.rowIds, table.rowIds)) {
+      if (e.dirty.size === 0) return e.cells
+      // Die Karte wird kopiert, damit Aufrufer, die die alte noch halten, unverändert bleiben
+      const dirty = [...e.dirty]
+      const cells = compute(dirty, new Map(e.cells))
+      deltas.set(cells, { prev: e.cells, dirty })
+      this.entries.set(key, { ...e, cells, dirty: new Set() })
+      return cells
+    }
+    const cells = compute()
+    this.entries.set(key, { sig, rowIds: table.rowIds, cells, dirty: new Set() })
+    return cells
+  }
+}
+const sameIds = (a: string[], b: string[]) => a === b || (a.length === b.length && a.every((x, i) => x === b[i]))
+
+/** Woraus eine aufgefrischte Karte entstand: die vorherige und die Zeilen, die neu berechnet wurden (für schrittweises Nachsortieren). */
+const deltas = new WeakMap<Map<string, Cell>, { prev: Map<string, Cell>; dirty: string[] }>()
+export const cellDelta = (cells: Map<string, Cell>) => deltas.get(cells)
+
+const persistents = new WeakMap<Y.Doc, Persistent>()
+const persistent = (doc: Y.Doc) => { let p = persistents.get(doc); if (!p) persistents.set(doc, p = new Persistent(doc)); return p }
+
+function plainCells(doc: Y.Doc, tables: TableInfo[], table: TableInfo, col: ColumnInfo, ctx: CellCtx, only?: string[], base?: Map<string, Cell>): Map<string, Cell> {
+  const out = base ?? new Map<string, Cell>()
   const rows: Y.Map<Y.Map<any>> | undefined = tablesOf(doc).get(table.id)?.get('rows')
   const links = col.type === 'relation' ? linkIndex(doc, ctx) : null
   const files = col.type === 'file' ? fileIndex(doc, ctx) : null
@@ -101,7 +158,7 @@ function plainCells(doc: Y.Doc, tables: TableInfo[], table: TableInfo, col: Colu
     const stamp = (id: string) => { const v = rows?.get(id)?.get(col.id); return typeof v === 'number' ? v : 0 }
     rank = new Map([...table.rowIds].sort((a, b) => stamp(a) - stamp(b) || (a < b ? -1 : a > b ? 1 : 0)).map((id, i) => [id, i + 1]))
   }
-  for (const rid of table.rowIds) {
+  for (const rid of only ?? table.rowIds) {
     const raw = rows?.get(rid)?.get(col.id)
     let text = ''
     let key: Key = null
