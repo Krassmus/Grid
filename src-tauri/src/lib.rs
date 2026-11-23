@@ -207,8 +207,11 @@ fn build_menu<M: tauri::Manager<tauri::Wry>>(app: &M, recent: &[String], _theme:
     .item(&MenuItemBuilder::with_id("settings", "Einstellungen …").accelerator("CmdOrCtrl+,").build(app)?)
     .separator().hide().hide_others().show_all().separator().quit()
     .build()?;
+  let logs = SubmenuBuilder::new(app, "Logs")
+    .item(&MenuItemBuilder::with_id("logs_all", "Alle Änderungen anzeigen …").build(app)?)
+    .build()?;
   let window = SubmenuBuilder::new(app, "Fenster").minimize().maximize().build()?;
-  app.app_handle().set_menu(MenuBuilder::new(app).items(&[&app_menu, &file, &edit, &window]).build()?)?;
+  app.app_handle().set_menu(MenuBuilder::new(app).items(&[&app_menu, &file, &edit, &logs, &window]).build()?)?;
   Ok(())
 }
 
