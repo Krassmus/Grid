@@ -221,8 +221,8 @@ export function SyncDialog(props: { control: SyncControl; onClose: () => void })
               <div className="cloud-card-main">
                 <strong>{syncLabel(c)}</strong>
                 <small>{info?.name ?? hostOf(c.server!)}</small>
-                <span className={`chip ${c.enc ? 'lock' : 'open'}`}>{c.enc ? '🔒 Ende-zu-Ende verschlüsselt' : 'Nicht verschlüsselt'}</span>
               </div>
+              <span className={`chip ${c.enc ? 'lock' : 'open'}`}>{c.enc ? '🔒 Ende-zu-Ende verschlüsselt' : 'Nicht verschlüsselt'}</span>
             </section>
             {note && <p className={`cloud-note ${tone}`} role={tone === 'bad' ? 'alert' : 'status'}>{note}</p>}
             {st?.status === 'denied' && st.kind === 'untrusted' && (

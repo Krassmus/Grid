@@ -692,7 +692,7 @@ button.avatar-pick { border: none; background: none; box-shadow: none; padding: 
 .cloud-card-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .cloud-card-main strong { font-size: 15px; font-weight: 600; }
 .cloud-card-main small { color: var(--c-666677); font-size: 13px; overflow: hidden; text-overflow: ellipsis; }
-.cloud-card .chip { align-self: flex-start; margin-top: 6px; font-size: 12px; font-weight: 500; padding: 3px 9px; border-radius: 999px; background: var(--c-e9edef); color: var(--c-3b4a52); white-space: nowrap; }
+.cloud-card .chip { flex: none; font-size: 12px; font-weight: 500; padding: 3px 9px; border-radius: 999px; background: var(--c-e9edef); color: var(--c-3b4a52); white-space: nowrap; }
 .cloud-card .chip.lock { background: color-mix(in srgb, #1a7f37 14%, transparent); color: #1a7f37; }
 .cloud-card .chip.open { background: color-mix(in srgb, #ff9f0a 22%, transparent); color: var(--c-3b4a52); }
 .cloud-card.plan { flex-wrap: wrap; }
