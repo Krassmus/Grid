@@ -811,3 +811,15 @@ button.invite-row:hover .plus-avatar { border-color: #0a84ff; color: #0a84ff; }
 .log-empty { padding: 20px; text-align: center; color: var(--c-666677); }
 .log-count { margin-right: auto; align-self: center; color: var(--c-666677); }
 .log-id { color: var(--c-666677); font-size: 11px; font-family: ui-monospace, monospace; margin-left: 4px; }
+
+.log-limit { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-weight: 400; }
+.log-limit label { display: inline-flex; align-items: center; gap: 6px; }
+.log-limit input[type=number] { width: 110px; }
+
+/* Stand zu einem früheren Zeitpunkt (nur ansehen) */
+.asof-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.asof-bar .asof-label { font-weight: 600; }
+.asof-bar .asof-date { font: inherit; padding: 5px 10px; border: 1px solid var(--c-d5dce0); border-radius: 8px; background: var(--c-ffffff); cursor: pointer; min-width: 150px; text-align: left; }
+.asof-bar .asof-note { color: var(--c-666677); font-size: 13px; }
+.asof-bar .asof-warn { color: color-mix(in srgb, #ff9f0a 75%, var(--c-3b4a52)); font-size: 13px; }
+.clientpane.asof .add-row, .clientpane.asof .del, .clientpane.asof .actions-c { display: none; }

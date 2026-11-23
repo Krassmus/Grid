@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type * as Y from 'yjs'
 import { Modal } from './Modal'
-import { auditOf, KIND_LABEL, type AuditEntry } from './audit'
+import { auditOf, coalesce, KIND_LABEL, type AuditEntry } from './audit'
 import { personName } from './model'
 
 const PAGE = 300
@@ -21,7 +21,7 @@ export function LogDialog(props: { doc: Y.Doc; onClose: () => void }) {
   const who = (a: string) => (a ? personName(props.doc, a) || a.slice(0, 8) : 'Unbekannt')
   const rows = useMemo(() => {
     const needle = q.trim().toLowerCase()
-    const all = [...entries].reverse()
+    const all = coalesce(entries).reverse()
     if (!needle) return all
     return all.filter((e) => [who(e.a), KIND_LABEL[e.k], e.tb, e.r, e.ri, e.c, e.o, e.n].join(' ').toLowerCase().includes(needle))
     // eslint-disable-next-line react-hooks/exhaustive-deps

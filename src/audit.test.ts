@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as Y from 'yjs'
 import { addColumn, addLink, addRow, addTable, deleteRow, moveLink, removeLink, reorderLink, readTables, setCell } from './model'
-import { auditOf, installAudit } from './audit'
+import { auditOf, coalesce, installAudit } from './audit'
 import { createUndoManager } from './undo'
 
 afterEach(() => vi.useRealTimers())
@@ -27,7 +27,8 @@ describe('Änderungsprotokoll', () => {
     const doc = new Y.Doc(); installAudit(doc)
     const t = addTable(doc, 'T'); const c = readTables(doc)[0].columns[0].id; const r = readTables(doc)[0].rowIds[0]
     for (const v of ['a', 'ab', 'abc']) { setCell(doc, t, r, c, v); vi.advanceTimersByTime(1000) }
-    const cells = auditOf(doc).toArray().filter((x) => x.k === 'cell')
+    const cells = coalesce(auditOf(doc).toArray()).filter((x) => x.k === 'cell')
+    expect(auditOf(doc).toArray().filter((x) => x.k === 'cell')).toHaveLength(3) // gespeichert einzeln
     expect(cells).toHaveLength(1)
     expect(cells[0]).toMatchObject({ o: '', n: 'abc' })
     // Änderung von außen (anderes Gerät) wird nicht protokolliert

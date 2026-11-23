@@ -209,6 +209,9 @@ fn build_menu<M: tauri::Manager<tauri::Wry>>(app: &M, recent: &[String], _theme:
     .build()?;
   let logs = SubmenuBuilder::new(app, "Logs")
     .item(&MenuItemBuilder::with_id("logs_all", "Alle Änderungen anzeigen …").build(app)?)
+    .item(&MenuItemBuilder::with_id("logs_asof", "Stand anzeigen von …").build(app)?)
+    .separator()
+    .item(&MenuItemBuilder::with_id("logs_settings", "Aufbewahrung …").build(app)?)
     .build()?;
   let window = SubmenuBuilder::new(app, "Fenster").minimize().maximize().build()?;
   app.app_handle().set_menu(MenuBuilder::new(app).items(&[&app_menu, &file, &edit, &logs, &window]).build()?)?;

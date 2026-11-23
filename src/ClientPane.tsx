@@ -12,6 +12,7 @@ import { FileCell } from './FileCell'
 import { SelectCell } from './SelectCell'
 import { ColumnDialog } from './ColumnDialog'
 import { DatePicker } from './DatePicker'
+import { floatingFromMs } from './dateFormat'
 import { SheetIcon } from './icons'
 import { useVirtualRows } from './virtualRows'
 import { useRowTransitions } from './rowTransitions'
@@ -570,6 +571,30 @@ function TrackingChip({ doc }: { doc: Y.Doc }) {
 }
 
 /** Wolke unten rechts: zeigt den Stand der Synchronisation, ein Klick öffnet die Einstellungen. */
+export interface AsOfInfo {
+  /** Gewählter Zeitpunkt (ms) */ at: number
+  /** Ältester Eintrag im Protokoll (ms) oder null */ earliest: number | null
+  /** Stand eventuell ungenau (Einträge ohne Gegenschritte) */ incomplete: boolean
+  onChange: (at: number) => void
+  onExit: () => void
+}
+
+/** Auswahl des Zeitpunkts in der Fußzeile der Ansicht eines früheren Standes (derselbe Datumsfeld-Auswahldialog wie bei Datumsspalten). */
+function AsOfPicker({ info }: { info: AsOfInfo }) {
+  const tooEarly = info.earliest !== null && info.at < info.earliest
+  return (
+    <>
+      <span className="asof-label">Stand vom</span>
+      <DatePicker className="asof-date" value={floatingFromMs(info.at)} withTime style="short" placeholder="Zeitpunkt wählen"
+        onChange={(v) => { const ms = v ? new Date(v).getTime() : NaN; if (Number.isFinite(ms) && ms <= Date.now() && ms !== info.at) info.onChange(ms) }} />
+      <button type="button" onClick={info.onExit}>Zur aktuellen Ansicht</button>
+      <span className="asof-note">Nur Lesen{info.earliest === null ? ' · Das Protokoll ist noch leer.' : ''}</span>
+      {tooEarly && <span className="asof-warn">Das Protokoll reicht nur bis {new Date(info.earliest!).toLocaleString('de-DE')}; davor ist der Stand nicht mehr bekannt.</span>}
+      {info.incomplete && <span className="asof-warn">Einige ältere Einträge enthalten keine Gegenschritte; der Stand kann ungenau sein.</span>}
+    </>
+  )
+}
+
 function SyncButton(props: { control: SyncControl; onClick: () => void }) {
   const { control } = props
   const status = control.server ? (control.state?.status === 'online' && control.state.readonly ? 'readonly' : control.state?.status ?? 'connecting') : 'none'
@@ -620,6 +645,8 @@ export function ClientPane(props: {
   sync?: SyncControl
   online?: boolean
   onToggle?: () => void
+  /** Ansicht eines früheren Standes (nur Lesen): Zeitpunkt, Auswahl und Rückkehr */
+  asOf?: AsOfInfo
 }) {
   // Wird das Dokument geschlossen, endet auch seine GPS-Verfolgung (sonst schriebe sie ins Leere).
   useEffect(() => () => { if (currentTracking()?.target.doc === props.doc) stopTracking() }, [props.doc])
@@ -928,7 +955,7 @@ export function ClientPane(props: {
 
   return (
     <ReprContext.Provider value={reprOf}>
-    <section ref={sectionRef} className={`pane ${props.online === false ? 'offline' : ''}`}>
+    <section ref={sectionRef} className={`pane ${props.online === false ? 'offline' : ''}${props.asOf ? ' asof' : ''}`}>
       {/* Titel und Online-Schalter nur im Simulationsmodus (mehrere Clients) */}
       {props.onToggle && (
         <header>
@@ -1090,7 +1117,20 @@ export function ClientPane(props: {
         </>
       )}
       </div>
-      {table && (
+      {props.asOf && (
+        <div className="addrow-bar asof-bar">
+          <AsOfPicker info={props.asOf} />
+          {table && (
+            <span className="rowsearch">
+              <input ref={searchRef} type="search" placeholder="Suchen …" aria-label="Tabelle durchsuchen" value={searches[table.id] ?? ''}
+                onChange={(e) => setSearches((s) => ({ ...s, [table.id]: e.target.value }))}
+                onKeyDown={(e) => { if (e.key === 'Escape') { setSearches((s) => ({ ...s, [table.id]: '' })); e.currentTarget.blur() } }} />
+              {matching && <small>{visibleIds.length} von {table.rowIds.length}</small>}
+            </span>
+          )}
+        </div>
+      )}
+      {!props.asOf && table && (
         <div className="addrow-bar">
           <button className="add-row" onClick={() => { setSearches((s) => ({ ...s, [table.id]: '' })); setFocusRow(addRow(doc, table.id)) }}>+ Zeile</button>
           <span className="rowsearch">
@@ -1103,7 +1143,7 @@ export function ClientPane(props: {
           {props.sync && <SyncButton control={props.sync} onClick={() => setSyncOpen(true)} />}
         </div>
       )}
-      {view && (
+      {view && !props.asOf && (
         <div className="addrow-bar view-bar">
           <span>Abgeleitete Tabelle aus „{tables.find((t) => t.id === view.def.source)?.name ?? '?'}“ – nur Lesen.</span>
           <button type="button" onClick={() => setViewDialog({ mode: 'edit', id: view.id })}>Bearbeiten …</button>

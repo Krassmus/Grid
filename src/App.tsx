@@ -13,6 +13,8 @@ import { ProfileDialog } from './ProfileDialog'
 import { SettingsDialog } from './SettingsDialog'
 import { LogDialog } from './LogDialog'
 import { installAudit } from './audit'
+import { RetentionDialog } from './RetentionDialog'
+import { buildAsOf } from './timeTravel'
 import { useProfiles } from './useTables'
 import { JoinDialog } from './MembersDialog'
 import type { MembersInfo } from './members'
@@ -52,10 +54,17 @@ function Single() {
   const [profileOpen, setProfileOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [logsOpen, setLogsOpen] = useState(false)
+  const [retentionOpen, setRetentionOpen] = useState(false)
+  const [asOfAt, setAsOfAt] = useState<number | null>(null)
+  const [asOfTick, setAsOfTick] = useState(0)
   const [members, setMembers] = useState<MembersInfo | null>(null)
   const profiles = useProfiles(session?.doc ?? NO_DOC)
   useEffect(() => (session ? installAudit(session.doc) : undefined), [session?.doc]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { if (!session) setLogsOpen(false) }, [session])
+  useEffect(() => { if (!session) { setLogsOpen(false); setRetentionOpen(false) } setAsOfAt(null) }, [session])
+  // Ansicht eines früheren Standes: eine Kopie des Dokuments, zurückgerechnet; Änderungsversuche verwerfen sie wieder
+  const asOf = useMemo(() => (session && asOfAt !== null ? buildAsOf(session.doc, asOfAt, () => setTimeout(() => setAsOfTick((n) => n + 1), 0)) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [session?.doc, asOfAt, asOfTick])
   const [listVersion, setListVersion] = useState(0)
 
   const unsaved = () => new FileSession(++counter.current, new Y.Doc(), null, newMeta(), new Set(), setError)
@@ -197,7 +206,7 @@ function Single() {
         await cur.flush()
       }
 
-      const actions: Record<string, () => Promise<void>> = { open, new: create, save, save_as: saveAs, open_cloud: async () => setCloudOpen(true), join: async () => setJoinOpen(true), account: async () => setProfileOpen(true), settings: async () => setSettingsOpen(true), logs_all: async () => { if (current.current) setLogsOpen(true) } }
+      const actions: Record<string, () => Promise<void>> = { open, new: create, save, save_as: saveAs, open_cloud: async () => setCloudOpen(true), join: async () => setJoinOpen(true), account: async () => setProfileOpen(true), settings: async () => setSettingsOpen(true), logs_all: async () => { if (current.current) setLogsOpen(true) }, logs_asof: async () => { if (current.current) setAsOfAt(Date.now()) }, logs_settings: async () => { if (current.current) setRetentionOpen(true) } }
       const unlisten = await listen<string>('menu', (e) => {
         if (e.payload === 'clear_recent') { writeRecent([]); return }
         if (e.payload === 'undo' || e.payload === 'redo') { runUndoCommand(e.payload); return }
@@ -230,6 +239,7 @@ function Single() {
       {profileOpen && <ProfileDialog onClose={() => setProfileOpen(false)} />}
       {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
       {logsOpen && session && <LogDialog doc={session.doc} onClose={() => setLogsOpen(false)} />}
+      {retentionOpen && session && <RetentionDialog doc={session.doc} onClose={() => setRetentionOpen(false)} />}
       {cloudOpen && <CloudOpenDialog onOpen={(d, server) => void openFromCloud(d, server)} onClose={() => setCloudOpen(false)} />}
       {error && !(isMobileUI && !session) && <div className="file-error" role="alert">{error}<button type="button" onClick={() => setError(null)}>✕</button></div>}
     </>
@@ -259,6 +269,15 @@ function Single() {
     moveTo: async (server) => { await session.moveTo(server); bump((n) => n + 1) },
     moved: session.movedTo,
     followMove: () => { const m = session.movedTo; if (m) { session.connect(m.server, m.key, !!session.meta.sync?.enc); bump((n) => n + 1) } },
+  }
+  if (asOf && asOfAt !== null) {
+    return (
+      <>
+        <ClientPane key="asof" title={UNSAVED_TITLE} doc={asOf.doc} persist={null}
+          asOf={{ at: asOfAt, earliest: asOf.earliest, incomplete: asOf.incomplete, onChange: setAsOfAt, onExit: () => setAsOfAt(null) }} />
+        {dialogs}
+      </>
+    )
   }
   return (
     <>
