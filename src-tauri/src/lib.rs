@@ -2,7 +2,7 @@ mod grid_file;
 
 use std::{path::PathBuf, sync::Mutex};
 #[cfg(desktop)]
-use tauri::menu::{CheckMenuItemBuilder, MenuBuilder, MenuItemBuilder, SubmenuBuilder};
+use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
 use tauri::{
   ipc::{InvokeBody, Request, Response},
   Emitter, Manager,
@@ -173,7 +173,7 @@ struct MenuState {
 }
 
 #[cfg(desktop)]
-fn build_menu<M: tauri::Manager<tauri::Wry>>(app: &M, recent: &[String], theme: &str) -> tauri::Result<()> {
+fn build_menu<M: tauri::Manager<tauri::Wry>>(app: &M, recent: &[String], _theme: &str) -> tauri::Result<()> {
   let item = |id: &str, text: &str, accel: &str| MenuItemBuilder::with_id(id, text).accelerator(accel).build(app);
   let mut recents = SubmenuBuilder::new(app, "Zuletzt geöffnet");
   if recent.is_empty() {
@@ -204,18 +204,11 @@ fn build_menu<M: tauri::Manager<tauri::Wry>>(app: &M, recent: &[String], theme: 
   let app_menu = SubmenuBuilder::new(app, "Grid")
     .about(None).separator()
     .item(&MenuItemBuilder::with_id("account", "Konto …").build(app)?)
+    .item(&MenuItemBuilder::with_id("settings", "Einstellungen …").accelerator("CmdOrCtrl+,").build(app)?)
     .separator().hide().hide_others().show_all().separator().quit()
     .build()?;
-  // Einstellungen: Erscheinungsbild (die Oberfläche wertet „theme:…“ aus und meldet den Stand über `set_theme` zurück)
-  let choice = |id: &str, text: &str| CheckMenuItemBuilder::with_id(format!("theme:{id}"), text).checked(theme == id).build(app);
-  let settings = SubmenuBuilder::new(app, "Einstellungen")
-    .item(&MenuItemBuilder::with_id("theme_label", "Erscheinungsbild").enabled(false).build(app)?)
-    .item(&choice("system", "Systemstandard")?)
-    .item(&choice("light", "Hell")?)
-    .item(&choice("dark", "Dunkel")?)
-    .build()?;
   let window = SubmenuBuilder::new(app, "Fenster").minimize().maximize().build()?;
-  app.app_handle().set_menu(MenuBuilder::new(app).items(&[&app_menu, &file, &edit, &settings, &window]).build()?)?;
+  app.app_handle().set_menu(MenuBuilder::new(app).items(&[&app_menu, &file, &edit, &window]).build()?)?;
   Ok(())
 }
 

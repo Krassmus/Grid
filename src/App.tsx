@@ -10,6 +10,7 @@ import { FileSession } from './fileSession'
 import { isThemeChoice, setTheme } from './theme'
 import { CloudOpenDialog, type SyncControl } from './SyncDialog'
 import { ProfileDialog } from './ProfileDialog'
+import { SettingsDialog } from './SettingsDialog'
 import { useProfiles } from './useTables'
 import { JoinDialog } from './MembersDialog'
 import type { MembersInfo } from './members'
@@ -47,6 +48,7 @@ function Single() {
   const [cloudOpen, setCloudOpen] = useState(false)
   const [joinOpen, setJoinOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [members, setMembers] = useState<MembersInfo | null>(null)
   const profiles = useProfiles(session?.doc ?? NO_DOC)
   const [listVersion, setListVersion] = useState(0)
@@ -190,7 +192,7 @@ function Single() {
         await cur.flush()
       }
 
-      const actions: Record<string, () => Promise<void>> = { open, new: create, save, save_as: saveAs, open_cloud: async () => setCloudOpen(true), join: async () => setJoinOpen(true), account: async () => setProfileOpen(true) }
+      const actions: Record<string, () => Promise<void>> = { open, new: create, save, save_as: saveAs, open_cloud: async () => setCloudOpen(true), join: async () => setJoinOpen(true), account: async () => setProfileOpen(true), settings: async () => setSettingsOpen(true) }
       const unlisten = await listen<string>('menu', (e) => {
         if (e.payload === 'clear_recent') { writeRecent([]); return }
         if (e.payload === 'undo' || e.payload === 'redo') { runUndoCommand(e.payload); return }
@@ -221,6 +223,7 @@ function Single() {
     <>
       {joinOpen && <JoinDialog onClose={() => setJoinOpen(false)} onJoined={(i: Invite) => { setJoinOpen(false); void openFromCloud({ id: i.doc, name: i.name, updated: 0 }, i.server, i.key, !!i.enc) }} />}
       {profileOpen && <ProfileDialog onClose={() => setProfileOpen(false)} />}
+      {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
       {cloudOpen && <CloudOpenDialog onOpen={(d, server) => void openFromCloud(d, server)} onClose={() => setCloudOpen(false)} />}
       {error && !(isMobileUI && !session) && <div className="file-error" role="alert">{error}<button type="button" onClick={() => setError(null)}>✕</button></div>}
     </>
