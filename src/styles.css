@@ -351,7 +351,7 @@ textarea.cell { resize: none; line-height: 1.35; overflow: hidden; display: bloc
 
 /* Formular für einen Datensatz */
 .recordform { width: min(460px, 94vw); max-height: 90vh; display: flex; flex-direction: column; gap: 12px; }
-.rf-fields { display: grid; gap: 12px; overflow: auto; padding: 2px; }
+.rf-fields { border: 0; margin: 0; min-width: 0; display: grid; gap: 12px; overflow: auto; padding: 2px; }
 .rf-unit { display: flex; align-items: center; gap: 8px; }
 .rf-unit input { flex: 1; min-width: 0; }
 .rf-error { color: var(--c-b4281c); font-size: 12px; }

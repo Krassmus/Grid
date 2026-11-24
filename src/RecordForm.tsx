@@ -147,6 +147,8 @@ export function RecordForm(props: {
   title: string
   initial?: Record<string, CellValue>
   submitLabel?: string
+  /** Nur ansehen: Felder gesperrt, kein Speichern. */
+  readOnly?: boolean
   /** Beim Bearbeiten: Dateien und Verknüpfungen, die die Zeile schon hat. */
   existing?: ExistingRecord
   /** Feld für eine Relationsspalte (Auswahl der Zielzeilen); fehlt es, werden Relationen im Formular ausgelassen. */
@@ -178,7 +180,7 @@ export function RecordForm(props: {
   const invalid = cols.some((c) => c.type === 'geo' && geoError(c))
 
   const submit = async () => {
-    if (invalid || busy) return
+    if (invalid || busy || props.readOnly) return
     const out: Record<string, CellValue> = { ...values }
     for (const c of cols) {
       if (c.type !== 'geo') continue
@@ -266,7 +268,7 @@ export function RecordForm(props: {
         onSubmit={(e) => { e.preventDefault(); submit() }}
         onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); props.onClose() } }}>
         <h3>{props.title}</h3>
-        <div className="rf-fields">
+        <fieldset className="rf-fields" disabled={props.readOnly}>
           {cols.map((c, i) => (
             <div key={c.id} className="cfg-field">
               <span>{c.name}</span>
@@ -274,11 +276,13 @@ export function RecordForm(props: {
             </div>
           ))}
           {cols.length === 0 && <p className="hint">{t('Diese Tabelle hat keine Felder zum Ausfüllen. Der Datensatz wird leer angelegt.')}</p>}
-        </div>
+        </fieldset>
         {failure && <p className="formula-error" role="alert">{failure}</p>}
         <div className="actions">
-          <button type="button" onClick={props.onClose}>{t('Abbrechen')}</button>
-          <button type="submit" className="primary" disabled={!!invalid || busy}>{busy ? t('Speichert …') : props.submitLabel ?? t('Anlegen')}</button>
+          {props.readOnly
+            ? <button type="button" autoFocus className="primary" onClick={props.onClose}>{t('Schließen')}</button>
+            : <><button type="button" onClick={props.onClose}>{t('Abbrechen')}</button>
+          <button type="submit" className="primary" disabled={!!invalid || busy}>{busy ? t('Speichert …') : props.submitLabel ?? t('Anlegen')}</button></>}
         </div>
       </form>
     </Modal>

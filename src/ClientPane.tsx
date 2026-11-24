@@ -166,6 +166,7 @@ function Picker(props: {
 /** Bestehenden Datensatz im Formular bearbeiten (Klick auf eine Kachel). Änderungen werden erst mit „Speichern“ übernommen. */
 function EditRecordDialog(props: { doc: Y.Doc; tables: TableInfo[]; table: TableInfo; rowId: string; onClose: () => void }) {
   const { doc, tables, table, rowId } = props
+  const readOnly = useRights().access(table.id) !== 'write'
   const reprs = useReprs()
   const title = reprs(table.id)?.get(rowId)?.title ?? summarize(doc, table, rowId).title
   // Stand beim Öffnen: Werte, Dateien, Verknüpfungen
@@ -182,9 +183,9 @@ function EditRecordDialog(props: { doc: Y.Doc; tables: TableInfo[]; table: Table
     return { values, existing }
   })
   return (
-    <RecordForm doc={doc} table={table} title={t('„{title}“ bearbeiten', { title })} submitLabel={t('Speichern')} initial={snap.values} existing={snap.existing}
+    <RecordForm doc={doc} table={table} title={t('„{title}“ bearbeiten', { title })} submitLabel={t('Speichern')} readOnly={readOnly} initial={snap.values} existing={snap.existing}
       onClose={props.onClose}
-      relationField={(col, ids, update) => <RelationDraftField doc={doc} tables={tables} col={col} ids={ids} update={update} rowId={rowId} />}
+      relationField={(col, ids, update) => <RelationDraftField doc={doc} tables={tables} col={col} ids={ids} update={update} rowId={rowId} readOnly={readOnly} />}
       onSubmit={async (values, extras) => {
         await updateRecord(doc, table.id, rowId, values, snap.values, extras, snap.existing.relations)
         props.onClose()
@@ -193,7 +194,7 @@ function EditRecordDialog(props: { doc: Y.Doc; tables: TableInfo[]; table: Table
 }
 
 /** Relationsfeld im Formular: gewählte Zielzeilen als Kacheln, „+“ öffnet die Auswahl. Gespeichert wird erst beim Anlegen. */
-function RelationDraftField(props: { doc: Y.Doc; tables: TableInfo[]; col: ColumnInfo; ids: string[]; update: (f: (prev: string[]) => string[]) => void; /** Der Datensatz, der bearbeitet wird (nicht beim Anlegen). */ rowId?: string }) {
+function RelationDraftField(props: { doc: Y.Doc; tables: TableInfo[]; col: ColumnInfo; ids: string[]; update: (f: (prev: string[]) => string[]) => void; /** Der Datensatz, der bearbeitet wird (nicht beim Anlegen). */ rowId?: string; readOnly?: boolean }) {
   const { doc, tables, col, ids, update } = props
   const target = tables.find((t) => t.id === col.target)
   const owner = tables.find((t) => t.columns.some((c) => c.id === col.id))
@@ -203,8 +204,8 @@ function RelationDraftField(props: { doc: Y.Doc; tables: TableInfo[]; col: Colum
   const single = RELATION.config(col).single
   return (
     <div className="tiles rf-tiles">
-      {ids.map((id) => <Tile key={id} doc={doc} table={target} rowId={id} display={RELATION.config(col).display === 'avatar' ? 'avatar' : undefined} onRemove={() => update((p) => p.filter((x) => x !== id))} />)}
-      {!(single && ids.length >= 1) && (
+      {ids.map((id) => <Tile key={id} doc={doc} table={target} rowId={id} display={RELATION.config(col).display === 'avatar' ? 'avatar' : undefined} onRemove={props.readOnly ? undefined : () => update((p) => p.filter((x) => x !== id))} />)}
+      {!props.readOnly && !(single && ids.length >= 1) && (
         <button type="button" className="add-tile" onClick={() => setPicking(true)} disabled={!target} title={target ? t('Datensatz verknüpfen') : t('Zieltabelle fehlt')}>+</button>
       )}
       {picking && target && (
@@ -336,14 +337,14 @@ function RelationCell(props: {
               <Tile doc={doc} table={target} rowId={e.item}
                 display={RELATION.config(col).display === 'avatar' ? 'avatar' : undefined}
                 drag={ro ? undefined : { slot, targetTable: col.target }}
-                onClick={ro ? undefined : () => setEditingRow(e.item)}
+                onClick={() => setEditingRow(e.item)}
                 onRemove={ro ? undefined : () => removeLink(doc, table.id, rowId, col.id, e.item)} />
             </AnimItem>
           ))
           if (ins) nodes.splice(Math.min(ins.index, nodes.length), 0, <DropGap key="drop-gap" width={ins.width} height={ins.height} />)
           return nodes
         })()}
-        {!(RELATION.config(col).single && ids.length >= 1) && <button type="button" className="add-tile" onClick={() => setPicking(true)} disabled={!target}
+        {!ro && !(RELATION.config(col).single && ids.length >= 1) && <button type="button" className="add-tile" onClick={() => setPicking(true)} disabled={!target}
           title={target ? t('Datensatz verknüpfen') : t('Zieltabelle fehlt')}>+</button>}
       </div>
       {picking && target && (
@@ -375,17 +376,21 @@ function BacklinkCell(props: {
   const target = props.tables.find((t) => t.id === props.col.target)
   const multi = allowsMultiTarget(props.col) // sonst steht im Rückverweis höchstens ein Datensatz
   const ro = useRights().access(props.source.id) !== 'write'
+  const [viewing, setViewing] = useState<string | null>(null) // nur lesen: Datensatz im Formular ansehen
   return (
     <div className="c rel backlink">
       <div className="tiles">
         {anim.entries.map((e) => (
           <AnimItem key={e.key} phase={e.phase} onExited={() => anim.done(e.key)}>
-            <Tile doc={props.doc} table={props.source} rowId={e.item} muted onClick={ro ? undefined : () => setLinking({ current: e.item })} />
+            <Tile doc={props.doc} table={props.source} rowId={e.item} muted onClick={() => ro ? setViewing(e.item) : setLinking({ current: e.item })} />
           </AnimItem>
         ))}
         {anim.entries.length === 0 && <span className="empty">–</span>}
-        {target && (multi || ids.length === 0) && <button type="button" className="add-tile" onClick={() => setLinking({ current: null })} title={t('Datensatz aus „{name}“ verknüpfen', { name: props.source.name })}>+</button>}
+        {!ro && target && (multi || ids.length === 0) && <button type="button" className="add-tile" onClick={() => setLinking({ current: null })} title={t('Datensatz aus „{name}“ verknüpfen', { name: props.source.name })}>+</button>}
       </div>
+      {viewing && rowExists(props.doc, props.source.id, viewing) && (
+        <EditRecordDialog doc={props.doc} tables={props.tables} table={props.source} rowId={viewing} onClose={() => setViewing(null)} />
+      )}
       {linking && target && (
         <BacklinkPicker doc={props.doc} source={props.source} col={props.col} target={target} rowId={props.rowId} current={linking.current} linked={ids} multi={multi} onClose={() => setLinking(null)} />
       )}
