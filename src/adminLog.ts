@@ -36,6 +36,8 @@ export interface AdminEntry {
   name: string
   time: number
   sig: string
+  /** Vom Server vergeben, nicht unterschrieben: Nummer des letzten Eintrags im Datenstrom, als dieser Eintrag angenommen wurde. Gilt für Änderungen danach. */
+  at?: number
 }
 
 export interface Member { pub: string; role: Role; name: string }

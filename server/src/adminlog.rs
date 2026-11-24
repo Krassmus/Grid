@@ -31,6 +31,10 @@ pub struct Entry {
     pub name: String,
     pub time: i64,
     pub sig: String,
+    /// Nummer des letzten Eintrags im Datenstrom des Dokuments, als der Server diesen Eintrag annahm (nicht unterschrieben).
+    /// Wirkt von da an für alle Änderungen danach; so bewerten alle Clients dieselbe Änderung nach denselben Rechten (docs/RIGHTS.md).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<u64>,
 }
 
 impl Entry {
@@ -65,6 +69,8 @@ pub struct State {
     pub moved: Option<(String, String)>,
     /// Ein Admin hat das Dokument als Ende-zu-Ende-verschlüsselt festgelegt (Eintrag `encrypt`, docs/E2E.md)
     pub enc: bool,
+    /// Gruppen (IDs); solange es eine gibt, gilt die Rechteverwaltung (docs/RIGHTS.md)
+    pub groups: std::collections::BTreeSet<String>,
     /// Anzahl der Einträge und Hash des letzten
     pub len: u64,
     pub head: String,
@@ -110,7 +116,11 @@ impl State {
                     // Rechte (docs/RIGHTS.md): der Server prüft nur Unterzeichner und Format. Die Gruppen selbst wertet der Client aus; Unstimmiges bewirkt dort nichts.
                     if actor.role != "admin" { return Err("Nur Admins dürfen das"); }
                     match e.kind.as_str() {
-                        "group" => { if e.role != "member" || e.subject_pub != "0".repeat(64) || e.name.trim().is_empty() { return Err("Gruppe ungültig"); } }
+                        "group" => {
+                            if e.role != "member" || e.subject_pub != "0".repeat(64) || e.name.trim().is_empty() { return Err("Gruppe ungültig"); }
+                            next.groups.insert(e.subject.clone());
+                        }
+                        "ungroup" => { next.groups.remove(&e.subject); }
                         "join-group" | "leave-group" => { if !valid_id(&e.name) { return Err("Gruppe ungültig"); } }
                         "grant" => {
                             let ok = e.name.split_once('|').map_or(false, |(obj, level)| valid_id(obj) && matches!(level, "none" | "read" | "write"));
@@ -164,7 +174,7 @@ mod tests {
     fn entry(s: &State, signer: &Person, kind: &str, subject: &Person, role: &str, name: &str) -> Entry {
         let mut e = Entry {
             v: 1, doc: DOC.into(), seq: s.len + 1, prev: s.head.clone(), kind: kind.into(), actor: signer.id.clone(),
-            subject: subject.id.clone(), subject_pub: subject.pubhex(), role: role.into(), name: name.into(), time: 1_700_000_000, sig: String::new(),
+            subject: subject.id.clone(), subject_pub: subject.pubhex(), role: role.into(), name: name.into(), time: 1_700_000_000, sig: String::new(), at: None,
         };
         e.sig = hex(&signer.key.sign(e.signing_text().as_bytes()).to_bytes());
         e
@@ -260,6 +270,7 @@ mod tests {
         group.subject_pub = "0".repeat(64);
         let group = sign(&a, group);
         let s3 = s2.apply(DOC, &group).unwrap();
+        assert!(s3.groups.contains(&gid.id));
         // Mitglieder dürfen keine Gruppen anlegen
         let mut by_member = entry(&s3, &b, "group", &gid, "member", "Hack");
         by_member.subject_pub = "0".repeat(64);
@@ -274,6 +285,9 @@ mod tests {
         let mut grant = entry(&s4, &a, "grant", &gid, "member", "tttttttt|write");
         grant.subject_pub = "0".repeat(64);
         assert!(s4.apply(DOC, &sign(&a, grant)).is_ok());
+        let mut ungroup = entry(&s4, &a, "ungroup", &gid, "member", "");
+        ungroup.subject_pub = "0".repeat(64);
+        assert!(s4.apply(DOC, &sign(&a, ungroup)).unwrap().groups.is_empty());
         let mut bad_grant = entry(&s4, &a, "grant", &gid, "member", "tttttttt|admin");
         bad_grant.subject_pub = "0".repeat(64);
         assert_eq!(s4.apply(DOC, &sign(&a, bad_grant)), Err("Recht ungültig"));

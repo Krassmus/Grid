@@ -1009,3 +1009,59 @@ async fn server_stops_accepting_changes_when_disk_space_is_low() {
     let m = get_members(&addr, &ta).await.1;
     assert_eq!(m["writable"]["code"], "disk");
 }
+
+/// Rechte (docs/RIGHTS.md): Protokolleinträge tragen die Stromnummer `at`; mit Gruppen führen nur Admins zusammen.
+#[tokio::test]
+async fn group_entries_carry_stream_position_and_only_admins_compact() {
+    let dir = tmp("rights");
+    let addr = serve(&dir, true).await;
+    let (a, b) = (acct(1), acct(2));
+    let (ta, tb) = (token(&addr, &a).await, token(&addr, &b).await);
+    let mut c = Chain::new();
+    let (g, h) = c.entry(&a, "genesis", &a, "admin", "Anna");
+    assert_eq!(status(&http_hdr("POST", &addr, &format!("/docs/{DOC}/admin"), Some(&ta), "X-Grid-Enc: 1\r\n", g.to_string().as_bytes()).await), 204);
+    c.accept(h);
+    let (set, h) = c.entry(&a, "set", &b, "member", "Ben");
+    assert_eq!(status(&post_entry(&addr, &ta, &set).await), 204);
+    c.accept(h);
+    let keys = format!("/docs/{DOC}/keys");
+    for who in [&a, &b] {
+        let body = serde_json::json!([{ "epoch": 1, "account": who.id, "box": "k" }]);
+        assert_eq!(status(&http("PUT", &addr, &keys, Some(&ta), body.to_string().as_bytes()).await), 204);
+    }
+    let (mut wa, _, _) = open_enc(&addr, &ta, 0).await;
+    let (mut wb, _, _) = open_enc(&addr, &tb, 0).await;
+    wa.send(frame(4, &enc_entry(1))).await.unwrap();
+    wa.send(frame(4, &enc_entry(2))).await.unwrap();
+    for _ in 0..2 { next_entry(&mut wa).await; next_entry(&mut wb).await; }
+
+    // Gruppe anlegen: der Eintrag merkt sich die Stromnummer (2)
+    let gid = "gggggggg-0000-0000-0000-000000000001";
+    let zero = "0".repeat(64);
+    let signed = |kind: &str, subject: &str, subject_pub: &str, role: &str, name: &str, c: &Chain| {
+        let text = ["grid-admin-v1", DOC, &c.seq.to_string(), &c.prev, kind, &a.id, subject, subject_pub, role, name, "1700000000"].join("\n");
+        let sig: String = a.key.sign(text.as_bytes()).to_bytes().iter().map(|b| format!("{b:02x}")).collect();
+        use sha2::{Digest, Sha256};
+        let hash = Sha256::digest(format!("{text}\n{sig}")).iter().map(|b| format!("{b:02x}")).collect::<String>();
+        (serde_json::json!({ "v": 1, "doc": DOC, "seq": c.seq, "prev": c.prev, "type": kind, "actor": a.id, "subject": subject,
+            "subjectPub": subject_pub, "role": role, "name": name, "time": 1_700_000_000i64, "sig": sig }), hash)
+    };
+    let (grp, h) = signed("group", gid, &zero, "member", "Redaktion", &c);
+    assert_eq!(status(&post_entry(&addr, &ta, &grp).await), 204);
+    c.accept(h);
+    let m = get_members(&addr, &ta).await.1;
+    assert_eq!(m["entries"][2]["at"], 2);
+    assert_eq!(m["entries"][0]["at"], 0);
+
+    // Mit Gruppen: Ben (Mitglied) darf nicht zusammenführen, Anna (Admin) schon
+    let mut snap = 2i64.to_be_bytes().to_vec();
+    snap.extend(enc_entry(9));
+    wb.send(frame(6, &snap)).await.unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    let (_w, all, _) = open_enc(&addr, &ta, 0).await;
+    assert_eq!(all.iter().map(|e| e.0).collect::<Vec<_>>(), vec![1, 2], "Ben darf den Verlauf nicht ersetzen");
+    wa.send(frame(6, &snap)).await.unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    let (_w, all, _) = open_enc(&addr, &ta, 0).await;
+    assert_eq!(all, vec![(2, enc_entry(9))]);
+}

@@ -491,7 +491,7 @@ async fn members(State(s): State<Shared>, h: HeaderMap, Path(doc): Path<String>)
 }
 
 /// Neuer Eintrag im Admin-Protokoll (vom Aufrufer unterschrieben).
-async fn post_admin(State(s): State<Shared>, h: HeaderMap, Path(doc): Path<String>, Json(entry): Json<adminlog::Entry>) -> Response {
+async fn post_admin(State(s): State<Shared>, h: HeaderMap, Path(doc): Path<String>, Json(mut entry): Json<adminlog::Entry>) -> Response {
     let Some(id) = current(&s, &h) else { return StatusCode::UNAUTHORIZED.into_response() };
     if !valid_doc(&doc) { return StatusCode::BAD_REQUEST.into_response(); }
     if entry.actor != id { return (StatusCode::FORBIDDEN, "Der Eintrag muss vom angemeldeten Konto stammen").into_response(); }
@@ -512,6 +512,7 @@ async fn post_admin(State(s): State<Shared>, h: HeaderMap, Path(doc): Path<Strin
         return (StatusCode::BAD_REQUEST, "Dieser Server verlangt verschlüsselte Dokumente").into_response();
     }
     let next = match before.apply(&doc, &entry) { Ok(n) => n, Err(e) => return (StatusCode::BAD_REQUEST, e).into_response() };
+    entry.at = Some(s.store.last_enc_seq(&doc).unwrap_or(0)); // gilt für Änderungen ab dieser Stelle des Datenstroms
     let json = match serde_json::to_string(&entry) { Ok(j) => j, Err(e) => return fail(e) };
     if s.store.append_admin(&doc, entry.seq, &json).is_err() {
         return (StatusCode::CONFLICT, "Das Protokoll hat sich inzwischen geändert").into_response();
@@ -537,7 +538,7 @@ struct ImportBody { entries: Vec<adminlog::Entry> }
 
 /// Dokument auf diesen Server umziehen: das ganze Admin-Protokoll übernehmen (Mitglieder und Admins bleiben erhalten).
 /// Nur für ein Dokument, das hier noch niemand angelegt hat, und nur durch einen Admin des Protokolls.
-async fn import_log(State(s): State<Shared>, h: HeaderMap, Path(doc): Path<String>, Json(b): Json<ImportBody>) -> Response {
+async fn import_log(State(s): State<Shared>, h: HeaderMap, Path(doc): Path<String>, Json(mut b): Json<ImportBody>) -> Response {
     let Some(id) = current(&s, &h) else { return StatusCode::UNAUTHORIZED.into_response() };
     if !valid_doc(&doc) { return StatusCode::BAD_REQUEST.into_response(); }
     match s.unclaimed(&doc) { Ok(true) => {} Ok(false) => return (StatusCode::CONFLICT, "Das Dokument gibt es hier schon").into_response(), Err(e) => return fail(e) }
@@ -546,6 +547,7 @@ async fn import_log(State(s): State<Shared>, h: HeaderMap, Path(doc): Path<Strin
     if state.role(&id) != Some("admin") { return (StatusCode::FORBIDDEN, "Nur ein Admin des Dokuments darf es umziehen").into_response(); }
     let state_enc = state.enc;
     if s.cfg.require_enc && !state_enc { return (StatusCode::BAD_REQUEST, "Dieser Server verlangt verschlüsselte Dokumente").into_response(); }
+    for e in b.entries.iter_mut() { e.at = Some(0); } // der Datenstrom beginnt hier neu: alle Einträge gelten von Anfang an
     let rows: Result<Vec<(u64, String)>, _> = b.entries.iter().map(|e| serde_json::to_string(e).map(|j| (e.seq, j))).collect();
     let Ok(rows) = rows else { return StatusCode::BAD_REQUEST.into_response() };
     if s.store.append_admin_all(&doc, &rows).is_err() { return (StatusCode::CONFLICT, "Das Dokument gibt es hier schon").into_response(); }
@@ -840,14 +842,19 @@ async fn session_enc(state: Shared, id: String, account: String, mut socket: Web
                     if body.len() < 29 { continue } // Epoche + Nonce + Tag
                     let Ok((seq, n)) = state.store.append_enc(&id, body) else { break };
                     let _ = room.tx.send(Event::Enc(seq, Arc::new(body.to_vec())));
-                    if n >= COMPACT_AT {
+                    let may_compact = state.log_state(&id).ok().flatten().is_none_or(|st| st.groups.is_empty() || st.role(&account) == Some("admin"));
+                    if n >= COMPACT_AT && may_compact {
                         let m = serde_json::json!({ "t": "compact", "upto": seq, "count": n });
                         if socket.send(Message::Text(m.to_string().into())).await.is_err() { break }
                     }
                 } else {
                     if body.len() < 8 + 29 { continue }
                     let upto = i64::from_be_bytes(body[..8].try_into().unwrap_or([0; 8]));
-                    let _ = state.store.compact_enc(&id, upto, &body[8..]);
+                    // Mit Rechteverwaltung (Gruppen) zusammenführen nur Admins: der Gesamtzustand bündelt Änderungen aller und muss von einem Admin stammen
+                    let rights = state.log_state(&id).ok().flatten().map(|st| (!st.groups.is_empty(), st.role(&account) == Some("admin")));
+                    if rights.is_none_or(|(active, admin)| !active || admin) {
+                        let _ = state.store.compact_enc(&id, upto, &body[8..]);
+                    }
                 }
             }
             outgoing = rx.recv() => {

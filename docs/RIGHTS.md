@@ -1,6 +1,6 @@
 # Grid: Rechte (Gruppen)
 
-Stand: Phase 1 gebaut (Modell, Gruppen-Dialog, Anzeige); Phase 2 (signierte Updates und Prüfung) offen. Ergänzt `docs/SYNC.md` (Mitglieder, Admin-Protokoll) und `docs/E2E.md` (Verschlüsselung).
+Stand: Phase 1 (Modell, Gruppen-Dialog, Anzeige) und Phase 2 (signierte Änderungen, Prüfung beim Empfang) gebaut; Phase 2 ist bisher nur in Einzelteilen und gegen den Server geprüft, noch nicht mit zwei echten Clients. Ergänzt `docs/SYNC.md` (Mitglieder, Admin-Protokoll) und `docs/E2E.md` (Verschlüsselung).
 
 ## Entscheidungen
 
@@ -50,6 +50,18 @@ Daraus berechnet jeder Client dieselben **wirksamen Rechte** (`rightsOf(konto, o
 - **Oberfläche:** Dialog „Gruppen und Rechte“ (Mitglieder → „Gruppen und Rechte …“, nur Admins). Ohne Leserecht fehlen Tabelle, Sicht oder Karte in den Reitern. Relationsspalten auf unlesbare Tabellen, Rollups darüber und Formeln oder Texte mit Platzhaltern, die darauf zugreifen, sind ausgeblendet (`src/rightsView.ts`). Bei *lesen* sind Zellen, Relationen, Dateien, „+ Zeile“ und Löschen gesperrt (`<fieldset disabled>` um die Zeilen); auf Karten sind Zeichnen und Ziehen von Markern nur mit Schreibrecht an der Karte bzw. der Tabelle möglich. Struktur (Spalten, Tabellen, Relationen, Sichten, Karten anlegen und ändern, Reihenfolge, Spaltenbreite, Auswertung der Summenzeile) bleibt Admins vorbehalten.
 - **Änderungsprotokoll und Zeitreise** nennen Tabellen und Werte; bei aktiver Rechteverwaltung sind sie nur für Admins zugänglich (Menü „Logs“).
 - **Noch nicht durchgesetzt:** Das ist reine Oberfläche. Ein veränderter Client kann weiterhin lesen und schreiben; das Schreiben wird erst in Phase 2 geprüft.
+
+## Phase 2 (gebaut): Schreiben wird beim Empfang geprüft
+
+Gilt nur für **verschlüsselte** Dokumente (alle neuen Cloud-Dokumente). In unverschlüsselten Dokumenten bleibt es bei der Oberfläche.
+
+- **Zuordnung (`src/updateScope.ts`):** Ein Update wird nicht angewendet, sondern gelesen: jede neue oder gelöschte Stelle wird über ihre Eltern bis zur Wurzel verfolgt. Ergebnis: geänderte Tabellen (Zeilen, Verknüpfungen, Dateien), geänderte Karten (Objekte), *Struktur* (Tabellen, Spalten, Sichten, Reihenfolge, Einstellungen, Karten selbst), *unbekannt* (Eltern fehlen). Änderungsprotokoll und Profile sind frei. Bereits Bekanntes zählt nicht, deshalb stört ein erneut hochgeladener Gesamtzustand nicht. Kosten gemessen: etwa 0,25 ms je Update bei 20.000 Zeilen, einschließlich Erzeugen und Anwenden.
+- **Signierte Hüllen (`src/signedUpdate.ts`):** Sobald es Gruppen gibt, steht im verschlüsselten Eintrag vor dem Update die Kennung des Autors und seine Ed25519-Unterschrift (Art: Änderung oder Gesamtzustand). Ohne Gruppen bleibt der Klartext das bloße Update, damit alte Clients lesefähig bleiben.
+- **Der Stand zum richtigen Zeitpunkt:** Jeder Eintrag im Admin-Protokoll trägt vom Server die Stromnummer `at` (nicht unterschrieben): die Nummer des letzten Datenstrom-Eintrags, als er angenommen wurde. Ein Strom-Eintrag Nummer *s* wird nach dem Protokollstand bewertet, dessen `at` < *s* ist (der Eintrag `at` selbst kam noch vor dem Protokolleintrag) (`RightsTimeline` in `src/updateGuard.ts`). So urteilen alle Clients über dieselbe Änderung gleich, auch spät hinzugekommene: Was ein Autor vor einem Entzug schrieb, bleibt gültig, was danach kommt, wird abgelehnt. Beim Umzug auf einen anderen Server bekommen alle Einträge `at` = 0.
+- **Prüfung (`judge`):** Ohne Gruppen am Stand von *s* gilt alles. Mit Gruppen muss die Änderung unterschrieben sein, vom Mitglied stammen, die Unterschrift muss stimmen, und die Änderung darf nur Tabellen und Karten betreffen, an denen der Autor schreiben darf. Struktur und Unbekanntes dürfen nur Admins. Gesamtzustände müssen von einem Admin unterschrieben sein. Abgelehntes kommt weder ins Dokument noch in den Schatten-Zustand, also auch nie in einen Gesamtzustand; die Oberfläche zählt die abgelehnten Änderungen im Cloud-Dialog.
+- **Zusammenführen:** Mit Gruppen führen nur Admins zusammen (Client und Server). Der Gesamtzustand ist aus dem Schatten-Zustand gebildet, der nur Geprüftes enthält, und vom Admin unterschrieben. Ein Admin, der sich verbindet, führt bei Bedarf zusammen.
+- **Mitgliederliste aktuell:** Eingehende Änderungen warten, bis die Mitgliederliste geladen ist (neues Mitglied: erst abholen), sonst käme Ungeprüftes ins Dokument.
+- **Folgen und Grenzen:** Spätere Änderungen anderer, die auf einer abgelehnten aufbauen, bleiben in Yjs wartend. Der Autor einer abgelehnten Änderung sieht sie bei sich weiter. Lesen bleibt Sichtbarkeit. Ältere Clients ohne diese Version werden ab dem ersten Gruppeneintrag nicht mehr verstanden und ihre Änderungen abgelehnt. Der Server muss in der neuen Version laufen (er vergibt `at` und beschränkt das Zusammenführen).
 
 ## Phasen
 

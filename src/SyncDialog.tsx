@@ -5,7 +5,7 @@ import { AuthError, fetchAccountInfo, fetchServerInfo, listCloudDocs, normalizeS
 import { MembersDialog, type MembersControl } from './MembersDialog'
 import { openExternal } from './externalLink'
 import { MOCK_SERVER, buy, iapAvailable, loadProducts, syncPurchases, type StoreProduct } from './iap'
-import { t, language, locale } from './i18n'
+import { t, tn, language, locale } from './i18n'
 
 const LAST = 'grid-sync-last-server'
 export const lastServer = () => { try { return localStorage.getItem(LAST) ?? MOCK_SERVER } catch { return MOCK_SERVER } }
@@ -14,6 +14,9 @@ export const rememberServer = (s: string) => { try { localStorage.setItem(LAST, 
 /** Was die Oberfläche über die Cloud-Anbindung des Dokuments wissen und tun darf. */
 export interface SyncControl extends MembersControl {
   state: SyncState | null
+  /** Änderungen anderer, die wegen fehlender Rechte abgelehnt wurden (seit dem Öffnen), und der letzte Grund */
+  rejected?: number
+  lastRejection?: string
   server: string | null
   /** Dokument ist Ende-zu-Ende-verschlüsselt (steht fest, solange es besteht) */
   enc: boolean
@@ -225,6 +228,7 @@ export function SyncDialog(props: { control: SyncControl; onClose: () => void })
               </div>
               <span className={`chip ${c.enc ? 'lock' : 'open'}`}>{c.enc ? t('🔒 Ende-zu-Ende verschlüsselt') : t('Nicht verschlüsselt')}</span>
             </section>
+            {!!c.rejected && <p className="cloud-note bad" role="status">{tn(c.rejected, '{n} Änderung eines Mitglieds wurde abgelehnt', '{n} Änderungen von Mitgliedern wurden abgelehnt')} ({c.lastRejection})</p>}
             {note && <p className={`cloud-note ${tone}`} role={tone === 'bad' ? 'alert' : 'status'}>{note}</p>}
             {st?.status === 'denied' && st.kind === 'untrusted' && (
               <div className="actions"><button type="button" className="danger-outline" onClick={() => c.trustServer()}>{t('Dem neuen Schlüssel vertrauen')}</button></div>

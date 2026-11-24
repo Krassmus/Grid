@@ -205,9 +205,10 @@ function Single() {
     if (!session) return
     session.onSyncState = setSyncState
     session.onMembers = setMembers
+    session.onRejected = () => bump((n) => n + 1)
     setSyncState(session.syncState)
     setMembers(session.members)
-    return () => { session.onSyncState = null; session.onMembers = null }
+    return () => { session.onSyncState = null; session.onMembers = null; session.onRejected = null }
   }, [session])
   useEffect(() => { if (session) setWindowTitle(session.path ? baseName(session.path) : t(UNSAVED_TITLE)) }, [session, lang])
 
@@ -308,6 +309,7 @@ function Single() {
   }
   const control: SyncControl = {
     state: syncState,
+    rejected: session.rejected, lastRejection: session.lastRejection,
     members,
     profiles,
     accept: session.accept, reject: session.reject, remove: session.remove, changeRole: session.changeRole, changeGroups: session.changeGroups, invite: () => session.invite(),

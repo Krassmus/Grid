@@ -9,7 +9,9 @@ import { DocKeys } from './docKeys'
 import { iapAvailable, syncPurchases } from './iap'
 import { publishProfile } from './model'
 import { getProfile, onProfileChange } from './profile'
-import { replay, type AdminState, type Role } from './adminLog'
+import { replay, type AdminEntry, type AdminState, type Role } from './adminLog'
+import { judge, RightsTimeline } from './updateGuard'
+import { accountIdNow } from './identity'
 import { t } from './i18n'
 
 /** Ab so vielen Einträgen im Protokoll ersetzt ein Gesamtzustand die Updates. */
@@ -83,18 +85,46 @@ export class FileSession {
     const sync = this.meta.sync
     if (!sync) return
     this.conn?.close()
+    this.membersTried = false
     if (sync.key) pinServer(sync.server, sync.key) // in der Datei gemerkt: der Server muss diesen Schlüssel beweisen
     else if (pinnedKey(sync.server)) sync.key = pinnedKey(sync.server)!
     this.keys = sync.enc ? new DocKeys(sync.server, this.meta.docId) : null
     // iPad: Verlängerungen und Käufe auf anderen Geräten dem Server melden (er prüft Apples Signatur selbst)
     if (iapAvailable) void syncPurchases(sync.server).catch(() => {})
     this.conn = new SyncConnection(this.doc,
-      { server: sync.server, docId: this.meta.docId, name: this.name, keys: this.keys ?? undefined },
+      { server: sync.server, docId: this.meta.docId, name: this.name, keys: this.keys ?? undefined, rights: this.rightsHooks() },
       (s) => this.setSyncState(s), () => void this.refreshMembers(),
       () => claimDocument(sync.server, this.meta.docId, this.meta.adminLog, !!sync.enc))
   }
 
   resync() { this.conn?.resync() }
+
+  // ----- Rechte (docs/RIGHTS.md): eingehende Änderungen werden nach dem Admin-Protokoll bewertet -----
+  /** Abgelehnte Änderungen seit dem Öffnen und der letzte Grund */
+  rejected = 0
+  lastRejection = ''
+  /** Die letzten abgelehnten Änderungen (Nummer im Datenstrom und Grund), für die Fehlersuche */
+  rejections: { seq: number; reason: string }[] = []
+  onRejected: (() => void) | null = null
+  private membersTried = false // pro Verbindung höchstens ein Nachholversuch
+  private timeline: { entries: readonly AdminEntry[]; tl: RightsTimeline | null } | null = null
+  private timelineNow(): RightsTimeline | null {
+    const entries: readonly AdminEntry[] = this.members?.entries ?? this.meta.adminLog ?? []
+    if (this.timeline?.entries !== entries) this.timeline = { entries, tl: entries.length ? new RightsTimeline(this.meta.docId, entries) : null }
+    return this.timeline.tl
+  }
+  private rightsHooks() {
+    return {
+      // Ohne bekanntes Protokoll (neues Mitglied, frische Datei) erst die Mitglieder holen: sonst käme Ungeprüftes ins Dokument
+      settled: async () => { await this.membersQueue; if (!this.timelineNow() && !this.membersTried) { this.membersTried = true; await this.refreshMembers() } },
+      judge: (live: Y.Doc, seq: number, plain: Uint8Array) => judge(this.timelineNow(), this.meta.docId, live, seq, plain),
+      mode: () => {
+        const st = this.timelineNow()?.latest
+        return { active: !!st && st.groups.size > 0, admin: st?.members.get(accountIdNow())?.role === 'admin' }
+      },
+      onRejected: (seq: number, reason: string) => { this.rejected++; this.lastRejection = reason; this.rejections = [...this.rejections.slice(-49), { seq, reason }]; this.onRejected?.() },
+    }
+  }
 
   private setMembers(m: MembersInfo | null) { this.members = m; this.onMembers?.(m) }
 

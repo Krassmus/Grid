@@ -171,6 +171,12 @@ impl Store {
         Ok(true)
     }
 
+    /// Nummer des letzten Eintrags im Datenstrom (0, wenn leer).
+    pub fn last_enc_seq(&self, doc: &str) -> rusqlite::Result<u64> {
+        let m: Option<i64> = self.conn().query_row("SELECT MAX(seq) FROM log WHERE doc = ?1", [doc], |r| r.get(0))?;
+        Ok(m.unwrap_or(0).max(0) as u64)
+    }
+
     pub fn put_key(&self, doc: &str, epoch: i64, account: &str, sender: &str, boxed: &str) -> rusqlite::Result<()> {
         self.conn().execute("INSERT OR IGNORE INTO keys (doc, epoch, account, sender, box) VALUES (?1, ?2, ?3, ?4, ?5)", params![doc, epoch, account, sender, boxed])?;
         Ok(())

@@ -13,6 +13,8 @@ import { fromHex, getIdentity, onIdentityChanged, signMessage, toHex } from './i
 import { decryptBlob, decryptEntry, encryptBlob, encryptEntry, MissingKey } from './e2e'
 import type { DocKeys } from './docKeys'
 import { fetchMembers } from './members'
+import { seal } from './signedUpdate'
+import type { Verdict } from './updateGuard'
 import { t } from './i18n'
 
 export type SyncStatus = 'connecting' | 'online' | 'offline' | 'pending' | 'denied'
@@ -162,6 +164,18 @@ export async function fetchAccountInfo(server: string): Promise<AccountInfo> {
   return r.json()
 }
 
+/** Rechte (docs/RIGHTS.md): wie die Verbindung Änderungen bewertet und signiert. */
+export interface RightsHooks {
+  /** Wartet, bis die Mitgliederliste aktuell ist (sie bestimmt, wer was darf). */
+  settled: () => Promise<void>
+  /** Bewertet den entschlüsselten Klartext des Eintrags `seq`. */
+  judge: (live: Y.Doc, seq: number, plain: Uint8Array) => Verdict
+  /** Gibt es Gruppen (dann wird signiert) und ist dieses Konto Admin (nur dann darf es zusammenführen)? */
+  mode: () => { active: boolean; admin: boolean }
+  /** Eine Änderung wurde abgelehnt. */
+  onRejected: (seq: number, reason: string) => void
+}
+
 export interface CloudDoc { id: string; name: string; updated: number; enc?: boolean }
 
 export async function listCloudDocs(server: string): Promise<CloudDoc[]> {
@@ -194,7 +208,7 @@ export class SyncConnection {
 
   constructor(
     private doc: Y.Doc,
-    private cfg: { server: string; docId: string; name: string; keys?: DocKeys },
+    private cfg: { server: string; docId: string; name: string; keys?: DocKeys; rights?: RightsHooks },
     private onState: (s: SyncState) => void,
     /** Mitglieder oder Beitrittsanfragen könnten sich geändert haben (auch gleich nach dem Verbinden). */
     private onNotice: () => void = () => {},
@@ -377,6 +391,18 @@ export class SyncConnection {
       this.since = Math.max(this.since, seq) // beschädigter oder fremder Eintrag: überspringen
       return
     }
+    const rights = this.cfg.rights
+    if (rights) {
+      await rights.settled()
+      if (!this.alive(ws, gen)) return
+      const v = rights.judge(this.doc, seq, plain)
+      if (!v.ok) { // nicht erlaubt: weder ins Dokument noch in den Schatten (so geht es auch nie in einen Gesamtzustand ein)
+        this.since = Math.max(this.since, seq)
+        rights.onRejected(seq, v.reason)
+        return
+      }
+      plain = v.update
+    }
     Y.applyUpdate(this.shadow, plain, SHADOW)
     Y.applyUpdate(this.doc, plain, REMOTE)
     this.since = Math.max(this.since, seq)
@@ -406,7 +432,8 @@ export class SyncConnection {
     const key = keys.key(epoch)
     const ws = this.ws
     if (!key || !ws || ws.readyState !== WebSocket.OPEN) return
-    ws.send(frame(ENC_PUT, await encryptEntry(this.cfg.docId, epoch, key, update)))
+    const signed = this.cfg.rights?.mode().active ? seal(await getIdentity(), this.cfg.docId, update) : update // mit Gruppen trägt jede Änderung die Unterschrift ihres Autors
+    ws.send(frame(ENC_PUT, await encryptEntry(this.cfg.docId, epoch, key, signed)))
   }
 
   /** Meldet der Server viele Einträge, lädt ein Client den Gesamtzustand hoch (der Server kann ihn nicht selbst bilden). */
@@ -417,7 +444,10 @@ export class SyncConnection {
     const keys = this.cfg.keys!
     const epoch = keys.top, key = keys.key(epoch)
     if (!key || ws.readyState !== WebSocket.OPEN) return
-    const entry = await encryptEntry(this.cfg.docId, epoch, key, Y.encodeStateAsUpdate(this.shadow))
+    const mode = this.cfg.rights?.mode()
+    if (mode?.active && !mode.admin) return // mit Gruppen führen nur Admins zusammen: der Gesamtzustand bündelt Änderungen aller
+    const state = Y.encodeStateAsUpdate(this.shadow)
+    const entry = await encryptEntry(this.cfg.docId, epoch, key, mode?.active ? seal(await getIdentity(), this.cfg.docId, state, 'snap') : state)
     const body = new Uint8Array(8 + entry.length)
     new DataView(body.buffer).setBigUint64(0, BigInt(upto))
     body.set(entry, 8)
