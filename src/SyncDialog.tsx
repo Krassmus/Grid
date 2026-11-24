@@ -5,6 +5,7 @@ import { AuthError, fetchAccountInfo, fetchServerInfo, listCloudDocs, normalizeS
 import { MembersDialog, type MembersControl } from './MembersDialog'
 import { openExternal } from './externalLink'
 import { MOCK_SERVER, buy, iapAvailable, loadProducts, syncPurchases, type StoreProduct } from './iap'
+import { t, language, locale } from './i18n'
 
 const LAST = 'grid-sync-last-server'
 export const lastServer = () => { try { return localStorage.getItem(LAST) ?? MOCK_SERVER } catch { return MOCK_SERVER } }
@@ -32,13 +33,13 @@ export interface SyncControl extends MembersControl {
 }
 
 export const syncLabel = (c: SyncControl) => {
-  if (!c.server) return 'Nicht synchronisiert'
+  if (!c.server) return t('Nicht synchronisiert')
   switch (c.state?.status) {
-    case 'online': return c.state.readonly ? 'Nur lesen' : 'Synchronisiert'
-    case 'offline': return 'Offline – wird später abgeglichen'
-    case 'pending': return c.state.kind === 'keys' ? 'Wartet auf den Dokumentschlüssel' : c.state.kind === 'join' ? 'Wartet auf Zustimmung eines Admins' : c.state.kind === 'claim' ? 'Dokument ist hier noch nicht angelegt' : 'Wartet auf Freigabe des Kontos'
-    case 'denied': return c.state.kind === 'untrusted' ? 'Server hat einen anderen Schlüssel' : `Abgelehnt: ${c.state.reason ?? 'kein Zugriff'}`
-    default: return 'Verbinde …'
+    case 'online': return c.state.readonly ? t('Nur lesen') : t('Synchronisiert')
+    case 'offline': return t('Offline – wird später abgeglichen')
+    case 'pending': return c.state.kind === 'keys' ? t('Wartet auf den Dokumentschlüssel') : c.state.kind === 'join' ? t('Wartet auf Zustimmung eines Admins') : c.state.kind === 'claim' ? t('Dokument ist hier noch nicht angelegt') : t('Wartet auf Freigabe des Kontos')
+    case 'denied': return c.state.kind === 'untrusted' ? t('Server hat einen anderen Schlüssel') : t('Abgelehnt: {reason}', { reason: c.state.reason ?? t('kein Zugriff') })
+    default: return t('Verbinde …')
   }
 }
 
@@ -56,7 +57,7 @@ function useAccount(): Identity | null {
 }
 
 const GB = 1e9
-const fmtSize = (b: number) => (b >= GB ? `${(b / GB).toFixed(1)} GB` : b >= 1e6 ? `${Math.round(b / 1e6)} MB` : `${Math.round(b / 1e3)} KB`).replace('.', ',')
+const fmtSize = (b: number) => (b >= GB ? `${(b / GB).toFixed(1)} GB` : b >= 1e6 ? `${Math.round(b / 1e6)} MB` : `${Math.round(b / 1e3)} KB`).replace('.', language() === 'de' ? ',' : '.')
 
 /** Angaben des Servers (Name, Schlüssel) für die Anzeige; `null`, solange sie fehlen. */
 function useServerInfo(server: string | null): ServerInfo | null {
@@ -72,7 +73,7 @@ function useServerInfo(server: string | null): ServerInfo | null {
 
 const hostOf = (url: string) => { try { return new URL(url).host } catch { return url } }
 
-const PERIOD: Record<string, string> = { P1W: 'pro Woche', P1M: 'pro Monat', P3M: 'alle 3 Monate', P6M: 'alle 6 Monate', P1Y: 'pro Jahr' }
+const period = (p: string): string | undefined => ({ P1W: t('pro Woche'), P1M: t('pro Monat'), P3M: t('alle 3 Monate'), P6M: t('alle 6 Monate'), P1Y: t('pro Jahr') } as Record<string, string>)[p]
 
 /** Abo und Speicher des Kontos (nur auf Servern mit Abo-Pflicht). Auf dem iPad kauft man direkt im App Store. */
 function PlanLine(props: { server: string; refresh: unknown; onActive: () => void }) {
@@ -113,48 +114,48 @@ function PlanLine(props: { server: string; refresh: unknown; onActive: () => voi
   const buyNow = (id: string) => run(id, async () => {
     const r = await buy(props.server, id)
     if (r === 'cancelled') return null
-    if (r === 'pending') return 'Der Kauf wartet auf Genehmigung (z. B. durch die Familienfreigabe). Danach schaltet Grid das Abo von selbst frei.'
+    if (r === 'pending') return t('Der Kauf wartet auf Genehmigung (z. B. durch die Familienfreigabe). Danach schaltet Grid das Abo von selbst frei.')
     await load()
-    return 'Danke! Dein Abo ist aktiv.'
+    return t('Danke! Dein Abo ist aktiv.')
   })
   const restore = () => run('restore', async () => {
     const n = await syncPurchases(props.server, true)
     await load()
-    return n > 0 ? 'Dein Abo wurde wiederhergestellt.' : 'Zu diesem Apple-Konto gibt es keinen Kauf, den dieses Grid-Konto nutzen kann.'
+    return n > 0 ? t('Dein Abo wurde wiederhergestellt.') : t('Zu diesem Apple-Konto gibt es keinen Kauf, den dieses Grid-Konto nutzen kann.')
   })
   const manage = info.planSource === 'apple' && appStore ? () => void openExternal('https://apps.apple.com/account/subscriptions') : info.manageUrl ? () => void openExternal(info.manageUrl!) : null
   return (
     <>
       <section className={`cloud-card plan ${info.active ? 'ok' : 'warn'}`}>
         <div className="cloud-card-main">
-          <strong>{info.active ? 'Abo aktiv' : 'Kein Abo'}</strong>
+          <strong>{info.active ? t('Abo aktiv') : t('Kein Abo')}</strong>
           <small>{info.active
-            ? `${info.planSource === 'manual' ? 'Vom Betreiber freigeschaltet · ' : ''}${until ? `bis ${until} · ` : ''}${fmtSize(info.used)} von ${fmtSize(info.quota)}`
-            : 'Dokumente, die dir gehören, sind nur lesbar.'}</small>
+            ? `${info.planSource === 'manual' ? t('Vom Betreiber freigeschaltet · ') : ''}${until ? t('bis {date} · ', { date: until }) : ''}${t('{used} von {quota}', { used: fmtSize(info.used), quota: fmtSize(info.quota) })}`
+            : t('Dokumente, die dir gehören, sind nur lesbar.')}</small>
           {info.active && <span className="meter" aria-hidden><i style={{ width: `${share}%` }} /></span>}
         </div>
         <span className="plan-actions">
-          {!appStore && !info.active && info.checkoutUrl && <button type="button" className="primary" onClick={() => void openExternal(info.checkoutUrl!)}>Abo abschließen</button>}
-          {manage && <button type="button" className="linklike" onClick={manage}>Verwalten</button>}
+          {!appStore && !info.active && info.checkoutUrl && <button type="button" className="primary" onClick={() => void openExternal(info.checkoutUrl!)}>{t('Abo abschließen')}</button>}
+          {manage && <button type="button" className="linklike" onClick={manage}>{t('Verwalten')}</button>}
         </span>
       </section>
       {appStore && !info.active && (
         <section className="paywall">
-          {products === null && <p className="cloud-note">Angebote werden geladen …</p>}
-          {products?.length === 0 && <p className="cloud-note warn">Der App Store zeigt gerade keine Angebote. Bitte später noch einmal versuchen.</p>}
+          {products === null && <p className="cloud-note">{t('Angebote werden geladen …')}</p>}
+          {products?.length === 0 && <p className="cloud-note warn">{t('Der App Store zeigt gerade keine Angebote. Bitte später noch einmal versuchen.')}</p>}
           {products?.map((p) => {
             const quota = info.iap!.products.find((x) => x.id === p.id)?.quota
             return (
               <div key={p.id} className="product-row">
-                <div className="member-who"><strong>{p.name}</strong><small>{p.price}{PERIOD[p.period] ? ` ${PERIOD[p.period]}` : ''}{quota ? ` · ${fmtSize(quota)} Speicher` : ''}</small></div>
-                <button type="button" className="primary" disabled={!!busy} onClick={() => buyNow(p.id)}>{busy === p.id ? '…' : 'Abonnieren'}</button>
+                <div className="member-who"><strong>{p.name}</strong><small>{p.price}{period(p.period) ? ` ${period(p.period)}` : ''}{quota ? ` · ${t('{size} Speicher', { size: fmtSize(quota) })}` : ''}</small></div>
+                <button type="button" className="primary" disabled={!!busy} onClick={() => buyNow(p.id)}>{busy === p.id ? '…' : t('Abonnieren')}</button>
               </div>
             )
           })}
-          <p className="paywall-terms">Das Abo verlängert sich automatisch, bis du es in den Einstellungen deines Apple-Kontos kündigst. Die Zahlung läuft über dein Apple-Konto.
-            {info.iap!.termsUrl && <> <button type="button" className="linklike" onClick={() => void openExternal(info.iap!.termsUrl!)}>Nutzungsbedingungen</button></>}
-            {info.iap!.privacyUrl && <> · <button type="button" className="linklike" onClick={() => void openExternal(info.iap!.privacyUrl!)}>Datenschutz</button></>}</p>
-          <div className="actions"><button type="button" className="linklike" disabled={!!busy} onClick={restore}>{busy === 'restore' ? 'Wird geprüft …' : 'Käufe wiederherstellen'}</button></div>
+          <p className="paywall-terms">{t('Das Abo verlängert sich automatisch, bis du es in den Einstellungen deines Apple-Kontos kündigst. Die Zahlung läuft über dein Apple-Konto.')}
+            {info.iap!.termsUrl && <> <button type="button" className="linklike" onClick={() => void openExternal(info.iap!.termsUrl!)}>{t('Nutzungsbedingungen')}</button></>}
+            {info.iap!.privacyUrl && <> · <button type="button" className="linklike" onClick={() => void openExternal(info.iap!.privacyUrl!)}>{t('Datenschutz')}</button></>}</p>
+          <div className="actions"><button type="button" className="linklike" disabled={!!busy} onClick={restore}>{busy === 'restore' ? t('Wird geprüft …') : t('Käufe wiederherstellen')}</button></div>
         </section>
       )}
       {message && <p className={`cloud-note ${message.ok ? '' : 'bad'}`} role={message.ok ? 'status' : 'alert'}>{message.text}</p>}
@@ -201,9 +202,9 @@ export function SyncDialog(props: { control: SyncControl; onClose: () => void })
   const tone = st?.status === 'online' ? (st.readonly ? 'warn' : 'ok') : st?.status === 'denied' ? 'bad' : 'warn'
   const mine = me ? fingerprint(me.publicKey) : ''
   // Eine Erklärung, nur wenn etwas zu tun oder zu wissen ist
-  const note = st?.readonly ? `${st.readonly.reason} Änderungen bleiben hier gespeichert und werden hochgeladen, sobald es wieder geht.`
-    : st?.status === 'pending' && st.kind === 'join' ? `Ein Admin muss dich zulassen. Nenne ihm deine Prüfnummer ${mine}; danach verbindet sich Grid von selbst.`
-    : st?.status === 'pending' && st.kind === 'account' ? `Der Betreiber des Servers muss dein Konto freigeben. Kennung ${me?.id.slice(0, 8) ?? ''} (${mine}).`
+  const note = st?.readonly ? `${st.readonly.reason} ${t('Änderungen bleiben hier gespeichert und werden hochgeladen, sobald es wieder geht.')}`
+    : st?.status === 'pending' && st.kind === 'join' ? t('Ein Admin muss dich zulassen. Nenne ihm deine Prüfnummer {fp}; danach verbindet sich Grid von selbst.', { fp: mine })
+    : st?.status === 'pending' && st.kind === 'account' ? t('Der Betreiber des Servers muss dein Konto freigeben. Kennung {id} ({fp}).', { id: me?.id.slice(0, 8) ?? '', fp: mine })
     : st?.status === 'pending' ? st.reason ?? null
     : st?.status === 'denied' ? st.reason ?? null
     : null
@@ -213,7 +214,7 @@ export function SyncDialog(props: { control: SyncControl; onClose: () => void })
       <form className="dialog sync-dialog cloud-dialog" onMouseDown={(e) => e.stopPropagation()}
         onSubmit={(e) => { e.preventDefault(); if (!connected) submit() }}
         onKeyDown={(e) => e.key === 'Escape' && props.onClose()}>
-        <h3>Cloud</h3>
+        <h3>{t('Cloud')}</h3>
         {connected ? (
           <>
             <section className={`cloud-card ${tone}`}>
@@ -222,33 +223,33 @@ export function SyncDialog(props: { control: SyncControl; onClose: () => void })
                 <strong>{syncLabel(c)}</strong>
                 <small>{info?.name ?? hostOf(c.server!)}</small>
               </div>
-              <span className={`chip ${c.enc ? 'lock' : 'open'}`}>{c.enc ? '🔒 Ende-zu-Ende verschlüsselt' : 'Nicht verschlüsselt'}</span>
+              <span className={`chip ${c.enc ? 'lock' : 'open'}`}>{c.enc ? t('🔒 Ende-zu-Ende verschlüsselt') : t('Nicht verschlüsselt')}</span>
             </section>
             {note && <p className={`cloud-note ${tone}`} role={tone === 'bad' ? 'alert' : 'status'}>{note}</p>}
             {st?.status === 'denied' && st.kind === 'untrusted' && (
-              <div className="actions"><button type="button" className="danger-outline" onClick={() => c.trustServer()}>Dem neuen Schlüssel vertrauen</button></div>
+              <div className="actions"><button type="button" className="danger-outline" onClick={() => c.trustServer()}>{t('Dem neuen Schlüssel vertrauen')}</button></div>
             )}
 
             {c.moved && (
               <section className="cloud-card moved">
-                <div className="cloud-card-main"><strong>Dieses Dokument ist umgezogen</strong><small>{hostOf(c.moved.server)} · von einem Admin angekündigt</small></div>
-                <button type="button" className="primary" onClick={() => c.followMove()}>Wechseln</button>
+                <div className="cloud-card-main"><strong>{t('Dieses Dokument ist umgezogen')}</strong><small>{hostOf(c.moved.server)} · {t('von einem Admin angekündigt')}</small></div>
+                <button type="button" className="primary" onClick={() => c.followMove()}>{t('Wechseln')}</button>
               </section>
             )}
 
             {!c.enc && st?.status === 'online' && (
               <section className="cloud-card warn">
-                <div className="cloud-card-main"><strong>Der Server kann dieses Dokument lesen</strong>
-                  <small>{c.members?.role === 'admin' ? 'Verschlüssele es, damit nur Mitglieder es lesen können.' : 'Ein Admin kann es verschlüsseln.'}</small></div>
-                {c.members?.role === 'admin' && !encrypting && <button type="button" onClick={() => { setEncrypting(true); setEncError(null) }}>Verschlüsseln …</button>}
+                <div className="cloud-card-main"><strong>{t('Der Server kann dieses Dokument lesen')}</strong>
+                  <small>{c.members?.role === 'admin' ? t('Verschlüssele es, damit nur Mitglieder es lesen können.') : t('Ein Admin kann es verschlüsseln.')}</small></div>
+                {c.members?.role === 'admin' && !encrypting && <button type="button" onClick={() => { setEncrypting(true); setEncError(null) }}>{t('Verschlüsseln …')}</button>}
               </section>
             )}
             {encrypting && (
               <div className="cloud-confirm">
-                <p>Der Server löscht den lesbaren Stand und die Dateien, und alle Mitglieder laden ihren Stand verschlüsselt neu hoch. Ein Admin muss dafür online sein, bis alle ihren Schlüssel haben. Alte Sicherungen des Servers enthalten den Klartext weiter. Das lässt sich nicht rückgängig machen.</p>
+                <p>{t('Der Server löscht den lesbaren Stand und die Dateien, und alle Mitglieder laden ihren Stand verschlüsselt neu hoch. Ein Admin muss dafür online sein, bis alle ihren Schlüssel haben. Alte Sicherungen des Servers enthalten den Klartext weiter. Das lässt sich nicht rückgängig machen.')}</p>
                 <div className="actions">
-                  <button type="button" onClick={() => setEncrypting(false)}>Abbrechen</button>
-                  <button type="button" className="primary" onClick={() => c.encryptDocument().then(() => setEncrypting(false), (e: Error) => setEncError(e.message))}>Jetzt verschlüsseln</button>
+                  <button type="button" onClick={() => setEncrypting(false)}>{t('Abbrechen')}</button>
+                  <button type="button" className="primary" onClick={() => c.encryptDocument().then(() => setEncrypting(false), (e: Error) => setEncError(e.message))}>{t('Jetzt verschlüsseln')}</button>
                 </div>
                 {encError && <p className="sync-error" role="alert">{encError}</p>}
               </div>
@@ -258,31 +259,31 @@ export function SyncDialog(props: { control: SyncControl; onClose: () => void })
 
             {st?.status === 'online' && (
               <button type="button" className="cloud-row" onClick={() => setMembersOpen(true)}>
-                <span><strong>Mitglieder</strong><small>{c.members?.state ? `${c.members.state.members.size} im Dokument · ` : ''}Einladen und verwalten</small></span>
+                <span><strong>{t('Mitglieder')}</strong><small>{c.members?.state ? t('{n} im Dokument · ', { n: c.members.state.members.size }) : ''}{t('Einladen und verwalten')}</small></span>
                 <span className="cloud-row-end">{requests > 0 && <span className="badge">{requests}</span>}<span className="chev" aria-hidden>›</span></span>
               </button>
             )}
 
             <details className="cloud-adv">
-              <summary>Erweitert</summary>
+              <summary>{t('Erweitert')}</summary>
               <dl>
-                <dt>Server</dt><dd>{c.server}</dd>
-                {info && <><dt>Server-Schlüssel</dt><dd><code>{fingerprint(info.pub)}</code></dd></>}
-                {mine && <><dt>Deine Prüfnummer</dt><dd><code>{mine}</code></dd></>}
+                <dt>{t('Server')}</dt><dd>{c.server}</dd>
+                {info && <><dt>{t('Server-Schlüssel')}</dt><dd><code>{fingerprint(info.pub)}</code></dd></>}
+                {mine && <><dt>{t('Deine Prüfnummer')}</dt><dd><code>{mine}</code></dd></>}
               </dl>
               {!switching
-                ? <button type="button" className="linklike" onClick={() => { setSwitching(true); setTarget('') }}>Auf einen anderen Server umziehen …</button>
+                ? <button type="button" className="linklike" onClick={() => { setSwitching(true); setTarget('') }}>{t('Auf einen anderen Server umziehen …')}</button>
                 : (
                   <div className="cloud-confirm">
-                    <Field label="Neuer Server" value={target} onChange={setTarget} placeholder="https://firma.example/grid" autoFocus />
-                    <p>Das Dokument wird mit allen Mitgliedern auf den neuen Server kopiert. Sie brauchen dort ein Konto und verbinden sich selbst mit dem neuen Server. Der alte Server behält seine Kopie.</p>
+                    <Field label={t('Neuer Server')} value={target} onChange={setTarget} placeholder={t('https://firma.example/grid')} autoFocus />
+                    <p>{t('Das Dokument wird mit allen Mitgliedern auf den neuen Server kopiert. Sie brauchen dort ein Konto und verbinden sich selbst mit dem neuen Server. Der alte Server behält seine Kopie.')}</p>
                     <div className="actions">
-                      <button type="button" onClick={() => setSwitching(false)}>Abbrechen</button>
+                      <button type="button" onClick={() => setSwitching(false)}>{t('Abbrechen')}</button>
                       <button type="button" className="primary" disabled={!normalizeServer(target)} onClick={() => {
                         const u = normalizeServer(target)
                         setMoveError(null)
                         c.moveTo(u).then(() => { rememberServer(u); setSwitching(false) }, (e: Error) => setMoveError(e.message))
-                      }}>Umziehen</button>
+                      }}>{t('Umziehen')}</button>
                     </div>
                     {moveError && <p className="sync-error" role="alert">{moveError}</p>}
                   </div>
@@ -292,27 +293,27 @@ export function SyncDialog(props: { control: SyncControl; onClose: () => void })
             {disconnecting
               ? (
                 <div className="cloud-confirm">
-                  <p><strong>Wirklich die Synchronisation zu diesem Server trennen?</strong><br />Das Dokument bleibt auf diesem Gerät vollständig erhalten, wird aber nicht mehr abgeglichen. Auf dem Server und bei den anderen Mitgliedern bleibt es bestehen.</p>
+                  <p><strong>{t('Wirklich die Synchronisation zu diesem Server trennen?')}</strong><br />{t('Das Dokument bleibt auf diesem Gerät vollständig erhalten, wird aber nicht mehr abgeglichen. Auf dem Server und bei den anderen Mitgliedern bleibt es bestehen.')}</p>
                   <div className="actions">
-                    <button type="button" onClick={() => setDisconnecting(false)}>Abbrechen</button>
-                    <button type="button" className="danger" onClick={() => { c.disconnect(); props.onClose() }}>Trennen</button>
+                    <button type="button" onClick={() => setDisconnecting(false)}>{t('Abbrechen')}</button>
+                    <button type="button" className="danger" onClick={() => { c.disconnect(); props.onClose() }}>{t('Trennen')}</button>
                   </div>
                 </div>
               )
               : (
                 <div className="actions split">
-                  <button type="button" className="danger-outline" onClick={() => setDisconnecting(true)}>Verbindung lösen</button>
-                  <button type="button" className="primary" onClick={props.onClose}>Fertig</button>
+                  <button type="button" className="danger-outline" onClick={() => setDisconnecting(true)}>{t('Verbindung lösen')}</button>
+                  <button type="button" className="primary" onClick={props.onClose}>{t('Fertig')}</button>
                 </div>
               )}
           </>
         ) : (
           <>
-            <p className="cloud-lead">Synchronisiere dieses Dokument mit anderen Geräten und Personen. Es wird Ende-zu-Ende verschlüsselt: der Server speichert nur unlesbare Daten, und lokal bleibt alles vollständig erhalten.</p>
-            <Field label="Server" value={server} onChange={setServer} placeholder="https://townwork.eu/grid" autoFocus />
+            <p className="cloud-lead">{t('Synchronisiere dieses Dokument mit anderen Geräten und Personen. Es wird Ende-zu-Ende verschlüsselt: der Server speichert nur unlesbare Daten, und lokal bleibt alles vollständig erhalten.')}</p>
+            <Field label={t('Server')} value={server} onChange={setServer} placeholder={t('https://townwork.eu/grid')} autoFocus />
             <div className="actions">
-              <button type="button" onClick={props.onClose}>Abbrechen</button>
-              <button type="submit" className="primary" disabled={!server.trim()}>Verbinden</button>
+              <button type="button" onClick={props.onClose}>{t('Abbrechen')}</button>
+              <button type="submit" className="primary" disabled={!server.trim()}>{t('Verbinden')}</button>
             </div>
           </>
         )}
@@ -339,37 +340,37 @@ export function AccountDialog(props: { onClose: () => void }) {
     try {
       await importAccount(incoming, pass2)
       setIncoming(''); setPass2('')
-      setMessage({ ok: true, text: 'Konto übernommen.' })
+      setMessage({ ok: true, text: t('Konto übernommen.') })
     } catch (e) { setMessage({ ok: false, text: String((e as Error).message ?? e) }) }
   }
   return (
     <Modal onClose={props.onClose}>
       <div className="dialog sync-dialog account-dialog" onMouseDown={(e) => e.stopPropagation()} onKeyDown={(e) => e.key === 'Escape' && props.onClose()}>
-        <h3>Grid-Konto</h3>
-        <p className="sync-account"><span>Fingerabdruck <code>{me ? fingerprint(me.publicKey) : '…'}</code></span></p>
-        <p className="hint">Das Konto liegt auf diesem Gerät im Schlüsselbund. Mit einem zweiten Gerät teilst du es über einen verschlüsselten Text. Wer ihn und das Passwort hat, kann sich als du anmelden.</p>
+        <h3>{t('Grid-Konto')}</h3>
+        <p className="sync-account"><span>{t('Fingerabdruck')} <code>{me ? fingerprint(me.publicKey) : '…'}</code></span></p>
+        <p className="hint">{t('Das Konto liegt auf diesem Gerät im Schlüsselbund. Mit einem zweiten Gerät teilst du es über einen verschlüsselten Text. Wer ihn und das Passwort hat, kann sich als du anmelden.')}</p>
 
-        <h4>Auf ein anderes Gerät übertragen</h4>
-        <Field label="Passwort für den Text" value={pass} onChange={(v) => { setPass(v); setExported('') }} type="password" />
+        <h4>{t('Auf ein anderes Gerät übertragen')}</h4>
+        <Field label={t('Passwort für den Text')} value={pass} onChange={(v) => { setPass(v); setExported('') }} type="password" />
         {exported
           ? <>
-              <textarea readOnly rows={3} value={exported} onFocus={(e) => e.target.select()} aria-label="Verschlüsseltes Konto" />
-              <div className="actions"><button type="button" onClick={() => { void navigator.clipboard?.writeText(exported); setCopied(true) }}>{copied ? 'Kopiert' : 'Kopieren'}</button></div>
+              <textarea readOnly rows={3} value={exported} onFocus={(e) => e.target.select()} aria-label={t('Verschlüsseltes Konto')} />
+              <div className="actions"><button type="button" onClick={() => { void navigator.clipboard?.writeText(exported); setCopied(true) }}>{copied ? t('Kopiert') : t('Kopieren')}</button></div>
             </>
-          : <div className="actions"><button type="button" disabled={pass.length < 6} onClick={() => void make()}>Text erzeugen</button></div>}
+          : <div className="actions"><button type="button" disabled={pass.length < 6} onClick={() => void make()}>{t('Text erzeugen')}</button></div>}
 
-        <h4>Konto von einem anderen Gerät übernehmen</h4>
-        <textarea rows={3} placeholder="grid-account:1:…" value={incoming} onChange={(e) => setIncoming(e.target.value)} aria-label="Übertragenes Konto" />
-        <Field label="Passwort" value={pass2} onChange={setPass2} type="password" />
+        <h4>{t('Konto von einem anderen Gerät übernehmen')}</h4>
+        <textarea rows={3} placeholder={t('grid-account:1:…')} value={incoming} onChange={(e) => setIncoming(e.target.value)} aria-label={t('Übertragenes Konto')} />
+        <Field label={t('Passwort')} value={pass2} onChange={setPass2} type="password" />
         {confirming
           ? <>
-              <p className="sync-error">Das Konto dieses Geräts wird ersetzt. Sichere es vorher, falls du es noch brauchst.</p>
-              <div className="actions"><button type="button" onClick={() => setConfirming(false)}>Abbrechen</button><button type="button" className="danger" onClick={() => void take()}>Konto ersetzen</button></div>
+              <p className="sync-error">{t('Das Konto dieses Geräts wird ersetzt. Sichere es vorher, falls du es noch brauchst.')}</p>
+              <div className="actions"><button type="button" onClick={() => setConfirming(false)}>{t('Abbrechen')}</button><button type="button" className="danger" onClick={() => void take()}>{t('Konto ersetzen')}</button></div>
             </>
-          : <div className="actions"><button type="button" disabled={!incoming.trim() || !pass2} onClick={() => setConfirming(true)}>Übernehmen</button></div>}
+          : <div className="actions"><button type="button" disabled={!incoming.trim() || !pass2} onClick={() => setConfirming(true)}>{t('Übernehmen')}</button></div>}
 
         {message && <p className={message.ok ? 'sync-ok' : 'sync-error'} role="status">{message.text}</p>}
-        <div className="actions"><button type="button" className="primary" onClick={props.onClose}>Fertig</button></div>
+        <div className="actions"><button type="button" className="primary" onClick={props.onClose}>{t('Fertig')}</button></div>
       </div>
     </Modal>
   )
@@ -401,25 +402,25 @@ export function CloudOpenDialog(props: { onOpen: (doc: CloudDoc, server: string)
       <form className="dialog sync-dialog" onMouseDown={(e) => e.stopPropagation()}
         onSubmit={(e) => { e.preventDefault(); void load() }}
         onKeyDown={(e) => e.key === 'Escape' && props.onClose()}>
-        <h3>Aus Cloud öffnen</h3>
-        <Field label="Server" value={server} onChange={(v) => { setServer(v); setDocs(null); setPending(false) }} placeholder="https://townwork.eu/grid" autoFocus={!server} />
-        {pending && <p className="hint">Dein Konto ist auf diesem Server noch nicht freigegeben. Nenne dem Betreiber die Kennung <code>{me?.id.slice(0, 8)}</code>.</p>}
+        <h3>{t('Aus Cloud öffnen')}</h3>
+        <Field label={t('Server')} value={server} onChange={(v) => { setServer(v); setDocs(null); setPending(false) }} placeholder={t('https://townwork.eu/grid')} autoFocus={!server} />
+        {pending && <p className="hint">{t('Dein Konto ist auf diesem Server noch nicht freigegeben. Nenne dem Betreiber die Kennung')} <code>{me?.id.slice(0, 8)}</code>.</p>}
         {error && <p className="sync-error" role="alert">{error}</p>}
         {docs && (docs.length === 0
-          ? <p className="hint">Für dein Konto liegen auf diesem Server noch keine Dokumente.</p>
+          ? <p className="hint">{t('Für dein Konto liegen auf diesem Server noch keine Dokumente.')}</p>
           : <ul className="cloud-docs">
               {docs.map((d) => (
                 <li key={d.id}>
                   <button type="button" onClick={() => props.onOpen(d, normalizeServer(server))}>
-                    <strong>{d.name || 'Ohne Namen'}</strong>
-                    <small>{new Date(d.updated * 1000).toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short' })}</small>
+                    <strong>{d.name || t('Ohne Namen')}</strong>
+                    <small>{new Date(d.updated * 1000).toLocaleString(locale(), { dateStyle: 'medium', timeStyle: 'short' })}</small>
                   </button>
                 </li>
               ))}
             </ul>)}
         <div className="actions">
-          <button type="button" onClick={props.onClose}>Schließen</button>
-          <button type="submit" className="primary" disabled={busy || !server.trim()}>{docs ? 'Aktualisieren' : 'Dokumente anzeigen'}</button>
+          <button type="button" onClick={props.onClose}>{t('Schließen')}</button>
+          <button type="submit" className="primary" disabled={busy || !server.trim()}>{docs ? t('Aktualisieren') : t('Dokumente anzeigen')}</button>
         </div>
       </form>
     </Modal>

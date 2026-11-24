@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { t } from './i18n'
 
 /** Rendert direkt in <body>, damit clip-path/transform der Zeilen den Dialog nicht beschneiden. */
 export function Modal({ onClose, children }: { onClose: () => void; children: ReactNode }) {
@@ -10,14 +11,14 @@ export function Modal({ onClose, children }: { onClose: () => void; children: Re
 export function ConfirmDialog(props: { detail?: string; onConfirm: () => void; onCancel: () => void }) {
   return (
     <Modal onClose={props.onCancel}>
-      <div className="dialog confirm" role="alertdialog" aria-label="Wirklich löschen?"
+      <div className="dialog confirm" role="alertdialog" aria-label={t('Wirklich löschen?')}
         onMouseDown={(e) => e.stopPropagation()}
         onKeyDown={(e) => e.key === 'Escape' && props.onCancel()}>
-        <h3>Wirklich löschen?</h3>
+        <h3>{t('Wirklich löschen?')}</h3>
         {props.detail && <p className="confirm-detail">{props.detail}</p>}
         <div className="actions">
-          <button type="button" autoFocus onClick={props.onCancel}>Abbrechen</button>
-          <button type="button" className="danger" onClick={props.onConfirm}>Löschen</button>
+          <button type="button" autoFocus onClick={props.onCancel}>{t('Abbrechen')}</button>
+          <button type="button" className="danger" onClick={props.onConfirm}>{t('Löschen')}</button>
         </div>
       </div>
     </Modal>
@@ -42,10 +43,10 @@ export function RenameDialog(props: {
         <h3>{props.title}</h3>
         <input autoFocus value={name} onFocus={(e) => e.target.select()} onChange={(e) => setName(e.target.value)} />
         <div className="actions split">
-          <button type="button" className="danger-outline" onClick={props.onDelete}>Löschen …</button>
+          <button type="button" className="danger-outline" onClick={props.onDelete}>{t('Löschen …')}</button>
           <span className="actions-right">
-            <button type="button" onClick={props.onClose}>Abbrechen</button>
-            <button type="submit" className="primary" disabled={!name.trim()}>Speichern</button>
+            <button type="button" onClick={props.onClose}>{t('Abbrechen')}</button>
+            <button type="submit" className="primary" disabled={!name.trim()}>{t('Speichern')}</button>
           </span>
         </div>
       </form>

@@ -4,6 +4,7 @@ import { renameColumn, setColumnConfig, setColumnHidden, type ColumnInfo, type T
 import { columnTypeOf } from './columnTypes'
 import { Modal } from './Modal'
 import { OptionsEditor } from './SelectCell'
+import { t } from './i18n'
 
 /**
  * Konfiguration einer Spalte. Der Typ ist nur zur Information sichtbar (nicht änderbar), die ID bleibt beim Umbenennen gleich.
@@ -40,20 +41,20 @@ export function ColumnDialog(props: {
       <form className="dialog columndialog" onMouseDown={(e) => e.stopPropagation()}
         onSubmit={(e) => { e.preventDefault(); close() }}
         onKeyDown={(e) => e.key === 'Escape' && !options && close()}>
-        <h3>Spalte konfigurieren</h3>
-        <p className="cfg-static">Typ: <strong>{type.label}</strong></p>
+        <h3>{t('Spalte konfigurieren')}</h3>
+        <p className="cfg-static">{t('Typ:')} <strong>{type.label}</strong></p>
         <label className="cfg-field">
-          <span>Name</span>
+          <span>{t('Name')}</span>
           <input autoFocus value={name} onFocus={(e) => e.target.select()} onChange={(e) => setName(e.target.value)} />
         </label>
         {type.renderConfig({ doc, table, tables, column, config, set, editOptions: () => setOptions(true) })}
         <label className="cfg-check">
           <input type="checkbox" checked={!!column.hidden} onChange={(e) => setColumnHidden(doc, table.id, column.id, e.target.checked)} />
-          <span>In der Tabelle ausblenden<small>Die Spalte bleibt für Formeln und die Darstellung nutzbar. Einblenden: Menü der Tabelle → Bearbeiten.</small></span>
+          <span>{t('In der Tabelle ausblenden')}<small>{t('Die Spalte bleibt für Formeln und die Darstellung nutzbar. Einblenden: Menü der Tabelle → Bearbeiten.')}</small></span>
         </label>
         <div className="actions split">
-          <button type="button" className="danger-outline" onClick={props.onDelete}>Löschen …</button>
-          <button type="submit" className="primary">Fertig</button>
+          <button type="button" className="danger-outline" onClick={props.onDelete}>{t('Löschen …')}</button>
+          <button type="submit" className="primary">{t('Fertig')}</button>
         </div>
         {options && <OptionsEditor doc={doc} tableId={table.id} col={column} onClose={() => setOptions(false)} />}
       </form>

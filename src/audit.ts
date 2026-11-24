@@ -10,6 +10,7 @@ import * as Y from 'yjs'
 import { accountIdNow } from './identity'
 import { linksOf, personName, personIds, tablesOf } from './model'
 import { plainText } from './richText'
+import { t } from './i18n'
 
 /** Text ohne Formatierung; nur Werte mit Markierungen brauchen die (browserabhängige) Umwandlung. */
 const plain = (v: string) => (typeof document !== 'undefined' && v.includes('<') ? plainText(v) : v)
@@ -183,11 +184,11 @@ export function installAudit(doc: Y.Doc): () => void {
     return item?.deleted && item.content.type === undefined ? item.content?.getContent?.()[0] : undefined
   }
   const rowLabel = (tb: string, rid: string, rowOverride?: Y.Map<any>): string => {
-    const t = tables.get(tb)
-    const row: Y.Map<any> | undefined = rowOverride ?? t?.get('rows')?.get(rid)
-    if (!t || !row) return ''
-    const cols: Y.Map<any> | undefined = t.get('cols')
-    const order: string[] = t.get('colOrder')?.toArray() ?? []
+    const tab = tables.get(tb)
+    const row: Y.Map<any> | undefined = rowOverride ?? tab?.get('rows')?.get(rid)
+    if (!tab || !row) return ''
+    const cols: Y.Map<any> | undefined = tab.get('cols')
+    const order: string[] = tab.get('colOrder')?.toArray() ?? []
     const text = (cid: string): string => {
       const c = cols?.get(cid)
       const v = valueOf(row, cid)
@@ -196,8 +197,8 @@ export function installAudit(doc: Y.Doc): () => void {
       return plain(String(v)).trim()
     }
     const usable = order.filter((cid) => cols?.has(cid) && !NOT_TEXT.has(cols.get(cid)!.get('type')))
-    const titleCol: string | undefined = t.get('repr.title'), subCol: string | undefined = t.get('repr.sub')
-    const title = (titleCol && titleCol !== '-' && cols?.has(titleCol) ? text(titleCol) : usable[0] ? text(usable[0]) : '') || 'Ohne Titel'
+    const titleCol: string | undefined = tab.get('repr.title'), subCol: string | undefined = tab.get('repr.sub')
+    const title = (titleCol && titleCol !== '-' && cols?.has(titleCol) ? text(titleCol) : usable[0] ? text(usable[0]) : '') || t('Ohne Titel')
     const subs = subCol && cols?.has(subCol) ? [text(subCol)] : usable.slice(1).map(text).filter(Boolean).slice(0, 2)
     const subText = subs.filter((x) => x && x !== title).join(', ')
     return clip(subText ? `${title} · ${subText}` : title)
@@ -279,8 +280,8 @@ export function installAudit(doc: Y.Doc): () => void {
           else out.push({ t: now, a, k: 'col*', tb, c: colNames.get(`${path[0]}.${path[2]}`) ?? '', o: clip(`${key}: ${old ?? ''}`), n: clip(`${key}: ${target.get(key) ?? ''}`), u })
         } else if (path[1] === 'cols' && path.length === 4 && path[3] === 'options') { // Auswahloptionen
           if (newCols.has(`${path[0]}.${path[2]}`) || newTabs.has(path[0]) || delCols.has(`${path[0]}.${path[2]}`)) continue
-          out.push({ t: now, a, k: 'col*', tb: tableNames.get(path[0]) ?? '', c: colNames.get(`${path[0]}.${path[2]}`) ?? '', o: old === undefined ? '' : clip(`Option: ${optText(old)}`),
-            n: ch.action === 'delete' ? '' : clip(`Option: ${optText(target.get(key))}`), u: [{ m: 'colp', ti: path[0], ci: path[2], k: `options.${key}`, v: old }] })
+          out.push({ t: now, a, k: 'col*', tb: tableNames.get(path[0]) ?? '', c: colNames.get(`${path[0]}.${path[2]}`) ?? '', o: old === undefined ? '' : clip(t('Option: {x}', { x: optText(old) })),
+            n: ch.action === 'delete' ? '' : clip(t('Option: {x}', { x: optText(target.get(key)) })), u: [{ m: 'colp', ti: path[0], ci: path[2], k: `options.${key}`, v: old }] })
         } else if (path[1] === 'rows' && path.length === 3) { // Zellen
           const [tb, , rid] = path
           if (newTabs.has(tb) || newRows.has(`${tb}.${rid}`) || newCols.has(`${tb}.${key}`)) continue
@@ -384,18 +385,18 @@ export function installAudit(doc: Y.Doc): () => void {
   return () => { tables.unobserveDeep(onDeep); links.unobserve(onLinks); doc.off('afterTransaction', onAfter); installed.delete(doc) }
 }
 
-export const KIND_LABEL: Record<AuditKind, string> = {
-  cell: 'Zelle geändert', 'row+': 'Zeile angelegt', 'row-': 'Zeile gelöscht', 'col+': 'Spalte angelegt', 'col-': 'Spalte gelöscht',
-  'col~': 'Spalte umbenannt', 'col*': 'Spalteneinstellung geändert', 'tab+': 'Tabelle angelegt', 'tab-': 'Tabelle gelöscht', 'tab~': 'Tabelle umbenannt',
-  'tab*': 'Tabelleneinstellung geändert', 'lnk+': 'Verknüpfung hinzugefügt', 'lnk-': 'Verknüpfung entfernt', 'lnk~': 'Verknüpfung umsortiert',
-  'lnk>': 'Verknüpfung verschoben', ops: 'Hintergrundänderung', bulk: 'Viele Änderungen',
-}
+export const kindLabel = (k: AuditKind): string => ({
+  cell: t('Zelle geändert'), 'row+': t('Zeile angelegt'), 'row-': t('Zeile gelöscht'), 'col+': t('Spalte angelegt'), 'col-': t('Spalte gelöscht'),
+  'col~': t('Spalte umbenannt'), 'col*': t('Spalteneinstellung geändert'), 'tab+': t('Tabelle angelegt'), 'tab-': t('Tabelle gelöscht'), 'tab~': t('Tabelle umbenannt'),
+  'tab*': t('Tabelleneinstellung geändert'), 'lnk+': t('Verknüpfung hinzugefügt'), 'lnk-': t('Verknüpfung entfernt'), 'lnk~': t('Verknüpfung umsortiert'),
+  'lnk>': t('Verknüpfung verschoben'), ops: t('Hintergrundänderung'), bulk: t('Viele Änderungen'),
+} as Record<AuditKind, string>)[k]
 
 /** Ein Eintrag als Satz für die Anzeige, z. B. „Anna · Zelle geändert · Kunden / Meier / Name: Meier → Müller“. */
 export function describeEntry(e: AuditEntry, who: string): string {
   const place = [e.tb, e.r, e.c].filter(Boolean).join(' / ')
   const change = e.k === 'cell' || e.k === 'col~' || e.k === 'tab~' || e.k === 'tab*' || e.k === 'col*' || e.k === 'lnk>'
-    ? `: ${e.o || 'leer'} → ${e.n || 'leer'}`
+    ? `: ${e.o || t('leer')} → ${e.n || t('leer')}`
     : e.k === 'lnk+' ? `: ${e.n}` : e.k === 'lnk-' ? `: ${e.o}` : e.k === 'bulk' ? ` (${e.x})` : ''
-  return `${who} · ${KIND_LABEL[e.k]}${place ? ` · ${place}` : ''}${change}`
+  return `${who} · ${kindLabel(e.k)}${place ? ` · ${place}` : ''}${change}`
 }

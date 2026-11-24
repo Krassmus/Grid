@@ -170,50 +170,54 @@ struct MenuState {
   recent: Mutex<Vec<String>>,
   /// „system“, „light“ oder „dark“
   theme: Mutex<String>,
+  /// „en“ oder „de“
+  lang: Mutex<String>,
 }
 
 #[cfg(desktop)]
-fn build_menu<M: tauri::Manager<tauri::Wry>>(app: &M, recent: &[String], _theme: &str) -> tauri::Result<()> {
+fn build_menu<M: tauri::Manager<tauri::Wry>>(app: &M, recent: &[String], _theme: &str, lang: &str) -> tauri::Result<()> {
+  let de = lang == "de";
+  let tr = |german: &'static str, english: &'static str| if de { german } else { english };
   let item = |id: &str, text: &str, accel: &str| MenuItemBuilder::with_id(id, text).accelerator(accel).build(app);
-  let mut recents = SubmenuBuilder::new(app, "Zuletzt geöffnet");
+  let mut recents = SubmenuBuilder::new(app, tr("Zuletzt geöffnet", "Open Recent"));
   if recent.is_empty() {
-    recents = recents.item(&MenuItemBuilder::with_id("recent_none", "Keine").enabled(false).build(app)?);
+    recents = recents.item(&MenuItemBuilder::with_id("recent_none", tr("Keine", "None")).enabled(false).build(app)?);
   } else {
     for (i, name) in recent.iter().enumerate() {
       recents = recents.item(&MenuItemBuilder::with_id(format!("recent:{i}"), name).build(app)?);
     }
-    recents = recents.separator().item(&MenuItemBuilder::with_id("clear_recent", "Liste löschen").build(app)?);
+    recents = recents.separator().item(&MenuItemBuilder::with_id("clear_recent", tr("Liste löschen", "Clear List")).build(app)?);
   }
-  let file = SubmenuBuilder::new(app, "Ablage")
-    .item(&item("new", "Neu …", "CmdOrCtrl+N")?)
-    .item(&item("open", "Öffnen …", "CmdOrCtrl+O")?)
-    .item(&MenuItemBuilder::with_id("open_cloud", "Aus Cloud öffnen …").build(app)?)
-    .item(&MenuItemBuilder::with_id("join", "Einladung annehmen …").build(app)?)
+  let file = SubmenuBuilder::new(app, tr("Ablage", "File"))
+    .item(&item("new", tr("Neu …", "New …"), "CmdOrCtrl+N")?)
+    .item(&item("open", tr("Öffnen …", "Open …"), "CmdOrCtrl+O")?)
+    .item(&MenuItemBuilder::with_id("open_cloud", tr("Aus Cloud öffnen …", "Open from Cloud …")).build(app)?)
+    .item(&MenuItemBuilder::with_id("join", tr("Einladung annehmen …", "Accept Invitation …")).build(app)?)
     .item(&recents.build()?)
     .separator()
-    .item(&item("save", "Sichern", "CmdOrCtrl+S")?)
-    .item(&item("save_as", "Sichern unter …", "CmdOrCtrl+Shift+S")?)
+    .item(&item("save", tr("Sichern", "Save"), "CmdOrCtrl+S")?)
+    .item(&item("save_as", tr("Sichern unter …", "Save As …"), "CmdOrCtrl+Shift+S")?)
     .separator()
     .close_window()
     .build()?;
-  let edit = SubmenuBuilder::new(app, "Bearbeiten")
-    .item(&item("undo", "Rückgängig", "CmdOrCtrl+Z")?)
-    .item(&item("redo", "Wiederholen", "CmdOrCtrl+Shift+Z")?)
+  let edit = SubmenuBuilder::new(app, tr("Bearbeiten", "Edit"))
+    .item(&item("undo", tr("Rückgängig", "Undo"), "CmdOrCtrl+Z")?)
+    .item(&item("redo", tr("Wiederholen", "Redo"), "CmdOrCtrl+Shift+Z")?)
     .separator().cut().copy().paste().select_all()
     .build()?;
   let app_menu = SubmenuBuilder::new(app, "Grid")
     .about(None).separator()
-    .item(&MenuItemBuilder::with_id("account", "Konto …").build(app)?)
-    .item(&MenuItemBuilder::with_id("settings", "Einstellungen …").accelerator("CmdOrCtrl+,").build(app)?)
+    .item(&MenuItemBuilder::with_id("account", tr("Konto …", "Account …")).build(app)?)
+    .item(&MenuItemBuilder::with_id("settings", tr("Einstellungen …", "Settings …")).accelerator("CmdOrCtrl+,").build(app)?)
     .separator().hide().hide_others().show_all().separator().quit()
     .build()?;
   let logs = SubmenuBuilder::new(app, "Logs")
-    .item(&MenuItemBuilder::with_id("logs_all", "Alle Änderungen anzeigen …").build(app)?)
-    .item(&MenuItemBuilder::with_id("logs_asof", "Stand anzeigen von …").build(app)?)
+    .item(&MenuItemBuilder::with_id("logs_all", tr("Alle Änderungen anzeigen …", "Show All Changes …")).build(app)?)
+    .item(&MenuItemBuilder::with_id("logs_asof", tr("Stand anzeigen von …", "Show State As Of …")).build(app)?)
     .separator()
-    .item(&MenuItemBuilder::with_id("logs_settings", "Aufbewahrung …").build(app)?)
+    .item(&MenuItemBuilder::with_id("logs_settings", tr("Aufbewahrung …", "Retention …")).build(app)?)
     .build()?;
-  let window = SubmenuBuilder::new(app, "Fenster").minimize().maximize().build()?;
+  let window = SubmenuBuilder::new(app, tr("Fenster", "Window")).minimize().maximize().build()?;
   app.app_handle().set_menu(MenuBuilder::new(app).items(&[&app_menu, &file, &edit, &logs, &window]).build()?)?;
   Ok(())
 }
@@ -225,7 +229,8 @@ fn set_recent_menu(app: tauri::AppHandle, state: tauri::State<'_, MenuState>, na
   #[cfg(desktop)]
   {
     let theme = state.theme.lock().map_err(|e| e.to_string())?.clone();
-    return build_menu(&app, &names, &theme).map_err(|e| e.to_string());
+    let lang = state.lang.lock().map_err(|e| e.to_string())?.clone();
+    return build_menu(&app, &names, &theme, &lang).map_err(|e| e.to_string());
   }
   #[cfg(not(desktop))]
   {
@@ -242,11 +247,28 @@ fn set_theme(app: tauri::AppHandle, state: tauri::State<'_, MenuState>, choice: 
   #[cfg(desktop)]
   {
     let recent = state.recent.lock().map_err(|e| e.to_string())?.clone();
-    build_menu(&app, &recent, &choice).map_err(|e| e.to_string())?;
+    let lang = state.lang.lock().map_err(|e| e.to_string())?.clone();
+    build_menu(&app, &recent, &choice, &lang).map_err(|e| e.to_string())?;
     let theme = match choice.as_str() { "light" => Some(tauri::Theme::Light), "dark" => Some(tauri::Theme::Dark), _ => None };
     for (_, window) in app.webview_windows() {
       let _ = window.set_theme(theme);
     }
+  }
+  #[cfg(not(desktop))]
+  let _ = app;
+  Ok(())
+}
+
+/// Sprache der Menüleiste („en“ oder „de“); baut das Menü neu auf.
+#[tauri::command]
+fn set_language(app: tauri::AppHandle, state: tauri::State<'_, MenuState>, lang: String) -> Result<(), String> {
+  let lang = if lang == "de" { lang } else { "en".to_string() };
+  *state.lang.lock().map_err(|e| e.to_string())? = lang.clone();
+  #[cfg(desktop)]
+  {
+    let recent = state.recent.lock().map_err(|e| e.to_string())?.clone();
+    let theme = state.theme.lock().map_err(|e| e.to_string())?.clone();
+    build_menu(&app, &recent, &theme, &lang).map_err(|e| e.to_string())?;
   }
   #[cfg(not(desktop))]
   let _ = app;
@@ -260,8 +282,8 @@ pub fn run() {
     .plugin(tauri_plugin_opener::init())
     .plugin(tauri_plugin_iap::init())
     .manage(PendingOpen::default())
-    .manage(MenuState { recent: Mutex::new(Vec::new()), theme: Mutex::new("system".to_string()) })
-    .invoke_handler(tauri::generate_handler![grid_save, grid_open, take_pending_open, set_recent_menu, set_theme, identity_load, identity_store, app_platform, docs_dir, list_documents, delete_document])
+    .manage(MenuState { recent: Mutex::new(Vec::new()), theme: Mutex::new("system".to_string()), lang: Mutex::new("en".to_string()) })
+    .invoke_handler(tauri::generate_handler![grid_save, grid_open, take_pending_open, set_recent_menu, set_theme, set_language, identity_load, identity_store, app_platform, docs_dir, list_documents, delete_document])
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(
@@ -272,7 +294,7 @@ pub fn run() {
       }
 
       #[cfg(desktop)]
-      build_menu(app.handle(), &[], "system")?;
+      build_menu(app.handle(), &[], "system", "en")?;
       Ok(())
     });
   #[cfg(desktop)]

@@ -1,3 +1,4 @@
+import { language, locale } from './i18n'
 /** Datumswerte sind „schwebend“ (ohne Zeitzone) als Text gespeichert: `2026-11-17` oder `2026-11-17T14:30`. */
 export type DateStyle = 'short' | 'long' | 'weekday' | 'iso'
 
@@ -19,10 +20,10 @@ export function formatDate(value: unknown, style: DateStyle, withTime: boolean):
   const pad = (n: number) => String(n).padStart(2, '0')
   let day: string
   if (style === 'iso') day = `${m[1]}-${m[2]}-${m[3]}`
-  else if (style === 'long') day = date.toLocaleDateString('de-DE', { day: 'numeric', month: 'long', year: 'numeric' })
-  else if (style === 'weekday') day = date.toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/^(\p{L}+)\.?,?\s*/u, '$1, ')
+  else if (style === 'long') day = date.toLocaleDateString(locale(), { day: 'numeric', month: 'long', year: 'numeric' })
+  else if (style === 'weekday') day = `${date.toLocaleDateString(locale(), { weekday: 'short' }).replace('.', '')}, ${pad(d)}.${pad(mo)}.${y}`
   else day = `${pad(d)}.${pad(mo)}.${y}`
-  if (withTime && m[4]) day += style === 'iso' ? ` ${m[4]}:${m[5]}` : `, ${m[4]}:${m[5]} Uhr`
+  if (withTime && m[4]) day += style === 'iso' ? ` ${m[4]}:${m[5]}` : `, ${m[4]}:${m[5]}${language() === 'de' ? ' Uhr' : ''}`
   return day
 }
 
@@ -79,7 +80,7 @@ export function parseDateInput(text: string, today: Date = new Date()): { date: 
     const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() + offset)
     return isoDate(d.getFullYear(), d.getMonth() + 1, d.getDate())
   }
-  const words: Record<string, number> = { heute: 0, morgen: 1, gestern: -1, übermorgen: 2, vorgestern: -2 }
+  const words: Record<string, number> = { heute: 0, morgen: 1, gestern: -1, übermorgen: 2, vorgestern: -2, today: 0, tomorrow: 1, yesterday: -1 }
   if (first in words) { const date = day(words[first]); return date ? { date, time } : null }
 
   const year = (s: string | undefined): number | null => {

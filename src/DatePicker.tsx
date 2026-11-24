@@ -1,9 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { editText, formatDate, isoDate, parseDateInput, type DateStyle } from './dateFormat'
+import { t, locale } from './i18n'
 
-const WEEKDAYS = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So']
-const MONTHS = Array.from({ length: 12 }, (_, i) => new Date(2000, i, 1).toLocaleDateString('de-DE', { month: 'long' }))
+const weekdays = () => Array.from({ length: 7 }, (_, i) => new Date(2024, 0, 1 + i).toLocaleDateString(locale(), { weekday: 'short' }).replace('.', '').slice(0, 2)) // 1.1.2024 war ein Montag
+const months = () => Array.from({ length: 12 }, (_, i) => new Date(2000, i, 1).toLocaleDateString(locale(), { month: 'long' }))
 const POPUP_W = 288
 const POPUP_H = 372
 
@@ -119,24 +120,24 @@ function DatePopup(props: { anchor: HTMLElement; value: unknown; withTime: boole
   const todayKey = keyOf(today)
 
   return createPortal(
-    <div ref={box} className="datepop" role="dialog" aria-label="Datum wählen" style={pos ? { left: pos.left, top: pos.top, width: POPUP_W } : { visibility: 'hidden' }}
+    <div ref={box} className="datepop" role="dialog" aria-label={t('Datum wählen')} style={pos ? { left: pos.left, top: pos.top, width: POPUP_W } : { visibility: 'hidden' }}
       onMouseDown={(e) => e.stopPropagation()} onKeyDown={onKey}>
-      <input ref={input} className={`datepop-text${invalid ? ' invalid' : ''}`} value={text} placeholder={withTime ? 'TT.MM.JJJJ SS:MM' : 'TT.MM.JJJJ'}
-        aria-invalid={invalid} aria-label="Datum eingeben" onChange={(e) => { setText(e.target.value); setTried(false) }} />
+      <input ref={input} className={`datepop-text${invalid ? ' invalid' : ''}`} value={text} placeholder={withTime ? t('TT.MM.JJJJ HH:MM') : t('TT.MM.JJJJ')}
+        aria-invalid={invalid} aria-label={t('Datum eingeben')} onChange={(e) => { setText(e.target.value); setTried(false) }} />
       <small className={`datepop-hint${invalid ? ' invalid' : ''}`}>
-        {invalid ? 'Kein gültiges Datum' : parsed ? formatDate(`${parsed.date}${parsed.time ? `T${parsed.time}` : ''}`, 'weekday', withTime) : 'z. B. 17.11. · 171126 · heute'}
+        {invalid ? t('Kein gültiges Datum') : parsed ? formatDate(`${parsed.date}${parsed.time ? `T${parsed.time}` : ''}`, 'weekday', withTime) : t('z. B. 17.11. · 171126 · heute')}
       </small>
       <div className="datepop-nav">
-        <button type="button" aria-label="Vorheriger Monat" onClick={() => moveMonth(-1)}>‹</button>
-        <select aria-label="Monat" value={view.m} onChange={(e) => setView((v) => ({ ...v, m: Number(e.target.value) }))}>
-          {MONTHS.map((m, i) => <option key={m} value={i}>{m}</option>)}
+        <button type="button" aria-label={t('Vorheriger Monat')} onClick={() => moveMonth(-1)}>‹</button>
+        <select aria-label={t('Monat')} value={view.m} onChange={(e) => setView((v) => ({ ...v, m: Number(e.target.value) }))}>
+          {months().map((m, i) => <option key={m} value={i}>{m}</option>)}
         </select>
-        <input className="datepop-year" type="number" aria-label="Jahr" value={view.y} min={1000} max={9999}
+        <input className="datepop-year" type="number" aria-label={t('Jahr')} value={view.y} min={1000} max={9999}
           onChange={(e) => { const y = Number(e.target.value); if (isoDate(y, 1, 1)) setView((v) => ({ ...v, y })) }} />
-        <button type="button" aria-label="Nächster Monat" onClick={() => moveMonth(1)}>›</button>
+        <button type="button" aria-label={t('Nächster Monat')} onClick={() => moveMonth(1)}>›</button>
       </div>
       <div className="datepop-grid">
-        {WEEKDAYS.map((w) => <span key={w} className="wd">{w}</span>)}
+        {weekdays().map((w) => <span key={w} className="wd">{w}</span>)}
         {days.map((d) => {
           const k = keyOf(d)
           return (
@@ -146,8 +147,8 @@ function DatePopup(props: { anchor: HTMLElement; value: unknown; withTime: boole
         })}
       </div>
       <div className="datepop-actions">
-        <button type="button" onClick={() => props.onPick(null)} disabled={!props.value}>Löschen</button>
-        <button type="button" onClick={() => props.onPick(result(todayKey, null))}>Heute</button>
+        <button type="button" onClick={() => props.onPick(null)} disabled={!props.value}>{t('Löschen')}</button>
+        <button type="button" onClick={() => props.onPick(result(todayKey, null))}>{t('Heute')}</button>
       </div>
     </div>,
     document.body,

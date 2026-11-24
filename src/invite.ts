@@ -1,4 +1,5 @@
 /** Einladung als Text: Server, Dokument und der einladende Admin (mit Fingerabdruck zum Vergleichen). */
+import { t as tr } from './i18n'
 
 export interface Invite {
   server: string
@@ -22,11 +23,11 @@ export const makeInvite = (i: Invite) => PREFIX + toB64Url(JSON.stringify(i))
 
 export function parseInvite(text: string): Invite {
   const t = text.trim()
-  if (!t.startsWith(PREFIX)) throw new Error('Das ist keine Grid-Einladung')
+  if (!t.startsWith(PREFIX)) throw new Error(tr('Das ist keine Grid-Einladung'))
   let o: Partial<Invite>
-  try { o = JSON.parse(fromB64Url(t.slice(PREFIX.length))) } catch { throw new Error('Die Einladung ist beschädigt') }
+  try { o = JSON.parse(fromB64Url(t.slice(PREFIX.length))) } catch { throw new Error(tr('Die Einladung ist beschädigt')) }
   if (typeof o.server !== 'string' || typeof o.doc !== 'string' || !/^[0-9a-zA-Z-]{8,64}$/.test(o.doc) || !/^https?:\/\//i.test(o.server)) {
-    throw new Error('Die Einladung ist unvollständig')
+    throw new Error(tr('Die Einladung ist unvollständig'))
   }
   return {
     server: o.server, doc: o.doc, name: typeof o.name === 'string' ? o.name : '', admin: typeof o.admin === 'string' ? o.admin : '',

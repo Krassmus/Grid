@@ -13,6 +13,7 @@ import { fromHex, getIdentity, onIdentityChanged, signMessage, toHex } from './i
 import { decryptBlob, decryptEntry, encryptBlob, encryptEntry, MissingKey } from './e2e'
 import type { DocKeys } from './docKeys'
 import { fetchMembers } from './members'
+import { t } from './i18n'
 
 export type SyncStatus = 'connecting' | 'online' | 'offline' | 'pending' | 'denied'
 /**
@@ -83,14 +84,14 @@ export const onServerKey = (fn: (server: string, key: string) => void) => { keyL
 function checkServer(base: string, nonce: string, server?: { pub: string; sig: string }) {
   const pinned = pins.get(base)
   if (!server) {
-    if (pinned) throw new AuthError('untrusted', 'Der Server meldet keinen Schlüssel mehr, Grid kennt aber einen. Es ist vielleicht nicht der richtige Server.')
+    if (pinned) throw new AuthError('untrusted', t('Der Server meldet keinen Schlüssel mehr, Grid kennt aber einen. Es ist vielleicht nicht der richtige Server.'))
     return // älterer Server ohne Identität
   }
   let ok = false
   try { ok = ed25519.verify(fromHex(server.sig), new TextEncoder().encode(`grid-server-v1\n${nonce}`), fromHex(server.pub)) } catch { /* ungültig */ }
-  if (!ok) throw new AuthError('untrusted', 'Der Server konnte seine Identität nicht beweisen.')
+  if (!ok) throw new AuthError('untrusted', t('Der Server konnte seine Identität nicht beweisen.'))
   if (pinned && pinned !== server.pub) {
-    throw new AuthError('untrusted', 'Dieser Server hat einen anderen Schlüssel als beim ersten Verbinden. Das passiert bei einer Neuinstallation – oder wenn es nicht der richtige Server ist.')
+    throw new AuthError('untrusted', t('Dieser Server hat einen anderen Schlüssel als beim ersten Verbinden. Das passiert bei einer Neuinstallation – oder wenn es nicht der richtige Server ist.'))
   }
   if (!pinned) { pins.set(base, server.pub); savePins(); keyListeners.forEach((f) => f(base, server.pub)) }
 }
@@ -98,7 +99,7 @@ function checkServer(base: string, nonce: string, server?: { pub: string; sig: s
 export interface ServerInfo { name: string | null; pub: string; billing: boolean; version: string }
 export async function fetchServerInfo(server: string): Promise<ServerInfo> {
   const r = await fetch(`${normalizeServer(server)}/server`)
-  if (!r.ok) throw new Error(`Server antwortet mit ${r.status}`)
+  if (!r.ok) throw new Error(t('Server antwortet mit {status}', { status: r.status }))
   return r.json()
 }
 
@@ -112,7 +113,7 @@ export async function sessionToken(server: string, force = false): Promise<strin
   if (have && !force && have.exp - 60 > Date.now() / 1000) return have.token
   let res: Response
   let challenge: { nonce: string; server?: { pub: string; sig: string } }
-  try { challenge = await (await fetch(`${base}/challenge`)).json() } catch { throw new AuthError('unreachable', 'Server nicht erreichbar') }
+  try { challenge = await (await fetch(`${base}/challenge`)).json() } catch { throw new AuthError('unreachable', t('Server nicht erreichbar')) }
   checkServer(base, challenge.nonce, challenge.server)
   try {
     const { nonce } = challenge
@@ -121,11 +122,11 @@ export async function sessionToken(server: string, force = false): Promise<strin
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: me.id, pub: me.publicKey, nonce, sig: signMessage(me, `grid-login-v1\n${me.id}\n${nonce}`) }),
     })
-  } catch { throw new AuthError('unreachable', 'Server nicht erreichbar') }
+  } catch { throw new AuthError('unreachable', t('Server nicht erreichbar')) }
   const body = await res.json().catch(() => ({}))
   if (res.ok && body.token) { sessions.set(base, { token: body.token, exp: body.exp }); return body.token }
-  if (body.status === 'pending') throw new AuthError('pending', 'Das Konto wartet auf Freigabe durch den Betreiber des Servers')
-  throw new AuthError('invalid', body.reason ?? `Server antwortet mit ${res.status}`)
+  if (body.status === 'pending') throw new AuthError('pending', t('Das Konto wartet auf Freigabe durch den Betreiber des Servers'))
+  throw new AuthError('invalid', body.reason ?? t('Server antwortet mit {status}', { status: res.status }))
 }
 
 /** `fetch` mit Sitzungsschlüssel; bei „abgelaufen“ einmal neu anmelden. */
@@ -157,7 +158,7 @@ export interface AccountInfo {
 
 export async function fetchAccountInfo(server: string): Promise<AccountInfo> {
   const r = await authedFetch(server, '/me')
-  if (!r.ok) throw new Error(`Server antwortet mit ${r.status}`)
+  if (!r.ok) throw new Error(t('Server antwortet mit {status}', { status: r.status }))
   return r.json()
 }
 
@@ -165,7 +166,7 @@ export interface CloudDoc { id: string; name: string; updated: number; enc?: boo
 
 export async function listCloudDocs(server: string): Promise<CloudDoc[]> {
   const r = await authedFetch(server, '/docs')
-  if (!r.ok) throw new Error(`Server antwortet mit ${r.status}`)
+  if (!r.ok) throw new Error(t('Server antwortet mit {status}', { status: r.status }))
   return r.json()
 }
 
@@ -351,7 +352,7 @@ export class SyncConnection {
         if (await keys.load()) return
         if (keys.serverEpoch === 0 && (await keys.createFirst(await fetchMembers(this.cfg.server, this.cfg.docId)))) return
       } catch { /* offline oder noch kein Mitglied: nächster Versuch */ }
-      this.onState({ status: 'pending', kind: 'keys', reason: 'Wartet auf den Dokumentschlüssel: ein Admin muss ihn senden (er muss dafür online sein).' })
+      this.onState({ status: 'pending', kind: 'keys', reason: t('Wartet auf den Dokumentschlüssel: ein Admin muss ihn senden (er muss dafür online sein).') })
       await sleep(5000)
     }
   }
@@ -360,7 +361,7 @@ export class SyncConnection {
     for (;;) {
       const k = await this.cfg.keys!.keyFor(epoch)
       if (k || !this.alive(ws, gen)) return k
-      this.onState({ status: 'pending', kind: 'keys', reason: `Schlüssel (Epoche ${epoch}) fehlt: ein Admin muss ihn senden.` })
+      this.onState({ status: 'pending', kind: 'keys', reason: t('Schlüssel (Epoche {epoch}) fehlt: ein Admin muss ihn senden.', { epoch }) })
       await sleep(5000)
     }
   }

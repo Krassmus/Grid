@@ -6,6 +6,7 @@
 import { ed25519 } from '@noble/curves/ed25519.js'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { fromHex, signMessage, toHex, type Identity } from './identity'
+import { t } from './i18n'
 
 export type Role = 'admin' | 'member'
 /** `encrypt`: Dokument als Ende-zu-Ende-verschlüsselt festlegen (`subject` = `actor`, einmalig; docs/E2E.md).
@@ -49,48 +50,48 @@ const validId = (s: string) => /^[0-9a-zA-Z-]{8,64}$/.test(s)
 
 /** Wendet einen Eintrag an. Wirft mit einer Begründung, wenn er nicht gilt (dieselben Regeln wie auf dem Server). */
 export function applyEntry(state: AdminState, doc: string, e: AdminEntry): AdminState {
-  if (e.v !== 1 || e.doc !== doc) throw new Error('Eintrag gehört nicht zu diesem Dokument')
-  if (e.seq !== state.len + 1) throw new Error('Nummer passt nicht')
-  if (e.prev !== state.head) throw new Error('Verkettung passt nicht')
-  if (e.name.length > 120 || e.name.includes('\n')) throw new Error('Name ungültig')
-  if (e.role !== 'admin' && e.role !== 'member') throw new Error('Rolle ungültig')
-  if (!validId(e.actor) || !validId(e.subject)) throw new Error('Kennung ungültig')
-  if (!/^[0-9a-f]{64}$/.test(e.subjectPub)) throw new Error('Schlüssel ungültig')
+  if (e.v !== 1 || e.doc !== doc) throw new Error(t('Eintrag gehört nicht zu diesem Dokument'))
+  if (e.seq !== state.len + 1) throw new Error(t('Nummer passt nicht'))
+  if (e.prev !== state.head) throw new Error(t('Verkettung passt nicht'))
+  if (e.name.length > 120 || e.name.includes('\n')) throw new Error(t('Name ungültig'))
+  if (e.role !== 'admin' && e.role !== 'member') throw new Error(t('Rolle ungültig'))
+  if (!validId(e.actor) || !validId(e.subject)) throw new Error(t('Kennung ungültig'))
+  if (!/^[0-9a-f]{64}$/.test(e.subjectPub)) throw new Error(t('Schlüssel ungültig'))
 
   const members = new Map(state.members)
   let moved = state.moved
   let enc = state.enc
   let signer: string
   if (e.type === 'genesis') {
-    if (state.len !== 0) throw new Error('Dokument hat schon einen Anfang')
-    if (e.actor !== e.subject || e.role !== 'admin') throw new Error('Der Anfang gehört dem Ersteller als Admin')
+    if (state.len !== 0) throw new Error(t('Dokument hat schon einen Anfang'))
+    if (e.actor !== e.subject || e.role !== 'admin') throw new Error(t('Der Anfang gehört dem Ersteller als Admin'))
     members.set(e.subject, { pub: e.subjectPub, role: 'admin', name: e.name })
     signer = e.subjectPub
   } else if (e.type === 'set' || e.type === 'remove' || e.type === 'move' || e.type === 'encrypt') {
     const actor = state.members.get(e.actor)
-    if (!actor) throw new Error('Nur Mitglieder dürfen das')
+    if (!actor) throw new Error(t('Nur Mitglieder dürfen das'))
     // Jedes Mitglied darf sich selbst entfernen (verlassen); alles andere dürfen nur Admins
     const leaving = e.type === 'remove' && e.subject === e.actor
-    if (actor.role !== 'admin' && !leaving) throw new Error('Nur Admins dürfen das')
+    if (actor.role !== 'admin' && !leaving) throw new Error(t('Nur Admins dürfen das'))
     if (e.type === 'move') {
-      if (e.subject !== e.actor) throw new Error('Umzug: subject muss der Unterzeichner sein')
-      if (!/^https?:\/\//.test(e.name)) throw new Error('Umzug: Server-Adresse ungültig')
+      if (e.subject !== e.actor) throw new Error(t('Umzug: subject muss der Unterzeichner sein'))
+      if (!/^https?:\/\//.test(e.name)) throw new Error(t('Umzug: Server-Adresse ungültig'))
       moved = { server: e.name, key: e.subjectPub }
     } else if (e.type === 'encrypt') {
-      if (e.subject !== e.actor || e.subjectPub !== actor.pub) throw new Error('Verschlüsseln: subject muss der Unterzeichner sein')
-      if (state.enc) throw new Error('Das Dokument ist schon verschlüsselt')
+      if (e.subject !== e.actor || e.subjectPub !== actor.pub) throw new Error(t('Verschlüsseln: subject muss der Unterzeichner sein'))
+      if (state.enc) throw new Error(t('Das Dokument ist schon verschlüsselt'))
       enc = true
     } else if (e.type === 'set') {
       const old = state.members.get(e.subject)
-      if (old && old.pub !== e.subjectPub) throw new Error('Schlüssel passt nicht zum Mitglied')
+      if (old && old.pub !== e.subjectPub) throw new Error(t('Schlüssel passt nicht zum Mitglied'))
       members.set(e.subject, { pub: e.subjectPub, role: e.role, name: e.name })
-    } else if (!members.delete(e.subject)) throw new Error('Kein Mitglied')
-    if (![...members.values()].some((m) => m.role === 'admin')) throw new Error('Es muss mindestens ein Admin bleiben')
+    } else if (!members.delete(e.subject)) throw new Error(t('Kein Mitglied'))
+    if (![...members.values()].some((m) => m.role === 'admin')) throw new Error(t('Es muss mindestens ein Admin bleiben'))
     signer = actor.pub
-  } else throw new Error('Unbekannter Eintragstyp')
+  } else throw new Error(t('Unbekannter Eintragstyp'))
 
   if (!/^[0-9a-f]{128}$/.test(e.sig) || !ed25519.verify(fromHex(e.sig), new TextEncoder().encode(signingText(e)), fromHex(signer))) {
-    throw new Error('Signatur falsch')
+    throw new Error(t('Signatur falsch'))
   }
   return { members, moved, enc, len: e.seq, head: entryHash(e) }
 }

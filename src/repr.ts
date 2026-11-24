@@ -5,6 +5,7 @@
 import * as Y from 'yjs'
 import { summarize, type ColumnInfo, type TableInfo } from './model'
 import { columnCells, fileIndex, newCtx, type CellCtx } from './cells'
+import { t } from './i18n'
 
 export type AvatarMode = 'default' | 'none' | 'initial' | 'image' | 'icon' | 'text'
 
@@ -73,9 +74,9 @@ export function computeRepr(doc: Y.Doc, tables: TableInfo[], table: TableInfo, c
   const out = new Map<string, Repr>()
   for (const rid of table.rowIds) {
     const base = summarize(doc, table, rid)
-    const title = titles ? titles.get(rid)?.text || 'Ohne Titel' : base.title
-    const t = subs?.get(rid)?.text
-    const subList = t && t !== title ? [t] : []
+    const title = titles ? titles.get(rid)?.text || t('Ohne Titel') : base.title
+    const sub = subs?.get(rid)?.text
+    const subList = sub && sub !== title ? [sub] : []
 
     let avatar: ReprAvatar | undefined
     const fallback = { text: initials(title) }

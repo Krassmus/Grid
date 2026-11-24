@@ -8,6 +8,7 @@ import { ed25519 } from '@noble/curves/ed25519.js'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { invoke } from '@tauri-apps/api/core'
 import { isTauri } from './gridFile'
+import { t } from './i18n'
 
 export interface Identity {
   /** Kennung des Kontos (UUID) */
@@ -47,7 +48,7 @@ export const onIdentityChanged = (fn: () => void) => { listeners.add(fn); return
 
 export const toHex = (b: Uint8Array) => [...b].map((x) => x.toString(16).padStart(2, '0')).join('')
 export const fromHex = (s: string) => {
-  if (!/^([0-9a-f]{2})*$/i.test(s)) throw new Error('Ungültige Schlüsseldaten')
+  if (!/^([0-9a-f]{2})*$/i.test(s)) throw new Error(t('Ungültige Schlüsseldaten'))
   return Uint8Array.from(s.match(/../g) ?? [], (h) => parseInt(h, 16))
 }
 const b64 = (b: Uint8Array) => btoa(String.fromCharCode(...b))
@@ -61,9 +62,9 @@ const serialize = (i: Identity) => JSON.stringify({ v: 1, id: i.id, secret: toHe
 
 function parse(text: string): Identity {
   const o = JSON.parse(text)
-  if (o?.v !== 1 || typeof o.id !== 'string' || typeof o.secret !== 'string') throw new Error('Kein gültiges Konto')
+  if (o?.v !== 1 || typeof o.id !== 'string' || typeof o.secret !== 'string') throw new Error(t('Kein gültiges Konto'))
   const secret = fromHex(o.secret)
-  if (secret.length !== 32 || !/^[0-9a-zA-Z-]{8,64}$/.test(o.id)) throw new Error('Kein gültiges Konto')
+  if (secret.length !== 32 || !/^[0-9a-zA-Z-]{8,64}$/.test(o.id)) throw new Error(t('Kein gültiges Konto'))
   return make(o.id, secret)
 }
 
@@ -77,7 +78,7 @@ let known = ''
 export function getIdentity(): Promise<Identity> {
   cached ??= (async () => {
     const saved = await store.load()
-    if (saved) { try { return parse(saved) } catch { /* beschädigt: nicht überschreiben, siehe unten */ throw new Error('Das gespeicherte Konto ist beschädigt') } }
+    if (saved) { try { return parse(saved) } catch { /* beschädigt: nicht überschreiben, siehe unten */ throw new Error(t('Das gespeicherte Konto ist beschädigt')) } }
     const fresh = make(crypto.randomUUID(), ed25519.utils.randomSecretKey())
     await store.save(serialize(fresh))
     return fresh
@@ -120,14 +121,14 @@ export async function exportAccount(pass: string): Promise<string> {
 
 /** Nimmt ein exportiertes Konto auf diesem Gerät in Gebrauch (ersetzt das bisherige). */
 export async function importAccount(text: string, pass: string): Promise<Identity> {
-  const t = text.trim()
-  if (!t.startsWith(PREFIX)) throw new Error('Das ist kein Grid-Konto')
-  const [salt, iv, ct] = t.slice(PREFIX.length).split(':')
-  if (!salt || !iv || !ct) throw new Error('Das ist kein Grid-Konto')
+  const trimmed = text.trim()
+  if (!trimmed.startsWith(PREFIX)) throw new Error(t('Das ist kein Grid-Konto'))
+  const [salt, iv, ct] = trimmed.slice(PREFIX.length).split(':')
+  if (!salt || !iv || !ct) throw new Error(t('Das ist kein Grid-Konto'))
   let plain: ArrayBuffer
   try {
     plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(iv) as BufferSource }, await wrapKey(pass, unb64(salt)), unb64(ct) as BufferSource)
-  } catch { throw new Error('Passwort falsch oder Text beschädigt') }
+  } catch { throw new Error(t('Passwort falsch oder Text beschädigt')) }
   const id = parse(new TextDecoder().decode(plain))
   await store.save(serialize(id))
   cached = Promise.resolve(id); known = id.id

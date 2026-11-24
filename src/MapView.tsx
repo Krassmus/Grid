@@ -11,6 +11,7 @@ import { TileContent } from './ReprTile'
 import { useFileIndex, useLinkIndex } from './useTables'
 import { glide, type Tag } from './markerGlide'
 import { formatArea, formatLength, pathLength, ringArea, type Pt } from './mapGeometry'
+import { t } from './i18n'
 
 type Mode = 'select' | 'point' | 'line' | 'area'
 /** Marker einer Zeile: dazu ein laufendes Ausblenden (Zeitgeber) und die zuletzt gezeigte Darstellung, die während des Ausblendens stehen bleibt */
@@ -19,7 +20,7 @@ type LiveTag = Tag & { leaving: number | null; repr?: Repr }
 const FADE_MS = 500
 const calmMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
 const COLORS = ['#0a84ff', '#34c759', '#ff3b30', '#ff9500', '#af52de', '#5856d6', '#8e8e93', '#1c1c1e']
-const KIND_LABEL = { point: 'Punkt', line: 'Strecke', area: 'Gebiet' } as const
+const kindLabel = (k: 'point' | 'line' | 'area') => ({ point: t('Punkt'), line: t('Strecke'), area: t('Gebiet') })[k]
 const MIN_POINTS = { line: 2, area: 3 } as const
 const r7 = (n: number) => Math.round(n * 1e7) / 1e7
 const normLon = (lon: number) => ((((lon + 180) % 360) + 360) % 360) - 180
@@ -306,8 +307,8 @@ export function MapView(props: { doc: Y.Doc; map: MapInfo; tables: TableInfo[]; 
 
   const sel = map.shapes.find((s) => s.id === selected)
   const drawing = mode === 'line' || mode === 'area'
-  const hint = mode === 'point' ? 'Auf die Karte klicken, um einen Punkt zu setzen.'
-    : drawing ? `Klicken, um Punkte zu setzen (${draft.length}). Doppelklick oder „Fertig“ beendet ${mode === 'line' ? 'die Strecke' : 'das Gebiet'}.`
+  const hint = mode === 'point' ? t('Auf die Karte klicken, um einen Punkt zu setzen.')
+    : drawing ? t(mode === 'line' ? 'Klicken, um Punkte zu setzen ({n}). Doppelklick oder „Fertig“ beendet die Strecke.' : 'Klicken, um Punkte zu setzen ({n}). Doppelklick oder „Fertig“ beendet das Gebiet.', { n: draft.length })
     : null
 
   return (
@@ -317,14 +318,14 @@ export function MapView(props: { doc: Y.Doc; map: MapInfo; tables: TableInfo[]; 
         h.repr
           ? <div className="geo-tag"><div className="tile"><TileContent repr={h.repr} /></div><i className="geo-tag-arrow" /></div>
           : <i className="geo-pin"><span /></i>, h.el, h.key))}
-      <div className="map-tools" role="toolbar" aria-label="Zeichenwerkzeuge">
-        {([['select', 'Auswählen'], ['point', '+ Punkt'], ['line', '+ Strecke'], ['area', '+ Gebiet']] as const).map(([m, label]) => (
+      <div className="map-tools" role="toolbar" aria-label={t('Zeichenwerkzeuge')}>
+        {([['select', t('Auswählen')], ['point', t('+ Punkt')], ['line', t('+ Strecke')], ['area', t('+ Gebiet')]] as const).map(([m, label]) => (
           <button key={m} type="button" className={mode === m ? 'on' : ''} onClick={() => choose(m)}>{label}</button>
         ))}
         {drawing && (
           <>
-            <button type="button" className="primary" disabled={draft.length < MIN_POINTS[mode]} onClick={() => finishRef.current(false)}>Fertig</button>
-            <button type="button" onClick={cancelDraw}>Abbrechen</button>
+            <button type="button" className="primary" disabled={draft.length < MIN_POINTS[mode]} onClick={() => finishRef.current(false)}>{t('Fertig')}</button>
+            <button type="button" onClick={cancelDraw}>{t('Abbrechen')}</button>
           </>
         )}
       </div>
@@ -341,23 +342,23 @@ function ShapePanel(props: { shape: MapShape; onChange: (patch: Partial<MapShape
   const { shape } = props
   const [label, setLabel] = useState(shape.label)
   const commit = () => { if (label !== shape.label) props.onChange({ label }) }
-  const measure = shape.kind === 'line' ? `Länge ${formatLength(pathLength(shape.pts))}`
-    : shape.kind === 'area' ? `Fläche ${formatArea(ringArea(shape.pts))}, Umfang ${formatLength(pathLength([...shape.pts, shape.pts[0]]))}` : null
+  const measure = shape.kind === 'line' ? t('Länge {n}', { n: formatLength(pathLength(shape.pts)) })
+    : shape.kind === 'area' ? t('Fläche {a}, Umfang {u}', { a: formatArea(ringArea(shape.pts)), u: formatLength(pathLength([...shape.pts, shape.pts[0]])) }) : null
   return (
-    <div className="map-panel" role="dialog" aria-label={KIND_LABEL[shape.kind]}>
-      <div className="map-panel-head"><b>{KIND_LABEL[shape.kind]}</b><button type="button" aria-label="Schließen" onClick={() => { commit(); props.onClose() }}>✕</button></div>
-      <input value={label} placeholder="Beschriftung" aria-label="Beschriftung" onChange={(e) => setLabel(e.target.value)}
+    <div className="map-panel" role="dialog" aria-label={kindLabel(shape.kind)}>
+      <div className="map-panel-head"><b>{kindLabel(shape.kind)}</b><button type="button" aria-label={t('Schließen')} onClick={() => { commit(); props.onClose() }}>✕</button></div>
+      <input value={label} placeholder={t('Beschriftung')} aria-label={t('Beschriftung')} onChange={(e) => setLabel(e.target.value)}
         onBlur={commit} onKeyDown={(e) => { if (e.key === 'Enter') { commit(); (e.target as HTMLElement).blur() } }} />
-      <div className="map-colors" role="radiogroup" aria-label="Farbe">
+      <div className="map-colors" role="radiogroup" aria-label={t('Farbe')}>
         {COLORS.map((c) => (
           <button key={c} type="button" role="radio" aria-checked={shape.color === c} className={shape.color === c ? 'on' : ''}
             style={{ background: c }} aria-label={c} onClick={() => props.onChange({ color: c })} />
         ))}
       </div>
       {measure && <p className="hint">{measure}</p>}
-      {shape.kind !== 'point' && <p className="hint">Eckpunkte ziehen; Punkt in der Kantenmitte ziehen fügt einen ein; Doppelklick auf einen Eckpunkt entfernt ihn.</p>}
-      {shape.kind === 'point' && <p className="hint">Zum Verschieben die Markierung ziehen.</p>}
-      <button type="button" className="danger-outline" onClick={props.onDelete}>Löschen</button>
+      {shape.kind !== 'point' && <p className="hint">{t('Eckpunkte ziehen; Punkt in der Kantenmitte ziehen fügt einen ein; Doppelklick auf einen Eckpunkt entfernt ihn.')}</p>}
+      {shape.kind === 'point' && <p className="hint">{t('Zum Verschieben die Markierung ziehen.')}</p>}
+      <button type="button" className="danger-outline" onClick={props.onDelete}>{t('Löschen')}</button>
     </div>
   )
 }

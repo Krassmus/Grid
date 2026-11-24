@@ -2,6 +2,7 @@
  * Geokoordinaten: Gespeichert wird stets einheitlich als WGS84-Dezimalgrad `"Breite,Länge"` (7 Nachkommastellen, ca. 1 cm).
  * Das Format ist reine Anzeige- und Eingabesache: Dezimalgrad, Länge/Breite, Grad-Minuten-Sekunden, Grad-Dezimalminuten, UTM.
  */
+import { t } from './i18n'
 
 export interface LatLon { lat: number; lon: number }
 
@@ -121,7 +122,7 @@ export function formatGeo(p: LatLon, format: GeoFormat): string {
     }
     case 'utm': {
       const u = toUtm(p)
-      return u ? `${u.zone}${u.band} ${Math.round(u.easting)} ${Math.round(u.northing)}` : `${p.lat.toFixed(5)}, ${p.lon.toFixed(5)} (außerhalb UTM)`
+      return u ? `${u.zone}${u.band} ${Math.round(u.easting)} ${Math.round(u.northing)}` : t('{pos} (außerhalb UTM)', { pos: `${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}` })
     }
     default: return `${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}` // dd, map
   }
@@ -132,8 +133,8 @@ export function formatGeo(p: LatLon, format: GeoFormat): string {
 export type ParseResult = { ok: true; point: LatLon } | { ok: false; error: string }
 
 const inRange = (lat: number, lon: number): ParseResult =>
-  Math.abs(lat) > 90 ? { ok: false, error: 'Die Breite muss zwischen −90 und 90 liegen' }
-    : Math.abs(lon) > 180 ? { ok: false, error: 'Die Länge muss zwischen −180 und 180 liegen' }
+  Math.abs(lat) > 90 ? { ok: false, error: t('Die Breite muss zwischen −90 und 90 liegen') }
+    : Math.abs(lon) > 180 ? { ok: false, error: t('Die Länge muss zwischen −180 und 180 liegen') }
     : { ok: true, point: { lat, lon } }
 
 /**
@@ -142,14 +143,14 @@ const inRange = (lat: number, lon: number): ParseResult =>
  */
 export function parseGeo(input: string, order: 'latlon' | 'lonlat' = 'latlon'): ParseResult {
   let s = input.trim()
-  if (!s) return { ok: false, error: 'Bitte Koordinaten eingeben' }
+  if (!s) return { ok: false, error: t('Bitte Koordinaten eingeben') }
 
   const utm = /^(\d{1,2})\s*([C-HJ-NP-X])\s+(\d+(?:[.,]\d+)?)\s*(?:m\s*)?E?\s*[,;]?\s+(\d+(?:[.,]\d+)?)\s*(?:m\s*)?N?$/i.exec(s)
   if (utm) {
     const zone = Number(utm[1])
-    if (zone < 1 || zone > 60) return { ok: false, error: 'Die UTM-Zone muss zwischen 1 und 60 liegen' }
+    if (zone < 1 || zone > 60) return { ok: false, error: t('Die UTM-Zone muss zwischen 1 und 60 liegen') }
     const p = fromUtm({ zone, band: utm[2].toUpperCase(), easting: Number(utm[3].replace(',', '.')), northing: Number(utm[4].replace(',', '.')) })
-    return Number.isFinite(p.lat) && Number.isFinite(p.lon) ? inRange(p.lat, p.lon) : { ok: false, error: 'Ungültige UTM-Koordinate' }
+    return Number.isFinite(p.lat) && Number.isFinite(p.lon) ? inRange(p.lat, p.lon) : { ok: false, error: t('Ungültige UTM-Koordinate') }
   }
 
   s = s.replace(/[′’‘]/g, "'").replace(/[″”“]/g, '"').replace(/º/g, '°').replace(/''/g, '"')
@@ -160,17 +161,17 @@ export function parseGeo(input: string, order: 'latlon' | 'lonlat' = 'latlon'): 
     if (!m[2]) continue
     const neg = m[2].startsWith('-')
     let v = Math.abs(Number(m[2])) + (m[3] ? Number(m[3]) / 60 : 0) + (m[4] ? Number(m[4]) / 3600 : 0)
-    if (m[3] && Number(m[3]) >= 60) return { ok: false, error: 'Minuten müssen kleiner als 60 sein' }
+    if (m[3] && Number(m[3]) >= 60) return { ok: false, error: t('Minuten müssen kleiner als 60 sein') }
     const letter = (m[1] ?? m[5])?.toUpperCase()
     if (neg) v = -v
     parts.push({ letter, value: letter === 'S' || letter === 'W' ? -Math.abs(v) : v })
   }
-  if (parts.length !== 2) return { ok: false, error: 'Erwartet werden zwei Werte (Breite und Länge) oder eine UTM-Angabe wie 32U 549260 5800540' }
+  if (parts.length !== 2) return { ok: false, error: t('Erwartet werden zwei Werte (Breite und Länge) oder eine UTM-Angabe wie 32U 549260 5800540') }
   const [a, b] = parts
   const isLat = (l?: string) => l === 'N' || l === 'S', isLon = (l?: string) => l === 'E' || l === 'W' || l === 'O'
   if (isLat(a.letter) && isLon(b.letter)) return inRange(a.value, b.value)
   if (isLon(a.letter) && isLat(b.letter)) return inRange(b.value, a.value)
-  if (a.letter || b.letter) return { ok: false, error: 'Himmelsrichtungen: eine Breite (N/S) und eine Länge (E/W/O)' }
+  if (a.letter || b.letter) return { ok: false, error: t('Himmelsrichtungen: eine Breite (N/S) und eine Länge (E/W/O)') }
   return order === 'lonlat' ? inRange(b.value, a.value) : inRange(a.value, b.value)
 }
 
@@ -178,7 +179,7 @@ export function parseGeo(input: string, order: 'latlon' | 'lonlat' = 'latlon'): 
 
 /** Kachelserver; bei Bedarf hier austauschen. */
 export const TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png'
-export const TILE_ATTRIBUTION = '© OpenStreetMap-Mitwirkende'
+export const tileAttribution = () => t('© OpenStreetMap-Mitwirkende')
 
 export interface MapTile { src: string; left: number; top: number }
 

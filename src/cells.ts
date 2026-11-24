@@ -12,6 +12,7 @@ import { DATE, DURATION, FORMULA, GEO, NUMBER, ROLLUP, STAMP, TEMPLATE, TEXT, ef
 import { formatDuration } from './duration'
 import { FormulaSyntaxError, parseFormula, parseTemplate, type Node } from './formula'
 import { allowedAggs, type FooterFn } from './aggregate'
+import { t } from './i18n'
 
 export type Key = number | string | null // null = leer (steht beim Sortieren immer am Ende)
 export interface Cell { raw: unknown; text: string; key: Key; /** Nur bei fehlerhaften Formeln: Erklärung (text enthält den Fehlercode). */ error?: string }
@@ -46,7 +47,7 @@ export function columnCells(doc: Y.Doc, tables: TableInfo[], table: TableInfo, c
   const me = `${table.id}.${col.id}`
   const computed = isComputed(col)
   if (computed && (stack.includes(me) || stack.length > MAX_DEPTH)) {
-    const cyc: Cell = col.type !== 'rollup' ? { raw: null, text: '#ZYKLUS', key: null, error: 'Die Formel verweist (auch über andere Spalten) auf sich selbst' } : EMPTY
+    const cyc: Cell = col.type !== 'rollup' ? { raw: null, text: '#ZYKLUS', key: null, error: t('Die Formel verweist (auch über andere Spalten) auf sich selbst') } : EMPTY
     return new Map(table.rowIds.map((rid) => [rid, cyc]))
   }
   const hit = ctx.cache.get(me)
@@ -192,7 +193,7 @@ function plainCells(doc: Y.Doc, tables: TableInfo[], table: TableInfo, col: Colu
         break
       }
       case 'person': {
-        const names = personIds(raw).map((id) => personName(doc, id) || 'Unbekannt')
+        const names = personIds(raw).map((id) => personName(doc, id) || t('Unbekannt'))
         text = names.join(', ')
         key = names[0] ?? null
         break
@@ -226,7 +227,7 @@ type Val = number | string | boolean | null | FErr
 const nameKey = (s: string) => s.trim().toLowerCase()
 
 const textOf = (v: Val): string =>
-  v === null ? '' : v instanceof FErr ? v.code : typeof v === 'number' ? String(Number(v.toPrecision(12))) : typeof v === 'boolean' ? (v ? 'Wahr' : 'Falsch') : v
+  v === null ? '' : v instanceof FErr ? v.code : typeof v === 'number' ? String(Number(v.toPrecision(12))) : typeof v === 'boolean' ? (v ? t('Wahr') : t('Falsch')) : v
 const truthy = (v: Val): boolean => (v === null ? false : typeof v === 'boolean' ? v : typeof v === 'number' ? v !== 0 : v !== '')
 function numOf(v: Val): number | FErr {
   if (v instanceof FErr) return v
@@ -234,7 +235,7 @@ function numOf(v: Val): number | FErr {
   if (typeof v === 'boolean') return v ? 1 : 0
   if (typeof v === 'number') return v
   const n = Number(v.trim())
-  return v.trim() === '' || Number.isNaN(n) ? new FErr('#WERT!', `„${v}“ ist keine Zahl`) : n
+  return v.trim() === '' || Number.isNaN(n) ? new FErr('#WERT!', t('„{v}“ ist keine Zahl', { v })) : n
 }
 
 /** Wert einer Zelle für Formeln: Zahlen als Zahl, Kästchen als Wahrheitswert, Datum als ISO-Text, sonst Text; leer = null. */
@@ -265,7 +266,7 @@ function dayNumber(v: Val): number | null | FErr {
   if (v instanceof FErr) return v
   if (v === null || v === '') return null
   const m = typeof v === 'string' ? ISO_DATE.exec(v.trim()) : null
-  const bad = () => new FErr('#WERT!', `„${textOf(v)}“ ist kein Datum (erwartet JJJJ-MM-TT)`)
+  const bad = () => new FErr('#WERT!', t('„{v}“ ist kein Datum (erwartet JJJJ-MM-TT)', { v: textOf(v) }))
   if (!m) return bad()
   const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])]
   const n = utcDay(y, mo, d)
@@ -275,9 +276,9 @@ function dayNumber(v: Val): number | null | FErr {
 
 /** Datum als Text; nur Jahre 1000 bis 9999 sind darstellbar. */
 function isoDay(n: number): string | FErr {
-  const t = new Date(n * DAY_MS)
-  const y = t.getUTCFullYear()
-  return y < 1000 || y > 9999 ? new FErr('#WERT!', 'Das Datum liegt außerhalb der Jahre 1000 bis 9999') : `${y}-${pad(t.getUTCMonth() + 1)}-${pad(t.getUTCDate())}`
+  const dt = new Date(n * DAY_MS)
+  const y = dt.getUTCFullYear()
+  return y < 1000 || y > 9999 ? new FErr('#WERT!', t('Das Datum liegt außerhalb der Jahre 1000 bis 9999')) : `${y}-${pad(dt.getUTCMonth() + 1)}-${pad(dt.getUTCDate())}`
 }
 
 function compareVals(a: Val, b: Val, op: string): Val {
@@ -309,12 +310,12 @@ function formulaCells(doc: Y.Doc, tables: TableInfo[], table: TableInfo, col: Co
     for (const part of parts.slice(0, -1)) {
       const rel = cur.columns.find((c) => nameKey(c.name) === nameKey(part) && c.type === 'relation')
       const next = tables.find((t) => t.id === rel?.target)
-      if (!rel || !next) throw new FErr('#NAME?', `„${part}“ ist keine Relationsspalte${steps.length ? '' : ' dieser Tabelle'}`)
+      if (!rel || !next) throw new FErr('#NAME?', t(steps.length ? '„{part}“ ist keine Relationsspalte' : '„{part}“ ist keine Relationsspalte dieser Tabelle', { part }))
       steps.push(rel); cur = next
     }
     const last = parts[parts.length - 1]
     const c = cur.columns.find((x) => nameKey(x.name) === nameKey(last))
-    if (!c) throw new FErr('#NAME?', `Spalte „${last}“ gibt es nicht${cur === table ? '' : ` in „${cur.name}“`}`)
+    if (!c) throw new FErr('#NAME?', cur === table ? t('Spalte „{last}“ gibt es nicht', { last }) : t('Spalte „{last}“ gibt es nicht in „{table}“', { last, table: cur.name }))
     return { steps, table: cur, col: c }
   }
 
@@ -322,7 +323,7 @@ function formulaCells(doc: Y.Doc, tables: TableInfo[], table: TableInfo, col: Co
     switch (n.t) {
       case 'num': case 'str': case 'bool': return () => n.v
       case 'ref': {
-        if (n.parts.length > 1) throw new FErr('#WERT!', 'Werte verknüpfter Zeilen nur innerhalb von SUMME, MITTELWERT, MIN, MAX, ANZAHL oder TEXTVERBINDEN verwenden')
+        if (n.parts.length > 1) throw new FErr('#WERT!', t('Werte verknüpfter Zeilen nur innerhalb von SUMME, MITTELWERT, MIN, MAX, ANZAHL oder TEXTVERBINDEN verwenden'))
         const r = resolve(n.parts)
         const cells = cellsOf(r.table, r.col)
         return (rid) => valueOf(r.col, cells.get(rid))
@@ -341,7 +342,7 @@ function formulaCells(doc: Y.Doc, tables: TableInfo[], table: TableInfo, col: Co
           if (n.op === '+') return x + y
           if (n.op === '-') return x - y
           if (n.op === '*') return x * y
-          if (n.op === '/') return y === 0 ? new FErr('#DIV/0!', 'Division durch 0') : x / y
+          if (n.op === '/') return y === 0 ? new FErr('#DIV/0!', t('Division durch 0')) : x / y
           return Math.pow(x, y)
         }
       }
@@ -376,9 +377,9 @@ function formulaCells(doc: Y.Doc, tables: TableInfo[], table: TableInfo, col: Co
   const tableColIsRelation = (name: string) => table.columns.some((c) => nameKey(c.name) === nameKey(name) && c.type === 'relation')
 
   function call(n: Extract<Node, { t: 'call' }>): Getter {
-    if (!n.fn) throw new FErr('#NAME?', `Unbekannte Funktion „${n.name}“`)
+    if (!n.fn) throw new FErr('#NAME?', t('Unbekannte Funktion „{name}“', { name: n.name }))
     const need = (min: number, max = min) => {
-      if (n.args.length < min || n.args.length > max) throw new FErr('#SYNTAX', `${n.name} erwartet ${min === max ? min : `${min} bis ${max}`} Argument${max === 1 ? '' : 'e'}`)
+      if (n.args.length < min || n.args.length > max) throw new FErr('#SYNTAX', t(max === 1 && min === 1 ? '{name} erwartet {range} Argument' : '{name} erwartet {range} Argumente', { name: n.name, range: min === max ? min : t('{a} bis {b}', { a: min, b: max }) }))
     }
     switch (n.fn) {
       case 'SUM': case 'AVG': case 'MIN': case 'MAX': case 'COUNT': {
@@ -492,7 +493,7 @@ function formulaCells(doc: Y.Doc, tables: TableInfo[], table: TableInfo, col: Co
         }
       }
     }
-    throw new FErr('#NAME?', `Unbekannte Funktion „${n.name}“`)
+    throw new FErr('#NAME?', t('Unbekannte Funktion „{name}“', { name: n.name }))
   }
 
   let get: Getter
@@ -506,11 +507,11 @@ function formulaCells(doc: Y.Doc, tables: TableInfo[], table: TableInfo, col: Co
     if (v instanceof FErr) out.set(rid, { raw: null, text: v.code, key: null, error: v.msg })
     else if (v === null) out.set(rid, EMPTY)
     else if (typeof v === 'number') {
-      if (!Number.isFinite(v)) { out.set(rid, { raw: null, text: '#WERT!', key: null, error: 'Das Ergebnis ist keine Zahl' }); continue }
+      if (!Number.isFinite(v)) { out.set(rid, { raw: null, text: '#WERT!', key: null, error: t('Das Ergebnis ist keine Zahl') }); continue }
       const s = cfg.decimals >= 0 ? v.toFixed(cfg.decimals) : String(Number(v.toPrecision(12)))
       out.set(rid, { raw: v, text: cfg.unit ? `${s} ${cfg.unit}` : s, key: v })
     }
-    else if (typeof v === 'boolean') out.set(rid, { raw: v, text: v ? 'Wahr' : 'Falsch', key: v ? 1 : 0 })
+    else if (typeof v === 'boolean') out.set(rid, { raw: v, text: v ? t('Wahr') : t('Falsch'), key: v ? 1 : 0 })
     else out.set(rid, v === '' ? EMPTY : { raw: v, text: v, key: v })
   }
   return out

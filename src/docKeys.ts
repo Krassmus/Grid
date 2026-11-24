@@ -7,6 +7,7 @@ import { newDocKey, openKeyBox, sealKeyBox } from './e2e'
 import { getIdentity } from './identity'
 import { fetchMembers, type MembersInfo } from './members'
 import { authedFetch } from './syncClient'
+import { t } from './i18n'
 
 interface KeysReply { enc: boolean; epoch: number; missing: string[]; stale?: string[]; boxes: { epoch: number; from: string; box: string }[] }
 type Put = { epoch: number; account: string; box: string }
@@ -25,14 +26,14 @@ export class DocKeys {
 
   private async fetch(): Promise<KeysReply> {
     const r = await authedFetch(this.server, `/docs/${this.doc}/keys`)
-    if (!r.ok) throw new Error(`Schlüssel: Server antwortet mit ${r.status}`)
+    if (!r.ok) throw new Error(t('Schlüssel: Server antwortet mit {status}', { status: r.status }))
     return r.json()
   }
 
   private async put(list: Put[]) {
     if (!list.length) return
     const r = await authedFetch(this.server, `/docs/${this.doc}/keys`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(list) })
-    if (!r.ok) throw new Error((await r.text().catch(() => '')) || `Schlüssel ablegen: Server antwortet mit ${r.status}`)
+    if (!r.ok) throw new Error((await r.text().catch(() => '')) || t('Schlüssel ablegen: Server antwortet mit {status}', { status: r.status }))
   }
 
   /** Nimmt Kisten an: nur von Admins aus dem geprüften Protokoll. */
@@ -106,7 +107,7 @@ export class DocKeys {
     await this.absorb(reply.boxes, info.state)
     if (onlyIfStale && !reply.stale?.length) return // ein anderer Admin war schneller
     const epoch = reply.epoch + 1
-    if (epoch > 255) throw new Error('Zu viele Schlüsselwechsel')
+    if (epoch > 255) throw new Error(t('Zu viele Schlüsselwechsel'))
     const key = newDocKey()
     await this.put(await this.boxesFor(info.state, epoch, key))
     this.keys.set(epoch, key)

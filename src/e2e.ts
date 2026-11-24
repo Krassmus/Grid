@@ -7,6 +7,7 @@ import { ed25519, x25519 } from '@noble/curves/ed25519.js'
 import { hkdf } from '@noble/hashes/hkdf.js'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { fromHex, type Identity } from './identity'
+import { t } from './i18n'
 
 const enc = new TextEncoder()
 const bytes = (s: string) => enc.encode(s)
@@ -35,14 +36,14 @@ async function seal(raw: Uint8Array, plain: Uint8Array, aad: string): Promise<Ui
 }
 
 async function open(raw: Uint8Array, data: Uint8Array, aad: string): Promise<Uint8Array> {
-  if (data.length < NONCE + TAG) throw new Error('Verschlüsselte Daten sind zu kurz')
+  if (data.length < NONCE + TAG) throw new Error(t('Verschlüsselte Daten sind zu kurz'))
   try {
     return new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: buf(data.subarray(0, NONCE)), additionalData: buf(bytes(aad)) }, await aes(raw), buf(data.subarray(NONCE))))
-  } catch { throw new Error('Entschlüsseln fehlgeschlagen (falscher Schlüssel oder veränderte Daten)') }
+  } catch { throw new Error(t('Entschlüsseln fehlgeschlagen (falscher Schlüssel oder veränderte Daten)')) }
 }
 
 /** Der Schlüssel für diese Epoche fehlt (noch): ein Admin muss ihn senden. */
-export class MissingKey extends Error { constructor(readonly epoch: number) { super(`Schlüssel für Epoche ${epoch} fehlt`) } }
+export class MissingKey extends Error { constructor(readonly epoch: number) { super(t("Schlüssel für Epoche {epoch} fehlt", { epoch })) } }
 
 // ---------- Einträge des Protokolls und Dateien ----------
 
@@ -61,7 +62,7 @@ export async function encryptEntry(doc: string, epoch: number, key: Uint8Array, 
   return withEpoch(epoch, await seal(key, plain, entryAad(doc, epoch)))
 }
 export async function decryptEntry(doc: string, keyFor: (epoch: number) => Promise<Uint8Array | undefined>, data: Uint8Array) {
-  if (data.length < MIN_ENTRY) throw new Error('Eintrag zu kurz')
+  if (data.length < MIN_ENTRY) throw new Error(t('Eintrag zu kurz'))
   const epoch = data[0]
   const key = await keyFor(epoch)
   if (!key) throw new MissingKey(epoch)
@@ -72,7 +73,7 @@ export async function encryptBlob(doc: string, epoch: number, key: Uint8Array, n
   return withEpoch(epoch, await seal(key, plain, blobAad(doc, epoch, name)))
 }
 export async function decryptBlob(doc: string, keyFor: (epoch: number) => Promise<Uint8Array | undefined>, name: string, data: Uint8Array) {
-  if (data.length < MIN_ENTRY) throw new Error('Datei zu kurz')
+  if (data.length < MIN_ENTRY) throw new Error(t('Datei zu kurz'))
   const epoch = data[0]
   const key = await keyFor(epoch)
   if (!key) throw new MissingKey(epoch)
@@ -94,6 +95,6 @@ export async function sealKeyBox(me: Identity, recipient: { id: string; pub: str
 /** Kiste von einem Absender öffnen (dessen öffentlicher Schlüssel muss aus dem geprüften Admin-Protokoll stammen). */
 export async function openKeyBox(me: Identity, sender: { id: string; pub: string }, doc: string, epoch: number, box: string): Promise<Uint8Array> {
   const key = await open(boxKey(me, sender.pub), unb64(box), boxAad(doc, epoch, sender.id, me.id))
-  if (key.length !== 32) throw new Error('Ungültiger Dokumentschlüssel')
+  if (key.length !== 32) throw new Error(t('Ungültiger Dokumentschlüssel'))
   return key
 }

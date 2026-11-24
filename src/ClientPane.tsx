@@ -43,6 +43,7 @@ import { useUndo } from './undo'
 import { AnimItem, useAnimatedList } from './animatedList'
 import { ConfirmDialog, Modal } from './Modal'
 import { TableDialog } from './TableDialog'
+import { t, tn, locale, useLanguage } from './i18n'
 
 // ---------- Kacheln ----------
 
@@ -82,10 +83,10 @@ function Tile(props: {
       onContextMenu={touchMenu ? (e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY }) } : undefined}
       onPointerDown={props.drag ? (e) => beginTileDrag(e.nativeEvent, e.currentTarget, { slot: props.drag!.slot, targetRow: rowId, targetTable: props.drag!.targetTable }, touchMenu ? (x, y) => setMenu({ x, y }) : undefined)
         : touchMenu ? (e) => beginLongPress(e.nativeEvent, (x, y) => setMenu({ x, y })) : undefined}>
-      {s ? <TileContent repr={s} /> : <div className="tile-body"><div className="tile-title">gelöscht</div></div>}
-      {menu && <ItemMenu x={menu.x} y={menu.y} label="Verknüpfung entfernen" onRemove={props.onRemove!} onClose={() => setMenu(null)} />}
+      {s ? <TileContent repr={s} /> : <div className="tile-body"><div className="tile-title">{t('gelöscht')}</div></div>}
+      {menu && <ItemMenu x={menu.x} y={menu.y} label={t('Verknüpfung entfernen')} onRemove={props.onRemove!} onClose={() => setMenu(null)} />}
       {props.onRemove && !isMobileUI && (
-        <button type="button" className="tile-x" title="Verknüpfung entfernen"
+        <button type="button" className="tile-x" title={t('Verknüpfung entfernen')}
           onClick={(e) => { e.stopPropagation(); props.onRemove!() }}>✕</button>
       )}
     </div>
@@ -131,20 +132,20 @@ function Picker(props: {
     <Modal onClose={props.onClose}>
       <div className="dialog picker" onMouseDown={(e) => e.stopPropagation()}
         onKeyDown={(e) => e.key === 'Escape' && props.onClose()}>
-        <h3>Datensatz aus „{props.target.name}“ verknüpfen</h3>
-        <input autoFocus placeholder="Suchen …" value={q} onChange={(e) => setQ(e.target.value)} />
+        <h3>{t('Datensatz aus „{name}“ verknüpfen', { name: props.target.name })}</h3>
+        <input autoFocus placeholder={t('Suchen …')} value={q} onChange={(e) => setQ(e.target.value)} />
         <div className="picker-list">
           {sorted.map((id) => (
             <Tile key={id} doc={props.doc} table={props.target} rowId={id} display="full" onClick={() => props.onPick(id)} />
           ))}
-          {sorted.length === 0 && <p className="hint">Keine passenden Datensätze.</p>}
+          {sorted.length === 0 && <p className="hint">{t('Keine passenden Datensätze.')}</p>}
         </div>
         <div className="actions split">
-          {props.allowCreate !== false ? <button type="button" onClick={() => setCreating(true)}>+ Neuer Datensatz …</button> : <span />}
-          <button type="button" onClick={props.onClose}>Fertig</button>
+          {props.allowCreate !== false ? <button type="button" onClick={() => setCreating(true)}>{t('+ Neuer Datensatz …')}</button> : <span />}
+          <button type="button" onClick={props.onClose}>{t('Fertig')}</button>
         </div>
         {creating && (
-          <RecordForm doc={props.doc} table={props.target} title={`Neuer Datensatz in „${props.target.name}“`}
+          <RecordForm doc={props.doc} table={props.target} title={t('Neuer Datensatz in „{name}“', { name: props.target.name })}
             initial={q.trim() && firstTextColumn(props.target) ? { [firstTextColumn(props.target)!.id]: q.trim() } : undefined}
             onClose={() => setCreating(false)}
             relationField={(col, ids, update) => <RelationDraftField doc={props.doc} tables={props.tables} col={col} ids={ids} update={update} />}
@@ -179,7 +180,7 @@ function EditRecordDialog(props: { doc: Y.Doc; tables: TableInfo[]; table: Table
     return { values, existing }
   })
   return (
-    <RecordForm doc={doc} table={table} title={`„${title}“ bearbeiten`} submitLabel="Speichern" initial={snap.values} existing={snap.existing}
+    <RecordForm doc={doc} table={table} title={t('„{title}“ bearbeiten', { title })} submitLabel={t('Speichern')} initial={snap.values} existing={snap.existing}
       onClose={props.onClose}
       relationField={(col, ids, update) => <RelationDraftField doc={doc} tables={tables} col={col} ids={ids} update={update} rowId={rowId} />}
       onSubmit={async (values, extras) => {
@@ -202,7 +203,7 @@ function RelationDraftField(props: { doc: Y.Doc; tables: TableInfo[]; col: Colum
     <div className="tiles rf-tiles">
       {ids.map((id) => <Tile key={id} doc={doc} table={target} rowId={id} display={RELATION.config(col).display === 'avatar' ? 'avatar' : undefined} onRemove={() => update((p) => p.filter((x) => x !== id))} />)}
       {!(single && ids.length >= 1) && (
-        <button type="button" className="add-tile" onClick={() => setPicking(true)} disabled={!target} title={target ? 'Datensatz verknüpfen' : 'Zieltabelle fehlt'}>+</button>
+        <button type="button" className="add-tile" onClick={() => setPicking(true)} disabled={!target} title={target ? t('Datensatz verknüpfen') : t('Zieltabelle fehlt')}>+</button>
       )}
       {picking && target && (
         <Picker doc={doc} tables={tables} target={target} linked={ids} unavailable={unavailable} allowCreate={false}
@@ -340,7 +341,7 @@ function RelationCell(props: {
           return nodes
         })()}
         {!(RELATION.config(col).single && ids.length >= 1) && <button type="button" className="add-tile" onClick={() => setPicking(true)} disabled={!target}
-          title={target ? 'Datensatz verknüpfen' : 'Zieltabelle fehlt'}>+</button>}
+          title={target ? t('Datensatz verknüpfen') : t('Zieltabelle fehlt')}>+</button>}
       </div>
       {picking && target && (
         <Picker doc={doc} tables={tables} target={target} linked={ids}
@@ -379,7 +380,7 @@ function BacklinkCell(props: {
           </AnimItem>
         ))}
         {anim.entries.length === 0 && <span className="empty">–</span>}
-        {target && (multi || ids.length === 0) && <button type="button" className="add-tile" onClick={() => setLinking({ current: null })} title={`Datensatz aus „${props.source.name}“ verknüpfen`}>+</button>}
+        {target && (multi || ids.length === 0) && <button type="button" className="add-tile" onClick={() => setLinking({ current: null })} title={t('Datensatz aus „{name}“ verknüpfen', { name: props.source.name })}>+</button>}
       </div>
       {linking && target && (
         <BacklinkPicker doc={props.doc} source={props.source} col={props.col} target={target} rowId={props.rowId} current={linking.current} linked={ids} multi={multi} onClose={() => setLinking(null)} />
@@ -434,15 +435,15 @@ function BacklinkPicker(props: { doc: Y.Doc; source: TableInfo; col: ColumnInfo;
   return (
     <Modal onClose={props.onClose}>
       <div className="dialog picker" onMouseDown={(e) => e.stopPropagation()} onKeyDown={(e) => e.key === 'Escape' && props.onClose()}>
-        <h3>Datensatz aus „{source.name}“ für „{titleOf(target, rowId)}“</h3>
-        <p className="hint">Spalte „{col.name}“ in „{source.name}“ verweist auf diesen Datensatz.</p>
-        <input autoFocus placeholder="Suchen …" value={q} onChange={(e) => setQ(e.target.value)} />
-        <div className="picker-list" role="radiogroup" aria-label={`Datensatz aus ${source.name}`}>
-          {radio(null, 'Keine Verknüpfung', <span className="pick-none">Keine Verknüpfung</span>)}
+        <h3>{t('Datensatz aus „{source}“ für „{target}“', { source: source.name, target: titleOf(target, rowId) })}</h3>
+        <p className="hint">{t('Spalte „{col}“ in „{source}“ verweist auf diesen Datensatz.', { col: col.name, source: source.name })}</p>
+        <input autoFocus placeholder={t('Suchen …')} value={q} onChange={(e) => setQ(e.target.value)} />
+        <div className="picker-list" role="radiogroup" aria-label={t('Datensatz aus {name}', { name: source.name })}>
+          {radio(null, t('Keine Verknüpfung'), <span className="pick-none">{t('Keine Verknüpfung')}</span>)}
           {rows.map((id) => radio(id, titleOf(source, id), <Tile doc={doc} table={source} rowId={id} display="full" />))}
-          {rows.length === 0 && <p className="hint">Keine passenden Datensätze.</p>}
+          {rows.length === 0 && <p className="hint">{t('Keine passenden Datensätze.')}</p>}
         </div>
-        <div className="actions"><button type="button" className="primary" onClick={props.onClose}>Fertig</button></div>
+        <div className="actions"><button type="button" className="primary" onClick={props.onClose}>{t('Fertig')}</button></div>
       </div>
     </Modal>
   )
@@ -514,7 +515,7 @@ function TextInput({ doc, table, rowId, col, value }: { doc: Y.Doc; table: strin
   if (cfg.mode === 'rich') {
     return (
       <div className="c">
-        <button type="button" className="rich-cell" title="Text bearbeiten" onClick={() => setEditing(true)}>
+        <button type="button" className="rich-cell" title={t('Text bearbeiten')} onClick={() => setEditing(true)}>
           <RichPreview html={text} placeholder={col.name} />
         </button>
         {editing && <RichTextDialog doc={doc} tableId={table} rowId={rowId} colId={col.id} title={col.name} html={text} onClose={() => setEditing(false)} />}
@@ -548,22 +549,22 @@ function TrackingChip({ doc }: { doc: Y.Doc }) {
   useEffect(() => { if (!tr) setOpen(false) }, [tr])
   if (!tr || tr.target.doc !== doc) return null
   const since = new Date(tr.since)
-  const sinceText = since.toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
-  const t = tr.target
+  const sinceText = since.toLocaleString(locale(), { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+  const tg = tr.target
   return (
     <span className="track-wrap">
       <button type="button" className={`track-chip${tr.error ? ' err' : ''}`} onClick={() => setOpen((o) => !o)} aria-expanded={open}>
-        <i className="track-dot" />{tr.error ? 'GPS-Tracking gestoppt' : 'GPS-Tracking aktiv'}
+        <i className="track-dot" />{tr.error ? t('GPS-Tracking gestoppt') : t('GPS-Tracking aktiv')}
       </button>
       {open && (
-        <div className="track-pop" role="dialog" aria-label="GPS-Tracking">
+        <div className="track-pop" role="dialog" aria-label={t('GPS-Tracking')}>
           <dl>
-            <dt>Gespeichert in</dt><dd>Tabelle „{t.tableName}“, {t.rowLabel}, Spalte „{t.colName}“</dd>
-            <dt>Seit</dt><dd>{sinceText}</dd>
-            <dt>Letzte Position</dt><dd>{tr.last ? `${tr.last.point.lat.toFixed(5)}, ${tr.last.point.lon.toFixed(5)} (${new Date(tr.last.at).toLocaleTimeString('de-DE')})` : 'noch keine'}</dd>
+            <dt>{t('Gespeichert in')}</dt><dd>{t('Tabelle „{table}“, {row}, Spalte „{col}“', { table: tg.tableName, row: tg.rowLabel, col: tg.colName })}</dd>
+            <dt>{t('Seit')}</dt><dd>{sinceText}</dd>
+            <dt>{t('Letzte Position')}</dt><dd>{tr.last ? `${tr.last.point.lat.toFixed(5)}, ${tr.last.point.lon.toFixed(5)} (${new Date(tr.last.at).toLocaleTimeString(locale())})` : t('noch keine')}</dd>
           </dl>
           {tr.error && <p className="formula-error">{tr.error}</p>}
-          <div className="actions"><button type="button" onClick={() => setOpen(false)}>Schließen</button><button type="button" className="danger-outline" onClick={() => stopTracking()}>Tracking beenden</button></div>
+          <div className="actions"><button type="button" onClick={() => setOpen(false)}>{t('Schließen')}</button><button type="button" className="danger-outline" onClick={() => stopTracking()}>{t('Tracking beenden')}</button></div>
         </div>
       )}
     </span>
@@ -589,7 +590,7 @@ export interface AsOfInfo {
   onExit: () => void
 }
 
-const stamp = (ms: number) => new Date(ms).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })
+const stamp = (ms: number) => new Date(ms).toLocaleString(locale(), { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })
 
 /** Zeitleiste: Säulen zeigen, wann viel passiert ist; Klick oder Ziehen springt in die Zeit. */
 function AsOfTimeline({ info }: { info: AsOfInfo }) {
@@ -607,29 +608,29 @@ function AsOfTimeline({ info }: { info: AsOfInfo }) {
   return (
     <div className="asof-timeline">
       <div className="asof-caption" aria-live="polite">
-        {info.total === 0 ? 'Das Protokoll ist noch leer.' : info.caption
+        {info.total === 0 ? t('Das Protokoll ist noch leer.') : info.caption
           ? <>{info.caption}{info.captionTime !== null && <small> · {stamp(info.captionTime)}</small>}</>
-          : 'Bis zu diesem Zeitpunkt gab es noch keine Änderung im Protokoll.'}
-        {info.total > 0 && <small className="asof-count"> {info.pos} von {info.total}</small>}
-        {tooEarly && <span className="asof-warn"> Zurückgerechnet werden kann nur ab {stamp(earliest!)}; davor ist der Stand nicht bekannt.</span>}
-        {info.incomplete && <span className="asof-warn"> Einige ältere Einträge enthalten keine Gegenschritte; der Stand kann ungenau sein.</span>}
+          : t('Bis zu diesem Zeitpunkt gab es noch keine Änderung im Protokoll.')}
+        {info.total > 0 && <small className="asof-count"> {t('{pos} von {total}', { pos: info.pos, total: info.total })}</small>}
+        {tooEarly && <span className="asof-warn"> {t('Zurückgerechnet werden kann nur ab {time}; davor ist der Stand nicht bekannt.', { time: stamp(earliest!) })}</span>}
+        {info.incomplete && <span className="asof-warn"> {t('Einige ältere Einträge enthalten keine Gegenschritte; der Stand kann ungenau sein.')}</span>}
       </div>
       <div className="asof-row">
-        <button type="button" className="asof-play" onClick={info.onPlay} disabled={info.total === 0} aria-pressed={info.playing} aria-label={info.playing ? 'Pause' : 'Abspielen'} title={info.playing ? 'Pause' : 'Abspielen'}>{info.playing ? '❚❚' : '▶'}</button>
+        <button type="button" className="asof-play" onClick={info.onPlay} disabled={info.total === 0} aria-pressed={info.playing} aria-label={info.playing ? t('Pause') : t('Abspielen')} title={info.playing ? t('Pause') : t('Abspielen')}>{info.playing ? '❚❚' : '▶'}</button>
         <div className="asof-trackbox">
-          <div ref={track} className="asof-track" role="slider" aria-label="Zeitleiste" aria-valuemin={earliest ?? 0} aria-valuemax={latest ?? 0} aria-valuenow={info.at}
+          <div ref={track} className="asof-track" role="slider" aria-label={t('Zeitleiste')} aria-valuemin={earliest ?? 0} aria-valuemax={latest ?? 0} aria-valuenow={info.at}
             tabIndex={0}
             onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); seek(e) }}
             onPointerMove={(e) => { if (e.currentTarget.hasPointerCapture(e.pointerId)) seek(e) }}
             onKeyDown={(e) => { if (e.key === 'ArrowLeft') { e.preventDefault(); info.onStep(-1) } else if (e.key === 'ArrowRight') { e.preventDefault(); info.onStep(1) } }}>
             <div className="asof-bars">
-              {info.histogram.map((n, i) => <span key={i} className={n ? 'has' : ''} style={{ height: n ? `${Math.max(12, Math.round((n / max) * 100))}%` : undefined }} title={n ? `${n} Änderungen` : undefined} />)}
+              {info.histogram.map((n, i) => <span key={i} className={n ? 'has' : ''} style={{ height: n ? `${Math.max(12, Math.round((n / max) * 100))}%` : undefined }} title={n ? tn(n, '{n} Änderung', '{n} Änderungen') : undefined} />)}
             </div>
             <div className="asof-progress" style={{ width: `${frac * 100}%` }} />
           </div>
           {earliest !== null && latest !== null && <div className="asof-axis"><span>{stamp(earliest)}</span><span>{stamp(latest)}</span></div>}
         </div>
-        <button type="button" className="asof-close" onClick={info.onExit} aria-label="Zeitreise beenden" title="Zur aktuellen Ansicht">✕</button>
+        <button type="button" className="asof-close" onClick={info.onExit} aria-label={t('Zeitreise beenden')} title={t('Zur aktuellen Ansicht')}>✕</button>
       </div>
     </div>
   )
@@ -638,7 +639,7 @@ function AsOfTimeline({ info }: { info: AsOfInfo }) {
 /** Zeitpunkt in der Fußzeile der Ansicht eines früheren Standes (derselbe Auswahldialog wie bei Datumsspalten). */
 function AsOfPicker({ info }: { info: AsOfInfo }) {
   return (
-    <DatePicker className="asof-date" value={floatingFromMs(info.at)} withTime style="short" placeholder="Zeitpunkt wählen"
+    <DatePicker className="asof-date" value={floatingFromMs(info.at)} withTime style="short" placeholder={t('Zeitpunkt wählen')}
       onChange={(v) => { const ms = v ? new Date(v).getTime() : NaN; if (Number.isFinite(ms) && ms <= Date.now() && ms !== info.at) info.onChange(ms) }} />
   )
 }
@@ -647,10 +648,10 @@ function SyncButton(props: { control: SyncControl; onClick: () => void }) {
   const { control } = props
   const status = control.server ? (control.state?.status === 'online' && control.state.readonly ? 'readonly' : control.state?.status ?? 'connecting') : 'none'
   const requests = control.members?.requests.length ?? 0
-  const note = requests > 0 ? ` – ${requests} Beitrittsanfrage${requests === 1 ? '' : 'n'}` : control.moved ? ' – Dokument ist auf einen anderen Server umgezogen' : ''
+  const note = requests > 0 ? ` – ${tn(requests, '{n} Beitrittsanfrage', '{n} Beitrittsanfragen')}` : control.moved ? ` – ${t('Dokument ist auf einen anderen Server umgezogen')}` : ''
   const title = `${syncLabel(control)}${note}`
   return (
-    <button type="button" className={`sync-btn ${status}${requests > 0 ? ' requests' : ''}`} onClick={props.onClick} title={title} aria-label={`Cloud: ${title}`}>
+    <button type="button" className={`sync-btn ${status}${requests > 0 ? ' requests' : ''}`} onClick={props.onClick} title={title} aria-label={t('Cloud: {title}', { title })}>
       <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
         <path d="M7 18a4 4 0 0 1-.6-7.96A5.5 5.5 0 0 1 17 9.5a4.25 4.25 0 0 1 .5 8.5H7z" />
       </svg>
@@ -674,8 +675,8 @@ function UndoButtons({ undo }: { undo: ReturnType<typeof useUndo> }) {
   )
   return (
     <span className="undo-btns">
-      <button type="button" disabled={!undo.canUndo} onClick={undo.undo} title="Rückgängig" aria-label="Rückgängig">{icon(false)}</button>
-      <button type="button" disabled={!undo.canRedo} onClick={undo.redo} title="Wiederholen" aria-label="Wiederholen">{icon(true)}</button>
+      <button type="button" disabled={!undo.canUndo} onClick={undo.undo} title={t('Rückgängig')} aria-label={t('Rückgängig')}>{icon(false)}</button>
+      <button type="button" disabled={!undo.canRedo} onClick={undo.redo} title={t('Wiederholen')} aria-label={t('Wiederholen')}>{icon(true)}</button>
     </span>
   )
 }
@@ -696,6 +697,7 @@ export function ClientPane(props: {
   /** Ansicht eines früheren Standes (nur Lesen): Zeitpunkt, Auswahl und Rückkehr */
   asOf?: AsOfInfo
 }) {
+  useLanguage() // bei Sprachwechsel neu zeichnen
   // Wird das Dokument geschlossen, endet auch seine GPS-Verfolgung (sonst schriebe sie ins Leere).
   useEffect(() => () => { if (currentTracking()?.target.doc === props.doc) stopTracking() }, [props.doc])
   const { doc } = props
@@ -1009,7 +1011,7 @@ export function ClientPane(props: {
         <header>
           <h2>{props.title}</h2>
           <button onClick={props.onToggle} className={props.online ? 'on' : 'off'}>
-            {props.online ? '● online' : '○ offline'}
+            {props.online ? t('● online') : t('○ offline')}
           </button>
         </header>
       )}
@@ -1018,7 +1020,7 @@ export function ClientPane(props: {
       <div className="gridscroll">
       {(props.onHome || props.onAccount) && (
         <div className="topbar">
-          {props.onHome ? <button type="button" className="home-btn" onClick={props.onHome} aria-label="Zurück zur Dokumentenliste">‹ Dokumente</button> : <span />}
+          {props.onHome ? <button type="button" className="home-btn" onClick={props.onHome} aria-label={t('Zurück zur Dokumentenliste')}>{t('‹ Dokumente')}</button> : <span />}
           <span className="topbar-right">
             <UndoButtons undo={history} />
             {props.onAccount && <AccountButton onClick={props.onAccount} />}
@@ -1026,49 +1028,49 @@ export function ClientPane(props: {
         </div>
       )}
       <nav className="tabs">
-        {shownTabs.map((t) => {
-          const current = t.id === tab?.id
+        {shownTabs.map((tb) => {
+          const current = tb.id === tab?.id
           return (
-            <span key={t.id} className={`tabgroup ${hintClass('table', t.id)}${current && menuOpen ? ' menu-open' : ''}`}>
+            <span key={tb.id} className={`tabgroup ${hintClass('table', tb.id)}${current && menuOpen ? ' menu-open' : ''}`}>
               <button className={current ? 'active' : ''} aria-haspopup={current ? 'menu' : undefined} aria-expanded={current ? menuOpen : undefined}
-                onClick={() => { if (current) setMenuOpen((o) => !o); else { setActive(t.id); setMenuOpen(false) } }}
-                title={current ? 'Menü öffnen – Ziehen zum Umsortieren' : 'Ziehen zum Umsortieren'}
-                {...reorderProps('table', t.id, t.name)}>
-                <SheetIcon icon={t.icon} kind={t.kind} />
-                <span className="tab-name">{t.name}</span>
+                onClick={() => { if (current) setMenuOpen((o) => !o); else { setActive(tb.id); setMenuOpen(false) } }}
+                title={current ? t('Menü öffnen – Ziehen zum Umsortieren') : t('Ziehen zum Umsortieren')}
+                {...reorderProps('table', tb.id, tb.name)}>
+                <SheetIcon icon={tb.icon} kind={tb.kind} />
+                <span className="tab-name">{tb.name}</span>
                 {current && <span className="tab-caret">▾</span>}</button>
               {current && menuOpen && (
                 <div className="tab-popup" role="menu">
                   <button type="button" role="menuitem" autoFocus onClick={() => {
                     setMenuOpen(false)
-                    if (t.kind === 'table') setEditing({ kind: 'table', id: t.id }); else if (t.kind === 'map') setMapDialog({ mode: 'edit', id: t.id }); else setViewDialog({ mode: 'edit', id: t.id })
-                  }}>Bearbeiten …</button>
-                  {t.kind === 'table' && (
-                    <button type="button" role="menuitem" onClick={() => { setMenuOpen(false); setViewDialog({ mode: 'new', sourceId: t.id }) }}>Abgeleitete Tabelle …</button>
+                    if (tb.kind === 'table') setEditing({ kind: 'table', id: tb.id }); else if (tb.kind === 'map') setMapDialog({ mode: 'edit', id: tb.id }); else setViewDialog({ mode: 'edit', id: tb.id })
+                  }}>{t('Bearbeiten …')}</button>
+                  {tb.kind === 'table' && (
+                    <button type="button" role="menuitem" onClick={() => { setMenuOpen(false); setViewDialog({ mode: 'new', sourceId: tb.id }) }}>{t('Abgeleitete Tabelle …')}</button>
                   )}
                   <button type="button" role="menuitem" className="danger-item" onClick={() => {
                     setMenuOpen(false)
-                    if (t.kind === 'table') setDeletingItem({ kind: 'table', id: t.id }); else if (t.kind === 'map') setDeletingMap(t.id); else setDeletingView(t.id)
-                  }}>Löschen …</button>
+                    if (tb.kind === 'table') setDeletingItem({ kind: 'table', id: tb.id }); else if (tb.kind === 'map') setDeletingMap(tb.id); else setDeletingView(tb.id)
+                  }}>{t('Löschen …')}</button>
                 </div>
               )}
             </span>
           )
         })}
         <span className={`tabgroup${addOpen ? ' menu-open' : ''}`}>
-          <button aria-haspopup="menu" aria-expanded={addOpen} title="Tabelle oder Karte hinzufügen" aria-label="Hinzufügen"
+          <button aria-haspopup="menu" aria-expanded={addOpen} title={t('Tabelle oder Karte hinzufügen')} aria-label={t('Hinzufügen')}
             onClick={() => { setAddOpen((o) => !o); setMenuOpen(false) }}>+</button>
           {addOpen && (
             <div className="add-popup" role="menu">
-              <button type="button" role="menuitem" autoFocus onClick={() => { setAddOpen(false); setDialog('table') }}>Neue Tabelle …</button>
-              <button type="button" role="menuitem" onClick={() => { setAddOpen(false); setMapDialog({ mode: 'new' }) }}>Neue Karte …</button>
+              <button type="button" role="menuitem" autoFocus onClick={() => { setAddOpen(false); setDialog('table') }}>{t('Neue Tabelle …')}</button>
+              <button type="button" role="menuitem" onClick={() => { setAddOpen(false); setMapDialog({ mode: 'new' }) }}>{t('Neue Karte …')}</button>
             </div>
           )}
         </span>
       </nav>
 
-      {!synced && <p className="hint">Lade lokale Daten …</p>}
-      {synced && !tab && <p className="hint">Noch keine Tabelle. Lege eine an.</p>}
+      {!synced && <p className="hint">{t('Lade lokale Daten …')}</p>}
+      {synced && !tab && <p className="hint">{t('Noch keine Tabelle. Lege eine an.')}</p>}
       {view && <ViewGrid key={view.id} doc={doc} view={view} />}
       {mapTab && <MapView key={mapTab.id} doc={doc} map={mapTab} tables={tables} onOpenRecord={(tableId, rowId) => setMapRecord({ tableId, rowId })} />}
 
@@ -1094,23 +1096,23 @@ export function ClientPane(props: {
               <div className="grid-head">
                 {shownColumns.map((c) => (
                   <div key={c.id} className={`h reorderable ${hintClass('column', c.id)}${isMobileUI && selectedCol === c.id ? ' col-selected' : ''}`} {...reorderProps('column', c.id, c.name)}>
-                    <button type="button" className="h-name" title="Spalte konfigurieren"
+                    <button type="button" className="h-name" title={t('Spalte konfigurieren')}
                       aria-expanded={isMobileUI ? selectedCol === c.id : undefined}
                       onClick={() => { if (isMobileUI) setSelectedCol((cur) => (cur === c.id ? null : c.id)); else setEditing({ kind: 'column', id: c.id }) }}>{c.name}</button>
                     {(!isMobileUI || selectedCol === c.id) && (
                       <button type="button" draggable={false} className={`h-sort${sort?.colId === c.id ? ' on' : ''}`}
-                        title={sort?.colId === c.id ? (sort.dir === 'asc' ? 'Aufsteigend sortiert – klicken für absteigend' : 'Absteigend sortiert – klicken für die ursprüngliche Reihenfolge') : 'Nach dieser Spalte sortieren'}
-                        aria-label={`Nach ${c.name} sortieren`}
+                        title={sort?.colId === c.id ? (sort.dir === 'asc' ? t('Aufsteigend sortiert – klicken für absteigend') : t('Absteigend sortiert – klicken für die ursprüngliche Reihenfolge')) : t('Nach dieser Spalte sortieren')}
+                        aria-label={t('Nach {name} sortieren', { name: c.name })}
                         onClick={() => cycleSort(c.id)}><SortIcon dir={sort?.colId === c.id ? sort.dir : null} /></button>
                     )}
-                    <span className="col-resize" title="Ziehen: Breite ändern, Doppelklick: zurücksetzen" draggable={false}
+                    <span className="col-resize" title={t('Ziehen: Breite ändern, Doppelklick: zurücksetzen')} draggable={false}
                       onMouseDown={(e) => startResize(e, c.id)}
                       onPointerDown={(e) => { if (e.pointerType !== 'mouse') startResize(e, c.id) }}
                       onDragStart={(e) => { e.preventDefault(); e.stopPropagation() }}
                       onDoubleClick={() => setColumnWidth(doc, table.id, c.id, undefined)} />
                     {isMobileUI && selectedCol === c.id && (
                       <div className="col-menu" role="menu">
-                        <button type="button" role="menuitem" onClick={() => { setSelectedCol(null); setEditing({ kind: 'column', id: c.id }) }}>Bearbeiten</button>
+                        <button type="button" role="menuitem" onClick={() => { setSelectedCol(null); setEditing({ kind: 'column', id: c.id }) }}>{t('Bearbeiten')}</button>
                       </div>
                     )}
                   </div>
@@ -1120,7 +1122,7 @@ export function ClientPane(props: {
                     ← {source.name}<small>{col.name}</small>
                   </div>
                 ))}
-                <div className="h"><button className="add-col" onClick={() => setDialog('column')} title="Spalte hinzufügen" aria-label="Spalte hinzufügen">+</button></div>
+                <div className="h"><button className="add-col" onClick={() => setDialog('column')} title={t('Spalte hinzufügen')} aria-label={t('Spalte hinzufügen')}>+</button></div>
               </div>
               {virt.virtual && <div ref={virt.anchorRef} style={{ height: virt.topPad }} aria-hidden />}
               {visibleIds.slice(virt.start, virt.end).map((rid) => (
@@ -1146,7 +1148,7 @@ export function ClientPane(props: {
                     {backlinks.map(({ source, col }) => (
                       <BacklinkCell key={col.id} doc={doc} tables={tables} source={source} rowId={rid} col={col} index={index} />
                     ))}
-                    <div className="c actions-c"><button className="del" title="Zeile löschen" onClick={() => setDeleting(rid)}>✕</button></div>
+                    <div className="c actions-c"><button className="del" title={t('Zeile löschen')} onClick={() => setDeleting(rid)}>✕</button></div>
                   </div>
                 </div>
               ))}
@@ -1170,10 +1172,10 @@ export function ClientPane(props: {
         <div className="addrow-bar asof-bar">
           {table && (
             <span className="rowsearch">
-              <input ref={searchRef} type="search" placeholder="Suchen …" aria-label="Tabelle durchsuchen" value={searches[table.id] ?? ''}
+              <input ref={searchRef} type="search" placeholder={t('Suchen …')} aria-label={t('Tabelle durchsuchen')} value={searches[table.id] ?? ''}
                 onChange={(e) => setSearches((s) => ({ ...s, [table.id]: e.target.value }))}
                 onKeyDown={(e) => { if (e.key === 'Escape') { setSearches((s) => ({ ...s, [table.id]: '' })); e.currentTarget.blur() } }} />
-              {matching && <small>{visibleIds.length} von {table.rowIds.length}</small>}
+              {matching && <small>{t('{shown} von {total}', { shown: visibleIds.length, total: table.rowIds.length })}</small>}
             </span>
           )}
           <AsOfPicker info={props.asOf} />
@@ -1181,12 +1183,12 @@ export function ClientPane(props: {
       )}
       {!props.asOf && table && (
         <div className="addrow-bar">
-          <button className="add-row" onClick={() => { setSearches((s) => ({ ...s, [table.id]: '' })); setFocusRow(addRow(doc, table.id)) }}>+ Zeile</button>
+          <button className="add-row" onClick={() => { setSearches((s) => ({ ...s, [table.id]: '' })); setFocusRow(addRow(doc, table.id)) }}>{t('+ Zeile')}</button>
           <span className="rowsearch">
-            <input ref={searchRef} type="search" placeholder="Suchen …" aria-label="Tabelle durchsuchen" value={searches[table.id] ?? ''}
+            <input ref={searchRef} type="search" placeholder={t('Suchen …')} aria-label={t('Tabelle durchsuchen')} value={searches[table.id] ?? ''}
               onChange={(e) => setSearches((s) => ({ ...s, [table.id]: e.target.value }))}
               onKeyDown={(e) => { if (e.key === 'Escape') { setSearches((s) => ({ ...s, [table.id]: '' })); e.currentTarget.blur() } }} />
-            {matching && <small>{visibleIds.length} von {table.rowIds.length}</small>}
+            {matching && <small>{t('{shown} von {total}', { shown: visibleIds.length, total: table.rowIds.length })}</small>}
           </span>
           <TrackingChip doc={doc} />
           {props.sync && <SyncButton control={props.sync} onClick={() => setSyncOpen(true)} />}
@@ -1194,8 +1196,8 @@ export function ClientPane(props: {
       )}
       {view && !props.asOf && (
         <div className="addrow-bar view-bar">
-          <span>Abgeleitete Tabelle aus „{tables.find((t) => t.id === view.def.source)?.name ?? '?'}“ – nur Lesen.</span>
-          <button type="button" onClick={() => setViewDialog({ mode: 'edit', id: view.id })}>Bearbeiten …</button>
+          <span>{t('Abgeleitete Tabelle aus „{name}“ – nur Lesen.', { name: tables.find((x) => x.id === view.def.source)?.name ?? '?' })}</span>
+          <button type="button" onClick={() => setViewDialog({ mode: 'edit', id: view.id })}>{t('Bearbeiten …')}</button>
         </div>
       )}
 
@@ -1223,8 +1225,8 @@ export function ClientPane(props: {
         const tbl = deletingItem.kind === 'table' ? tables.find((t) => t.id === deletingItem.id) : undefined
         if (!col && !tbl) return null
         const detail = col
-          ? `Spalte „${col.name}“ mit allen Werten, Verknüpfungen und Dateien dieser Spalte.`
-          : `Tabelle „${tbl!.name}“ mit ${tbl!.rowIds.length} ${tbl!.rowIds.length === 1 ? 'Zeile' : 'Zeilen'}. Verknüpfungen darauf werden entfernt.${views.some((v) => v.def.source === tbl!.id) ? ` Abgeleitete Tabellen daraus (${views.filter((v) => v.def.source === tbl!.id).length}) werden ebenfalls gelöscht.` : ''}`
+          ? t('Spalte „{name}“ mit allen Werten, Verknüpfungen und Dateien dieser Spalte.', { name: col.name })
+          : t('Tabelle „{name}“ mit {rows}. Verknüpfungen darauf werden entfernt.', { name: tbl!.name, rows: tn(tbl!.rowIds.length, '{n} Zeile', '{n} Zeilen') }) + (views.some((v) => v.def.source === tbl!.id) ? ' ' + t('Abgeleitete Tabellen daraus ({n}) werden ebenfalls gelöscht.', { n: views.filter((v) => v.def.source === tbl!.id).length }) : '')
         return (
           <ConfirmDialog detail={detail} onCancel={() => setDeletingItem(null)}
             onConfirm={() => {
@@ -1267,7 +1269,7 @@ export function ClientPane(props: {
         const m = maps.find((x) => x.id === deletingMap)
         if (!m) return null
         return (
-          <ConfirmDialog detail={`Karte „${m.name}“ mit ${m.shapes.length} ${m.shapes.length === 1 ? 'eigenem Objekt' : 'eigenen Objekten'}. Die Tabellen und ihre Daten bleiben unverändert.`}
+          <ConfirmDialog detail={t('Karte „{name}“ mit {objects}. Die Tabellen und ihre Daten bleiben unverändert.', { name: m.name, objects: tn(m.shapes.length, '{n} eigenem Objekt', '{n} eigenen Objekten') })}
             onCancel={() => setDeletingMap(null)}
             onConfirm={() => { deleteMap(doc, m.id); setActive(null); setDeletingMap(null) }} />
         )
@@ -1279,24 +1281,24 @@ export function ClientPane(props: {
         const v = views.find((x) => x.id === deletingView)
         if (!v) return null
         return (
-          <ConfirmDialog detail={`Abgeleitete Tabelle „${v.name}“. Die Quelltabelle und ihre Daten bleiben unverändert.`}
+          <ConfirmDialog detail={t('Abgeleitete Tabelle „{name}“. Die Quelltabelle und ihre Daten bleiben unverändert.', { name: v.name })}
             onCancel={() => setDeletingView(null)}
             onConfirm={() => { deleteView(doc, v.id); setActive(null); setDeletingView(null) }} />
         )
       })()}
 
       {deleting && table && (
-        <ConfirmDialog detail={`Zeile „${summarize(doc, table, deleting).title}“`}
+        <ConfirmDialog detail={t('Zeile „{title}“', { title: summarize(doc, table, deleting).title })}
           onCancel={() => setDeleting(null)}
           onConfirm={() => { deleteRow(doc, table.id, deleting); setDeleting(null) }} />
       )}
 
       {dialog === 'table' && (
-        <Dialog title="Neue Tabelle" tables={tables} onClose={() => setDialog(null)}
+        <Dialog title={t('Neue Tabelle')} tables={tables} onClose={() => setDialog(null)}
           onSubmit={(f) => { setActive(addTable(doc, f.name)); setFocusFirst(true); setDialog(null) }} />
       )}
       {dialog === 'column' && table && (
-        <Dialog title={`Neue Spalte in „${table.name}“`} withType tables={tables} table={table} defaultTarget={table.id}
+        <Dialog title={t('Neue Spalte in „{name}“', { name: table.name })} withType tables={tables} table={table} defaultTarget={table.id}
           onClose={() => setDialog(null)}
           onSubmit={(f) => { addColumn(doc, table.id, f.name, f.type, f.target, f.options, f.config); setDialog(null) }} />
       )}
@@ -1356,40 +1358,40 @@ function Dialog(props: {
         <h3>{props.title}</h3>
         {props.withType && (
           <select value={type} onChange={(e) => setType(e.target.value as ColType)}>
-            <option value="text">Text</option>
-            <option value="number">Zahl</option>
-            <option value="relation">Relation (Verknüpfung)</option>
-            <option value="file">Datei / Bild</option>
-            <option value="select">Auswahl (z. B. Status)</option>
-            <option value="date">Datum</option>
-            <option value="checkbox">Checkbox</option>
-            <option value="formula">Formel (Berechnung aus anderen Spalten)</option>
-            <option value="geo">Geokoordinate</option>
-            <option value="autonumber">Aufsteigende Zahl (nicht bearbeitbar)</option>
-            <option value="stamp">Zeitstempel (erstellt / geändert, automatisch)</option>
-            <option value="person">Person (Mitglied des Dokuments)</option>
-            <option value="link">Link (Web, E-Mail, Telefon)</option>
-            <option value="duration">Dauer (Stunden:Minuten)</option>
-            <option value="template">Text mit Platzhaltern {'({{…}})'}</option>
-            <option value="rollup" disabled={!props.table || relations.length === 0}>Rollup (Summe u. a. über verknüpfte Zeilen)</option>
+            <option value="text">{t('Text')}</option>
+            <option value="number">{t('Zahl')}</option>
+            <option value="relation">{t('Relation (Verknüpfung)')}</option>
+            <option value="file">{t('Datei / Bild')}</option>
+            <option value="select">{t('Auswahl (z. B. Status)')}</option>
+            <option value="date">{t('Datum')}</option>
+            <option value="checkbox">{t('Checkbox')}</option>
+            <option value="formula">{t('Formel (Berechnung aus anderen Spalten)')}</option>
+            <option value="geo">{t('Geokoordinate')}</option>
+            <option value="autonumber">{t('Aufsteigende Zahl (nicht bearbeitbar)')}</option>
+            <option value="stamp">{t('Zeitstempel (erstellt / geändert, automatisch)')}</option>
+            <option value="person">{t('Person (Mitglied des Dokuments)')}</option>
+            <option value="link">{t('Link (Web, E-Mail, Telefon)')}</option>
+            <option value="duration">{t('Dauer (Stunden:Minuten)')}</option>
+            <option value="template">{t('Text mit Platzhaltern')} {'({{…}})'}</option>
+            <option value="rollup" disabled={!props.table || relations.length === 0}>{t('Rollup (Summe u. a. über verknüpfte Zeilen)')}</option>
           </select>
         )}
-        <input autoFocus placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
+        <input autoFocus placeholder={t('Name')} value={name} onChange={(e) => setName(e.target.value)} />
         {props.withType && type === 'relation' && (
           <select value={target} onChange={(e) => setTarget(e.target.value)}>
-            {props.tables.map((t) => <option key={t.id} value={t.id}>auf Tabelle „{t.name}“</option>)}
+            {props.tables.map((x) => <option key={x.id} value={x.id}>{t('auf Tabelle „{name}“', { name: x.name })}</option>)}
           </select>
         )}
         {props.withType && type === 'template' && (
           <>
-            <textarea rows={3} spellCheck={false} className="formula-input" placeholder={'z. B. {{Vorname}} {{Name}} – {{[Führer] + [Helfer]}} Personen'}
+            <textarea rows={3} spellCheck={false} className="formula-input" placeholder={t('z. B. {{Vorname}} {{Name}} – {{ {{Führer}} + {{Helfer}} }} Personen')}
               value={expr} onChange={(e) => setExpr(e.target.value)} />
             {exprError && <p className="formula-error" role="alert">{exprError}</p>}
           </>
         )}
         {props.withType && type === 'formula' && (
           <>
-            <textarea rows={3} spellCheck={false} className="formula-input" placeholder={'z. B. [Führer] + [Unterführer] + [Helfer]\noder SUMME(Gruppen.Führer)'}
+            <textarea rows={3} spellCheck={false} className="formula-input" placeholder={t('z. B. {{Führer}} + {{Unterführer}} + {{Helfer}}\noder SUMME({{Gruppen.Führer}})')}
               value={expr} onChange={(e) => setExpr(e.target.value)} />
             {exprError && <p className="formula-error" role="alert">{exprError}</p>}
           </>
@@ -1397,7 +1399,7 @@ function Dialog(props: {
         {props.withType && type === 'rollup' && (
           <>
             <select value={rel} onChange={(e) => { setRel(e.target.value); setRcol('') }}>
-              {relations.map((c) => <option key={c.id} value={c.id}>über Relation „{c.name}“</option>)}
+              {relations.map((c) => <option key={c.id} value={c.id}>{t('über Relation „{name}“', { name: c.name })}</option>)}
             </select>
             <select value={rcol} onChange={(e) => {
               const id = e.target.value
@@ -1405,7 +1407,7 @@ function Dialog(props: {
               const ci = rollupTarget?.columns.find((c) => c.id === id)
               if (ci) setFn(defaultAgg(effectiveType(ci, props.tables)))
             }}>
-              <option value="">Spalte der verknüpften Zeilen …</option>
+              <option value="">{t('Spalte der verknüpften Zeilen …')}</option>
               {(rollupTarget?.columns ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
             <select value={fn} disabled={!rcolInfo} onChange={(e) => setFn(e.target.value as AggFn)}>
@@ -1414,12 +1416,12 @@ function Dialog(props: {
           </>
         )}
         {props.withType && type === 'select' && (
-          <textarea rows={4} placeholder={'Optionen, eine pro Zeile\nz. B. Entwurf\nIn Arbeit'} value={optionsText}
+          <textarea rows={4} placeholder={t('Optionen, eine pro Zeile\nz. B. Entwurf\nIn Arbeit')} value={optionsText}
             onChange={(e) => setOptionsText(e.target.value)} />
         )}
         <div className="actions">
-          <button type="button" onClick={props.onClose}>Abbrechen</button>
-          <button type="submit" className="primary" disabled={!name.trim() || (type === 'rollup' && !rollupReady) || ((type === 'formula' || type === 'template') && (!expr.trim() || !!exprError))}>Anlegen</button>
+          <button type="button" onClick={props.onClose}>{t('Abbrechen')}</button>
+          <button type="submit" className="primary" disabled={!name.trim() || (type === 'rollup' && !rollupReady) || ((type === 'formula' || type === 'template') && (!expr.trim() || !!exprError))}>{t('Anlegen')}</button>
         </div>
       </form>
     </Modal>

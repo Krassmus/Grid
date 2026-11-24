@@ -4,10 +4,11 @@
  */
 import { exportAccount, importAccount, type Identity } from './identity'
 import { authedFetch, normalizeServer } from './syncClient'
+import { t } from './i18n'
 
 const fail = async (r: Response, what: string) => {
   const text = (await r.text().catch(() => '')).trim()
-  return new Error(text || `${what}: Server antwortet mit ${r.status}`)
+  return new Error(text || t('{what}: Server antwortet mit {status}', { what, status: r.status }))
 }
 const json = { 'Content-Type': 'application/json' }
 
@@ -22,25 +23,25 @@ export async function requestEmailCode(server: string, email: string): Promise<v
 
 export async function confirmEmailCode(server: string, code: string): Promise<void> {
   const r = await authedFetch(server, '/me/email/confirm', { method: 'POST', headers: json, body: JSON.stringify({ code }) })
-  if (!r.ok) throw await fail(r, 'Bestätigung')
+  if (!r.ok) throw await fail(r, t('Bestätigung'))
 }
 
 export async function removeEmail(server: string): Promise<void> {
   const r = await authedFetch(server, '/me/email', { method: 'DELETE' })
-  if (!r.ok) throw await fail(r, 'Entfernen')
+  if (!r.ok) throw await fail(r, t('Entfernen'))
 }
 
 /** Legt das Konto, mit diesem Passwort verschlüsselt, beim Server zur Wiederherstellung ab (Adresse muss bestätigt sein). */
 export async function storeRecovery(server: string, password: string): Promise<void> {
-  if (password.length < MIN_RECOVERY_PASSWORD) throw new Error(`Das Passwort braucht mindestens ${MIN_RECOVERY_PASSWORD} Zeichen`)
+  if (password.length < MIN_RECOVERY_PASSWORD) throw new Error(t('Das Passwort braucht mindestens {n} Zeichen', { n: MIN_RECOVERY_PASSWORD }))
   const r = await authedFetch(server, '/me/recovery', { method: 'PUT', body: await exportAccount(password) })
-  if (!r.ok) throw await fail(r, 'Wiederherstellung')
+  if (!r.ok) throw await fail(r, t('Wiederherstellung'))
 }
 
 /** Neues Gerät, Schritt 1: Code an die Adresse schicken lassen (der Server verrät nicht, ob es sie gibt). */
 export async function startRecovery(server: string, email: string): Promise<void> {
   const r = await fetch(`${normalizeServer(server)}/recover/start`, { method: 'POST', headers: json, body: JSON.stringify({ email }) })
-  if (!r.ok) throw await fail(r, 'Wiederherstellung')
+  if (!r.ok) throw await fail(r, t('Wiederherstellung'))
 }
 
 /**
@@ -49,7 +50,7 @@ export async function startRecovery(server: string, email: string): Promise<void
  */
 export async function fetchRecoveryText(server: string, email: string, code: string): Promise<string> {
   const r = await fetch(`${normalizeServer(server)}/recover/finish`, { method: 'POST', headers: json, body: JSON.stringify({ email, code }) })
-  if (!r.ok) throw await fail(r, 'Wiederherstellung')
+  if (!r.ok) throw await fail(r, t('Wiederherstellung'))
   return (await r.json()).account
 }
 

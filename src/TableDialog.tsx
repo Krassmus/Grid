@@ -6,6 +6,7 @@ import { Modal } from './Modal'
 import { newCtx } from './cells'
 import { NO_TITLE, computeRepr, reprConfig, type AvatarMode } from './repr'
 import { TileContent, tileClasses } from './ReprTile'
+import { t } from './i18n'
 
 const AVATAR_LABELS: [AvatarMode, string][] = [
   ['default', 'Standard (Initialen, nur in der Auswahl)'],
@@ -50,78 +51,78 @@ export function TableDialog(props: {
       <form className="dialog columndialog tabledialog" onMouseDown={(e) => e.stopPropagation()}
         onSubmit={(e) => { e.preventDefault(); close() }}
         onKeyDown={(e) => e.key === 'Escape' && close()}>
-        <h3>Tabelle bearbeiten</h3>
+        <h3>{t('Tabelle bearbeiten')}</h3>
         <label className="cfg-field">
-          <span>Name</span>
+          <span>{t('Name')}</span>
           <input autoFocus value={name} onFocus={(e) => e.target.select()} onChange={(e) => setName(e.target.value)} />
         </label>
         <IconPicker value={table.icon ?? ''} kind="table" onChange={(i) => setTableIcon(doc, table.id, i)} />
 
         <section className="vd-section">
-          <h4>Standardsortierung</h4>
-          <p className="hint">So ist die Tabelle sortiert, wenn niemand selbst über die Pfeile in der Spaltenüberschrift sortiert hat. Die gespeicherte Reihenfolge der Zeilen ändert sich dadurch nicht.</p>
+          <h4>{t('Standardsortierung')}</h4>
+          <p className="hint">{t('So ist die Tabelle sortiert, wenn niemand selbst über die Pfeile in der Spaltenüberschrift sortiert hat. Die gespeicherte Reihenfolge der Zeilen ändert sich dadurch nicht.')}</p>
           <div className="geo-inputs">
-            <select aria-label="Sortieren nach" value={table.sort?.colId ?? ''} onChange={(e) => setTableSort(doc, table.id, e.target.value, table.sort?.dir ?? 'asc')}>
-              <option value="">Keine (gespeicherte Reihenfolge)</option>
+            <select aria-label={t('Sortieren nach')} value={table.sort?.colId ?? ''} onChange={(e) => setTableSort(doc, table.id, e.target.value, table.sort?.dir ?? 'asc')}>
+              <option value="">{t('Keine (gespeicherte Reihenfolge)')}</option>
               {table.columns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
-            <select aria-label="Richtung" value={table.sort?.dir ?? 'asc'} disabled={!table.sort} onChange={(e) => setTableSort(doc, table.id, table.sort!.colId, e.target.value as 'asc' | 'desc')}>
-              <option value="asc">Aufsteigend</option>
-              <option value="desc">Absteigend</option>
+            <select aria-label={t('Richtung')} value={table.sort?.dir ?? 'asc'} disabled={!table.sort} onChange={(e) => setTableSort(doc, table.id, table.sort!.colId, e.target.value as 'asc' | 'desc')}>
+              <option value="asc">{t('Aufsteigend')}</option>
+              <option value="desc">{t('Absteigend')}</option>
             </select>
           </div>
         </section>
 
         <section className="vd-section">
-          <h4>Darstellung eines Datensatzes</h4>
-          <p className="hint">So erscheint eine Zeile dieser Tabelle in anderen Tabellen, etwa als verknüpfte Kachel.</p>
+          <h4>{t('Darstellung eines Datensatzes')}</h4>
+          <p className="hint">{t('So erscheint eine Zeile dieser Tabelle in anderen Tabellen, etwa als verknüpfte Kachel.')}</p>
           <label className="cfg-field">
-            <span>Titel</span>
+            <span>{t('Titel')}</span>
             <select value={cfg.title} onChange={(e) => set('title', e.target.value)}>
-              <option value="">Standard (erste Textspalte)</option>
-              <option value={NO_TITLE}>Keiner (nur der Avatar)</option>
+              <option value="">{t('Standard (erste Textspalte)')}</option>
+              <option value={NO_TITLE}>{t('Keiner (nur der Avatar)')}</option>
               {valueCols.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </label>
           <label className="cfg-field">
-            <span>Untertitel (klein und grau)</span>
+            <span>{t('Untertitel (klein und grau)')}</span>
             <select value={cfg.sub} onChange={(e) => set('sub', e.target.value)}>
-              <option value="">Keiner</option>
+              <option value="">{t('Keiner')}</option>
               {valueCols.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </label>
           <label className="cfg-field">
-            <span>Avatar</span>
+            <span>{t('Avatar')}</span>
             <select value={cfg.avatar} onChange={(e) => set('avatar', e.target.value)}>
-              {AVATAR_LABELS.map(([v, label]) => <option key={v} value={v} disabled={v === 'image' && fileCols.length === 0}>{label}</option>)}
+              {AVATAR_LABELS.map(([v, label]) => <option key={v} value={v} disabled={v === 'image' && fileCols.length === 0}>{t(label)}</option>)}
             </select>
           </label>
           {cfg.avatar === 'image' && (
             <label className="cfg-field">
-              <span>Dateispalte mit dem Bild</span>
+              <span>{t('Dateispalte mit dem Bild')}</span>
               <select value={cfg.avatarCol} onChange={(e) => set('avatarCol', e.target.value)}>
-                <option value="">Spalte wählen …</option>
+                <option value="">{t('Spalte wählen …')}</option>
                 {fileCols.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </label>
           )}
           {cfg.avatar === 'text' && (
             <label className="cfg-field">
-              <span>Spalte mit dem Symbol (z. B. ein Emoji)</span>
+              <span>{t('Spalte mit dem Symbol (z. B. ein Emoji)')}</span>
               <select value={cfg.avatarCol} onChange={(e) => set('avatarCol', e.target.value)}>
-                <option value="">Spalte wählen …</option>
+                <option value="">{t('Spalte wählen …')}</option>
                 {valueCols.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </label>
           )}
           {cfg.avatar === 'icon' && (
             <label className="cfg-field">
-              <span>Symbol</span>
-              <input value={cfg.icon} placeholder="z. B. 🚒" maxLength={8} onChange={(e) => set('icon', e.target.value)} />
+              <span>{t('Symbol')}</span>
+              <input value={cfg.icon} placeholder={t('z. B. 🚒')} maxLength={8} onChange={(e) => set('icon', e.target.value)} />
             </label>
           )}
-          <div className="repr-preview" aria-label="Vorschau">
-            {preview.length === 0 && <span className="hint">Sobald die Tabelle Zeilen hat, erscheint hier eine Vorschau.</span>}
+          <div className="repr-preview" aria-label={t('Vorschau')}>
+            {preview.length === 0 && <span className="hint">{t('Sobald die Tabelle Zeilen hat, erscheint hier eine Vorschau.')}</span>}
             {preview.map((r, i) => (
               <div key={i} className={`tile ${tileClasses({ avatarInCells: true, subInCells: true })}`}><TileContent repr={r} /></div>
             ))}
@@ -130,19 +131,19 @@ export function TableDialog(props: {
 
         {hidden.length > 0 && (
           <section className="vd-section">
-            <h4>Ausgeblendete Spalten</h4>
+            <h4>{t('Ausgeblendete Spalten')}</h4>
             {hidden.map((c) => (
               <div key={c.id} className="hidden-col">
                 <span>{c.name}</span>
-                <button type="button" onClick={() => setColumnHidden(doc, table.id, c.id, false)}>Einblenden</button>
+                <button type="button" onClick={() => setColumnHidden(doc, table.id, c.id, false)}>{t('Einblenden')}</button>
               </div>
             ))}
           </section>
         )}
 
         <div className="actions split">
-          <button type="button" className="danger-outline" onClick={props.onDelete}>Löschen …</button>
-          <button type="submit" className="primary">Fertig</button>
+          <button type="button" className="danger-outline" onClick={props.onDelete}>{t('Löschen …')}</button>
+          <button type="submit" className="primary">{t('Fertig')}</button>
         </div>
       </form>
     </Modal>

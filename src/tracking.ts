@@ -6,6 +6,7 @@ import { useSyncExternalStore } from 'react'
 import type * as Y from 'yjs'
 import { encodeGeo, type LatLon } from './geo'
 import { setCell, tablesOf } from './model'
+import { t } from './i18n'
 
 export interface TrackTarget {
   doc: Y.Doc
@@ -58,11 +59,11 @@ export function stopTracking() {
 export function applyFix(p: LatLon, now = Date.now()): boolean {
   const s = state
   if (!s) return false
-  if (!rowExists(s.target)) { fail('Die Zeile gibt es nicht mehr.'); return false }
+  if (!rowExists(s.target)) { fail(t('Die Zeile gibt es nicht mehr.')); return false }
   if (s.last && (now - s.last.at < MIN_MS || distanceMeters(s.last.point, p) < MIN_METERS)) return false
   const point = round7(p)
-  const t = s.target
-  setCell(t.doc, t.tableId, t.rowId, t.colId, encodeGeo(point))
+  const tg = s.target
+  setCell(tg.doc, tg.tableId, tg.rowId, tg.colId, encodeGeo(point))
   emit({ ...s, last: { point, at: now }, error: null })
   return true
 }
@@ -75,11 +76,11 @@ function fail(message: string) {
 
 export function startTracking(target: TrackTarget) {
   stopTracking()
-  if (!navigator.geolocation) throw new Error('Dieses Gerät kann den Standort nicht ermitteln.')
+  if (!navigator.geolocation) throw new Error(t('Dieses Gerät kann den Standort nicht ermitteln.'))
   emit({ target, since: Date.now(), last: null, error: null })
   watchId = navigator.geolocation.watchPosition(
     (g) => { applyFix({ lat: g.coords.latitude, lon: g.coords.longitude }) },
-    (e) => { if (e.code === e.PERMISSION_DENIED) fail('Der Zugriff auf den Standort ist nicht erlaubt (Einstellungen des Geräts).') /* sonst: kurzer Funkausfall, weiter warten */ },
+    (e) => { if (e.code === e.PERMISSION_DENIED) fail(t('Der Zugriff auf den Standort ist nicht erlaubt (Einstellungen des Geräts).')) /* sonst: kurzer Funkausfall, weiter warten */ },
     { enableHighAccuracy: true, maximumAge: 2000, timeout: 30000 },
   )
 }

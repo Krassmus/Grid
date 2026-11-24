@@ -10,6 +10,7 @@ import { iapAvailable, syncPurchases } from './iap'
 import { publishProfile } from './model'
 import { getProfile, onProfileChange } from './profile'
 import type { Role } from './adminLog'
+import { t } from './i18n'
 
 /** Ab so vielen Einträgen im Protokoll ersetzt ein Gesamtzustand die Updates. */
 const COMPACT_AT = 200
@@ -117,7 +118,7 @@ export class FileSession {
         // Verschlüsselung muss auf beiden Seiten gleich sein; sonst würde Klartext dort landen, wo er nicht hingehört
         if (info.entries.length > 0 && !!this.meta.sync?.enc !== info.enc) {
           this.conn?.close(); this.conn = null
-          this.setSyncState({ status: 'denied', reason: info.enc ? 'Das Dokument ist auf dem Server verschlüsselt, diese Datei kennt es unverschlüsselt.' : 'Diese Datei erwartet ein verschlüsseltes Dokument, der Server hat es unverschlüsselt.' })
+          this.setSyncState({ status: 'denied', reason: info.enc ? t('Das Dokument ist auf dem Server verschlüsselt, diese Datei kennt es unverschlüsselt.') : t('Diese Datei erwartet ein verschlüsseltes Dokument, der Server hat es unverschlüsselt.') })
           return
         }
         if (this.keys) await this.keys.provision(info) // als Admin: Schlüssel an neue Mitglieder verteilen
@@ -128,7 +129,7 @@ export class FileSession {
 
   private async change(run: (server: string, doc: string) => Promise<void>) {
     const server = this.meta.sync?.server
-    if (!server) throw new Error('Das Dokument ist nicht mit einem Server verbunden')
+    if (!server) throw new Error(t('Das Dokument ist nicht mit einem Server verbunden'))
     await run(server, this.meta.docId)
     await this.refreshMembers()
   }
@@ -150,12 +151,12 @@ export class FileSession {
   /** Einladungstext für dieses Dokument (der Empfänger klopft damit an). */
   async invite(): Promise<string> {
     const server = this.meta.sync?.server
-    if (!server) throw new Error('Das Dokument ist nicht mit einem Server verbunden')
+    if (!server) throw new Error(t('Das Dokument ist nicht mit einem Server verbunden'))
     const me = await getIdentity()
     return makeInvite({ server, doc: this.meta.docId, name: this.name, admin: fingerprint(me.publicKey), key: this.meta.sync?.key, ...(this.meta.sync?.enc ? { enc: true } : {}) })
   }
 
-  private get name() { return this.path ? this.path.split(/[\\/]/).pop()!.replace(/\.grid$/i, '') : 'Mein Dokument' }
+  private get name() { return this.path ? this.path.split(/[\\/]/).pop()!.replace(/\.grid$/i, '') : t('Mein Dokument') }
 
   /** Dokument mit einem Server verbinden (und die Anbindung in der Datei merken). */
   connect(server: string, key?: string, enc = false) {
@@ -172,7 +173,7 @@ export class FileSession {
    */
   async moveTo(newServer: string) {
     const url = normalizeServer(newServer)
-    const info = await fetchServerInfo(url).catch(() => { throw new Error('Der neue Server ist nicht erreichbar') })
+    const info = await fetchServerInfo(url).catch(() => { throw new Error(t('Der neue Server ist nicht erreichbar')) })
     if (this.meta.sync && this.members?.role === 'admin') {
       try { await this.change((s, d) => announceMove(s, d, url, info.pub)) } catch { /* alter Server nicht erreichbar: trotzdem umziehen */ }
     }
@@ -239,7 +240,7 @@ export class FileSession {
       } catch (e) {
         this.dirty = true
         this.needsFull = true // nach einem Fehler sicherheitshalber alles neu schreiben
-        this.onError(`Speichern fehlgeschlagen: ${e}`)
+        this.onError(t('Speichern fehlgeschlagen: {e}', { e: String(e) }))
       }
     })
     return this.queue

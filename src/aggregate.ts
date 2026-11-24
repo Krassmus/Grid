@@ -1,5 +1,6 @@
 /** Zusammenfassungen: je Gruppe (abgeleitete Tabellen), über verknüpfte Zeilen (Rollup) und in der Summenzeile. */
 import type { AggFn, ColType } from './model'
+import { t } from './i18n'
 
 export function allowedAggs(type: ColType): AggFn[] {
   if (type === 'number') return ['sum', 'min', 'max', 'concat', 'count', 'hide']
@@ -10,8 +11,8 @@ export function allowedAggs(type: ColType): AggFn[] {
 export const defaultAgg = (type: ColType): AggFn => (type === 'number' || type === 'checkbox' ? 'sum' : 'concat')
 
 export function aggLabel(type: ColType, fn: AggFn): string {
-  if (fn === 'sum') return type === 'checkbox' ? 'Anzahl angehakt' : 'Summe'
-  return { min: 'Minimum', max: 'Maximum', concat: 'Verketten', count: 'Anzahl', hide: 'Nicht anzeigen' }[fn]
+  if (fn === 'sum') return type === 'checkbox' ? t('Anzahl angehakt') : t('Summe')
+  return { min: t('Minimum'), max: t('Maximum'), concat: t('Verketten'), count: t('Anzahl'), hide: t('Nicht anzeigen') }[fn]
 }
 
 /** Auswertungen der Summenzeile unter einer Tabelle. */
@@ -25,9 +26,9 @@ export function allowedFooters(type: ColType): FooterFn[] {
 }
 
 export function footerLabel(type: ColType, fn: FooterFn): string {
-  if (fn === 'sum') return type === 'checkbox' ? 'Angehakt' : 'Summe'
-  if (fn === 'percent') return 'Anteil angehakt'
-  if (fn === 'min') return type === 'date' ? 'Früheste' : 'Minimum'
-  if (fn === 'max') return type === 'date' ? 'Späteste' : 'Maximum'
-  return { avg: 'Durchschnitt', count: 'Gefüllt', empty: 'Leer' }[fn]
+  if (fn === 'sum') return type === 'checkbox' ? t('Angehakt') : t('Summe')
+  if (fn === 'percent') return t('Anteil angehakt')
+  if (fn === 'min') return type === 'date' ? t('Früheste') : t('Minimum')
+  if (fn === 'max') return type === 'date' ? t('Späteste') : t('Maximum')
+  return { avg: t('Durchschnitt'), count: t('Gefüllt'), empty: t('Leer') }[fn]
 }

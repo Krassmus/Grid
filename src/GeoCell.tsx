@@ -11,6 +11,7 @@ import { addBaseMap } from './baseMap'
 import { useCell } from './useTables'
 import { TileContent, useReprs } from './ReprTile'
 import type { Repr } from './repr'
+import { t } from './i18n'
 
 const MAP_W = 200, MAP_H = 96, MAP_ZOOM = 14
 
@@ -46,12 +47,12 @@ export function GeoCell(props: { doc: Y.Doc; tableId: string; rowId: string; col
   return (
     <div className="c geocell">
       <button ref={btn} type="button" className={`cell-geo${format === 'map' && point ? ' with-map' : ''}`} title={col.name} onClick={() => setOpen(true)}>
-        {!point ? <span className="select-empty">Position wählen …</span>
+        {!point ? <span className="select-empty">{t('Position wählen …')}</span>
           : format === 'map' ? <MiniMap point={point} repr={repr} />
           : <span className="geo-text">{formatGeo(point, format)}</span>}
       </button>
       {open && (
-        <GeoDialog doc={doc} tableId={tableId} rowId={rowId} colId={col.id} tableName={readTables(doc).find((t) => t.id === tableId)?.name ?? ''} rowLabel={repr?.title || 'Zeile'} title={col.name} initial={point} format={format} repr={repr}
+        <GeoDialog doc={doc} tableId={tableId} rowId={rowId} colId={col.id} tableName={readTables(doc).find((t) => t.id === tableId)?.name ?? ''} rowLabel={repr?.title || t('Zeile')} title={col.name} initial={point} format={format} repr={repr}
           onSave={(p) => { setCell(doc, tableId, rowId, col.id, p ? encodeGeo(p) : null); setOpen(false) }}
           onClose={() => setOpen(false)} />
       )}
@@ -146,14 +147,14 @@ function GeoDialog(props: { doc: Y.Doc; tableId: string; rowId: string; colId: s
   const trackedHere = !!tracking && tracking.target.doc === props.doc && tracking.target.tableId === props.tableId && tracking.target.rowId === props.rowId && tracking.target.colId === props.colId
   const locate = () => {
     setLocError(null)
-    if (!navigator.geolocation) { setLocError('Dieses Gerät kann den Standort nicht ermitteln.'); return }
+    if (!navigator.geolocation) { setLocError(t('Dieses Gerät kann den Standort nicht ermitteln.')); return }
     setLocating(true)
     navigator.geolocation.getCurrentPosition((g) => {
       const p = round7({ lat: g.coords.latitude, lon: g.coords.longitude })
       setPos(p); setText(formatGeo(p, inputFormat)); setError(null); showOnMap(p); setLocating(false)
     }, (e) => {
       setLocating(false)
-      setLocError(e.code === e.PERMISSION_DENIED ? 'Der Zugriff auf den Standort ist nicht erlaubt (Einstellungen des Geräts).' : 'Der Standort konnte nicht ermittelt werden.')
+      setLocError(e.code === e.PERMISSION_DENIED ? t('Der Zugriff auf den Standort ist nicht erlaubt (Einstellungen des Geräts).') : t('Der Standort konnte nicht ermittelt werden.'))
     }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 })
   }
   const track = () => {
@@ -172,28 +173,28 @@ function GeoDialog(props: { doc: Y.Doc; tableId: string; rowId: string; colId: s
         <div ref={mapEl} className="geomap" />
         {tagHost && repr && createPortal(
           <div className="geo-tag"><div className="tile"><TileContent repr={repr} /></div><i className="geo-tag-arrow" /></div>, tagHost)}
-        <p className="hint">Auf die Karte klicken oder die Markierung ziehen. Mit den Tasten + und − lässt sich zoomen.</p>
+        <p className="hint">{t('Auf die Karte klicken oder die Markierung ziehen. Mit den Tasten + und − lässt sich zoomen.')}</p>
         <div className="geo-inputs">
-          <select value={inputFormat} aria-label="Format" onChange={(e) => changeFormat(e.target.value as Exclude<GeoFormat, 'map'>)}>
-            {GEO_FORMATS.filter((f) => f.id !== 'map').map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
+          <select value={inputFormat} aria-label={t('Format')} onChange={(e) => changeFormat(e.target.value as Exclude<GeoFormat, 'map'>)}>
+            {GEO_FORMATS.filter((f) => f.id !== 'map').map((f) => <option key={f.id} value={f.id}>{t(f.label)}</option>)}
           </select>
-          <input autoFocus value={text} placeholder={example} spellCheck={false} aria-label="Koordinaten" onChange={(e) => onText(e.target.value)} />
+          <input autoFocus value={text} placeholder={example} spellCheck={false} aria-label={t('Koordinaten')} onChange={(e) => onText(e.target.value)} />
         </div>
         {error && <p className="formula-error" role="alert">{error}</p>}
         <div className="geo-locate">
-          <button type="button" disabled={locating} onClick={locate}>◎ Aktueller Standort</button>
+          <button type="button" disabled={locating} onClick={locate}>{t('◎ Aktueller Standort')}</button>
           {trackedHere
-            ? <button type="button" onClick={() => stopTracking()}>GPS-Tracking beenden</button>
-            : <button type="button" onClick={track} title="Die Zelle folgt dem Gerät, bis du es beendest – auch wenn dieser Dialog geschlossen ist.">Dauerhaft verfolgen</button>}
+            ? <button type="button" onClick={() => stopTracking()}>{t('GPS-Tracking beenden')}</button>
+            : <button type="button" onClick={track} title={t('Die Zelle folgt dem Gerät, bis du es beendest – auch wenn dieser Dialog geschlossen ist.')}>{t('Dauerhaft verfolgen')}</button>}
         </div>
         {locError && <p className="formula-error" role="alert">{locError}</p>}
         <div className="actions split">
           {props.initial
-            ? <button type="button" className="danger-outline" onClick={() => props.onSave(null)}>Position entfernen</button>
+            ? <button type="button" className="danger-outline" onClick={() => props.onSave(null)}>{t('Position entfernen')}</button>
             : <span />}
           <span className="actions-right">
-            <button type="button" onClick={props.onClose}>Abbrechen</button>
-            <button type="submit" className="primary" disabled={!pos || !!error}>Übernehmen</button>
+            <button type="button" onClick={props.onClose}>{t('Abbrechen')}</button>
+            <button type="submit" className="primary" disabled={!pos || !!error}>{t('Übernehmen')}</button>
           </span>
         </div>
       </form>

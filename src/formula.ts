@@ -2,11 +2,13 @@
  * Formelsprache der Formel-Spalten (angelehnt an Excel): Parser und statische Typbestimmung.
  * Die Auswertung steht in cells.ts, weil sie auf Spalten-Zellwerte zugreift.
  *
- * Beispiele:  [Führer] + [Unterführer] + [Helfer]      SUMME(Gruppen.Führer)      WENN([Helfer] > 10; "viele"; "wenige")
- * Spalten ohne Leerzeichen dürfen ohne Klammern stehen, sonst `[Name der Spalte]`.
- * `Relation.Spalte` greift auf die verknüpften Zeilen zu (nur innerhalb von SUMME, MITTELWERT, MIN, MAX, ANZAHL, TEXTVERBINDEN).
+ * Beispiele:  {{Führer}} + {{Unterführer}} + {{Helfer}}      SUMME({{Gruppen.Führer}})      WENN({{Helfer}} > 10; "viele"; "wenige")
+ * Ein Feld steht in doppelten geschweiften Klammern: `{{Name der Spalte}}`. Ältere Schreibweisen gelten weiter: `[Name der Spalte]`
+ * und, ohne Leerzeichen und Sonderzeichen, der bloße Name.
+ * `{{Relation.Spalte}}` greift auf die verknüpften Zeilen zu (nur innerhalb von SUMME, MITTELWERT, MIN, MAX, ANZAHL, TEXTVERBINDEN).
  */
 import type { ColType } from './model'
+import { t as tr } from './i18n'
 
 export type Node =
   | { t: 'num'; v: number }
@@ -61,9 +63,17 @@ function tokenize(src: string): Tok[] {
       }
       out.push({ k: 'str', v: s, pos: i }); i = j + 1; continue
     }
+    if (ch === '{' && src[i + 1] === '{') { // {{Spalte}} oder {{Relation.Spalte}}
+      const j = src.indexOf('}}', i + 2)
+      if (j < 0) throw new FormulaSyntaxError(tr('Spaltenname ist nicht mit }} abgeschlossen'), i)
+      const names = src.slice(i + 2, j).split('.').map((x) => x.trim())
+      if (names.some((x) => !x)) throw new FormulaSyntaxError(tr('Leerer Spaltenname in {{ }}'), i)
+      names.forEach((x, n) => { if (n) out.push({ k: 'op', v: '.', pos: i }); out.push({ k: 'br', v: x, pos: i }) })
+      i = j + 2; continue
+    }
     if (ch === '[') {
       const j = src.indexOf(']', i)
-      if (j < 0) throw new FormulaSyntaxError('Spaltenname ist nicht mit ] abgeschlossen', i)
+      if (j < 0) throw new FormulaSyntaxError(tr('Spaltenname ist nicht mit ] abgeschlossen'), i)
       out.push({ k: 'br', v: src.slice(i + 1, j).trim(), pos: i }); i = j + 1; continue
     }
     const id = /^[\p{L}_][\p{L}\p{N}_]*/u.exec(src.slice(i))
@@ -71,7 +81,7 @@ function tokenize(src: string): Tok[] {
     const two = src.slice(i, i + 2)
     if (['<>', '<=', '>='].includes(two)) { out.push({ k: 'op', v: two, pos: i }); i += 2; continue }
     if ('+-*/^&=<>().;,'.includes(ch)) { out.push({ k: 'op', v: ch, pos: i }); i++; continue }
-    throw new FormulaSyntaxError(`Unerwartetes Zeichen „${ch}“`, i)
+    throw new FormulaSyntaxError(tr('Unerwartetes Zeichen „{ch}“', { ch }), i)
   }
   out.push({ k: 'end', v: '', pos: src.length })
   return out
@@ -87,7 +97,7 @@ export function parseFormula(src: string): Node {
   const peek = () => toks[p]
   const isOp = (v: string) => toks[p].k === 'op' && toks[p].v === v
   const fail = (msg: string, t = peek()): never => { throw new FormulaSyntaxError(msg, t.pos) }
-  const describe = (t: Tok) => (t.k === 'end' ? 'das Ende der Formel' : `„${t.k === 'str' ? `"${t.v}"` : t.k === 'br' ? `[${t.v}]` : t.v}“`)
+  const describe = (t: Tok) => (t.k === 'end' ? tr('das Ende der Formel') : `„${t.k === 'str' ? `"${t.v}"` : t.k === 'br' ? `[${t.v}]` : t.v}“`)
 
   function binary(minPrec: number): Node {
     let left = unary()
@@ -111,7 +121,7 @@ export function parseFormula(src: string): Node {
   function part(): string {
     const t = peek()
     if (t.k === 'id' || t.k === 'br') { p++; return t.v }
-    return fail(`Nach dem Punkt fehlt ein Spaltenname, gefunden: ${describe(t)}`)
+    return fail(tr('Nach dem Punkt fehlt ein Spaltenname, gefunden: {found}', { found: describe(t) }))
   }
   function primary(): Node {
     const t = peek()
@@ -120,7 +130,7 @@ export function parseFormula(src: string): Node {
     if (isOp('(')) {
       p++
       const e = binary(1)
-      if (!isOp(')')) fail(`Hier fehlt eine schließende Klammer, gefunden: ${describe(peek())}`)
+      if (!isOp(')')) fail(tr('Hier fehlt eine schließende Klammer, gefunden: {found}', { found: describe(peek()) }))
       p++
       return e
     }
@@ -134,7 +144,7 @@ export function parseFormula(src: string): Node {
           break
         }
       }
-      if (!isOp(')')) fail(`Hier fehlt eine schließende Klammer, gefunden: ${describe(peek())}`)
+      if (!isOp(')')) fail(tr('Hier fehlt eine schließende Klammer, gefunden: {found}', { found: describe(peek()) }))
       p++
       return { t: 'call', fn: canonicalFn(t.v) ?? '', name: t.v, args }
     }
@@ -145,12 +155,12 @@ export function parseFormula(src: string): Node {
       while (isOp('.')) { p++; parts.push(part()) }
       return { t: 'ref', parts }
     }
-    return fail(t.k === 'end' ? 'Die Formel ist unvollständig' : `Unerwartet: ${describe(t)}`)
+    return fail(t.k === 'end' ? tr('Die Formel ist unvollständig') : tr('Unerwartet: {found}', { found: describe(t) }))
   }
 
-  if (toks.length === 1) fail('Die Formel ist leer')
+  if (toks.length === 1) fail(tr('Die Formel ist leer'))
   const tree = binary(1)
-  if (peek().k !== 'end') fail(`Unerwartet: ${describe(peek())}${peek().v === ',' ? ' (Dezimalzahlen mit Punkt schreiben)' : ''}`)
+  if (peek().k !== 'end') fail(`${tr('Unerwartet: {found}', { found: describe(peek()) })}${peek().v === ',' ? ` ${tr('(Dezimalzahlen mit Punkt schreiben)')}` : ''}`)
   return tree
 }
 
@@ -183,8 +193,8 @@ export function inferType(n: Node, typeOfRef: (parts: string[]) => ColType | und
 }
 
 /**
- * Text mit Platzhaltern: Text mit eingestreuten `{{Formel}}`, z. B. `Gruppe {{[Name]}} hat {{[Führer] + [Helfer]}} Personen`.
- * Wird zu einer Formel, die alle Teile mit & verbindet; in `{{ }}` gilt die ganze Formelsprache.
+ * Text mit Platzhaltern: Text mit eingestreuten Feldern `{{Feld}}` oder Formeln, z. B. `Gruppe {{Name}} hat {{ {{Führer}} + {{Helfer}} }} Personen`.
+ * Wird zu einer Formel, die alle Teile mit & verbindet; in `{{ }}` gilt die ganze Formelsprache (Felder darin wieder als `{{Feld}}`).
  */
 export function parseTemplate(src: string): Node {
   let tree: Node = { t: 'str', v: '' } // erzwingt Text als Ergebnis
@@ -194,17 +204,18 @@ export function parseTemplate(src: string): Node {
   while (i < src.length) {
     if (!src.startsWith('{{', i)) { lit += src[i++]; continue }
     if (lit) { add({ t: 'str', v: lit }); lit = '' }
-    // Ende suchen, "}}" in Anführungszeichen zählt nicht
-    let j = i + 2, inStr = false
+    // Ende suchen: "}}" in Anführungszeichen zählt nicht, eingeschachtelte {{Feld}} werden mitgezählt
+    let j = i + 2, inStr = false, depth = 1
     for (; j < src.length; j++) {
       if (src[j] === '"') inStr = !inStr
-      else if (!inStr && src.startsWith('}}', j)) break
+      else if (!inStr && src.startsWith('{{', j)) { depth++; j++ }
+      else if (!inStr && src.startsWith('}}', j)) { if (--depth === 0) break; j++ }
     }
-    if (j >= src.length) throw new FormulaSyntaxError('Der Platzhalter ist nicht mit }} abgeschlossen', i)
+    if (j >= src.length) throw new FormulaSyntaxError(tr('Der Platzhalter ist nicht mit }} abgeschlossen'), i)
     const inner = src.slice(i + 2, j)
-    if (!inner.trim()) throw new FormulaSyntaxError('Leerer Platzhalter {{ }}', i)
+    if (!inner.trim()) throw new FormulaSyntaxError(tr('Leerer Platzhalter {{ }}'), i)
     try { add(parseFormula(inner)) } catch (e) {
-      if (e instanceof FormulaSyntaxError) throw new FormulaSyntaxError(`Platzhalter {{${inner.trim()}}}: ${e.message}`, i)
+      if (e instanceof FormulaSyntaxError) throw new FormulaSyntaxError(`${tr('Platzhalter')} {{${inner.trim()}}}: ${e.message}`, i)
       throw e
     }
     i = j + 2

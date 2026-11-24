@@ -3,6 +3,7 @@ import * as Y from 'yjs'
 import { addOption, deleteOption, setCell, updateOption, OPTION_COLORS, type ColumnInfo, type SelectOption } from './model'
 import { ConfirmDialog, Modal } from './Modal'
 import { useCell } from './useTables'
+import { t } from './i18n'
 
 /** Farben der Optionen: Hintergrund, Text, Punkt. Das Dokument speichert nur die Farb-ID. */
 const PALETTE: Record<string, { bg: string; fg: string; dot: string }> = {
@@ -77,23 +78,23 @@ function SelectPicker(props: {
               {o.id === props.value && <span className="check">✓</span>}
             </button>
           ))}
-          {options.length === 0 && <p className="hint">Noch keine Optionen. Lege unten eine an.</p>}
+          {options.length === 0 && <p className="hint">{t('Noch keine Optionen. Lege unten eine an.')}</p>}
           {props.value && (
             <button type="button" className={`opt-row clear ${active === options.length ? 'active' : ''}`}
-              onClick={() => choose(null)} onMouseMove={() => setActive(options.length)}>Keine Auswahl</button>
+              onClick={() => choose(null)} onMouseMove={() => setActive(options.length)}>{t('Keine Auswahl')}</button>
           )}
         </div>
         <form className="opt-new" onSubmit={(e) => { e.preventDefault(); create() }}>
-          <input autoFocus placeholder="Neue Option …" value={name}
+          <input autoFocus placeholder={t('Neue Option …')} value={name}
             onChange={(e) => { setName(e.target.value); setActive(null) }}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !name.trim() && active !== null) { e.preventDefault(); choose(entries[active] ?? null) }
             }} />
-          <button type="submit" className="primary" disabled={!name.trim()}>Anlegen</button>
+          <button type="submit" className="primary" disabled={!name.trim()}>{t('Anlegen')}</button>
         </form>
         <div className="actions split">
-          <button type="button" onClick={props.onManage}>Optionen verwalten</button>
-          <button type="button" onClick={props.onClose}>Schließen</button>
+          <button type="button" onClick={props.onManage}>{t('Optionen verwalten')}</button>
+          <button type="button" onClick={props.onClose}>{t('Schließen')}</button>
         </div>
       </div>
     </Modal>
@@ -108,7 +109,7 @@ export function OptionsEditor(props: { doc: Y.Doc; tableId: string; col: ColumnI
     <Modal onClose={props.onClose}>
       <div className="dialog optionseditor" onMouseDown={(e) => e.stopPropagation()}
         onKeyDown={(e) => e.key === 'Escape' && props.onClose()}>
-        <h3>Optionen von „{col.name}“</h3>
+        <h3>{t('Optionen von „{name}“', { name: col.name })}</h3>
         <div className="opt-edit-list">
           {options.map((o) => (
             <div key={o.id} className="opt-edit">
@@ -119,19 +120,19 @@ export function OptionsEditor(props: { doc: Y.Doc; tableId: string; col: ColumnI
                     style={{ background: paletteOf(c).dot }} onClick={() => updateOption(doc, tableId, col.id, o.id, { color: c })} />
                 ))}
               </div>
-              <button type="button" className="del" title="Option löschen" onClick={() => setRemoving(o)}>✕</button>
+              <button type="button" className="del" title={t('Option löschen')} onClick={() => setRemoving(o)}>✕</button>
             </div>
           ))}
-          {options.length === 0 && <p className="hint">Keine Optionen.</p>}
+          {options.length === 0 && <p className="hint">{t('Keine Optionen.')}</p>}
         </div>
         <div className="actions">
           <button type="button" className="primary" onClick={() => {
-            const n = addOption(doc, tableId, col.id, 'Neue Option'); void n
-          }}>+ Option</button>
-          <button type="button" onClick={props.onClose}>Fertig</button>
+            const n = addOption(doc, tableId, col.id, t('Neue Option')); void n
+          }}>{t('+ Option')}</button>
+          <button type="button" onClick={props.onClose}>{t('Fertig')}</button>
         </div>
         {removing && (
-          <ConfirmDialog detail={`Option „${removing.name}“. Zeilen mit dieser Option zeigen danach nichts an.`}
+          <ConfirmDialog detail={t('Option „{name}“. Zeilen mit dieser Option zeigen danach nichts an.', { name: removing.name })}
             onCancel={() => setRemoving(null)}
             onConfirm={() => { deleteOption(doc, tableId, col.id, removing.id); setRemoving(null) }} />
         )}
@@ -155,7 +156,7 @@ export function SelectCell(props: { doc: Y.Doc; tableId: string; rowId: string; 
   return (
     <div className="c selectcell">
       <button ref={btn} type="button" className="select-btn" onClick={() => setMode('pick')} title={col.name}>
-        {current ? <Pill option={current} /> : <span className="select-empty">Auswählen …</span>}
+        {current ? <Pill option={current} /> : <span className="select-empty">{t('Auswählen …')}</span>}
       </button>
       {mode === 'pick' && (
         <SelectPicker doc={doc} tableId={tableId} rowId={rowId} col={col} value={current ? value : null}

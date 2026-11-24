@@ -26,14 +26,15 @@ import { DocumentList } from './DocumentList'
 import { isMobileUI } from './platform'
 import { uniqueName } from './documents'
 import { forgetRecent, noteRecent, readRecent, writeRecent } from './recentFiles'
+import { t, useLanguage } from './i18n'
 
 /** Normalfall: ein Dokument, ein Client. Mit ?sim in der URL: zwei simulierte Clients zum Testen von Merges. */
 const SIM = new URLSearchParams(location.search).has('sim')
 
 /** Dokument ohne Datei (Browser, erster Start): wird in der IndexedDB der WebView gehalten. */
-const UNSAVED_TITLE = 'Mein Dokument'
+const UNSAVED_TITLE = 'Mein Dokument' // deutscher Text zugleich Schlüssel für den lokalen Speicher und die Übersetzung
 const LAST_KEY = 'grid-last-file'
-const FILTERS = [{ name: 'Grid-Dokument', extensions: ['grid'] }]
+const filters = () => [{ name: t('Grid-Dokument'), extensions: ['grid'] }]
 const withExt = (p: string) => (/\.grid$/i.test(p) ? p : `${p}.grid`)
 const remember = (p: string | null) => {
   try { p ? localStorage.setItem(LAST_KEY, p) : localStorage.removeItem(LAST_KEY) } catch { /* egal */ }
@@ -43,6 +44,7 @@ const remember = (p: string | null) => {
 const NO_DOC = new Y.Doc() // Platzhalter, solange kein Dokument offen ist
 
 function Single() {
+  const lang = useLanguage()
   const [session, setSession] = useState<FileSession | null>(null)
   const current = useRef<FileSession | null>(null)
   current.current = session
@@ -92,7 +94,7 @@ function Single() {
     return {
       at: asOfState.at, earliest: machine.earliest, latest: machine.latest, incomplete: machine.incomplete,
       pos: asOfView.pos, total: machine.entries.length, histogram: machine.histogram(80),
-      caption: cur && session ? describeEntry(cur, cur.a ? personName(session.doc, cur.a) || cur.a.slice(0, 8) : 'Unbekannt') : null, captionTime: cur?.t ?? null,
+      caption: cur && session ? describeEntry(cur, cur.a ? personName(session.doc, cur.a) || cur.a.slice(0, 8) : t('Unbekannt')) : null, captionTime: cur?.t ?? null,
       playing,
       onChange: (at: number) => setAsOfState({ at, pos: null }),
       onSeek: (at: number) => { setPlaying(false); setAsOfState({ at, pos: null }) },
@@ -119,7 +121,7 @@ function Single() {
     await current.current?.flush()
     try { adopt(fromFile(p, await readGrid(p))) } catch (e) {
       forgetRecent(p) // Datei fehlt oder ist kaputt: nicht weiter im Menü anbieten
-      setError(`„${baseName(p)}“ konnte nicht geöffnet werden: ${e}`)
+      setError(t('„{name}“ konnte nicht geöffnet werden: {e}', { name: baseName(p), e: String(e) }))
     }
   }
 
@@ -141,17 +143,17 @@ function Single() {
       const doc = new Y.Doc(), meta = newMeta()
       const known = await writeGrid(p, doc, meta, new Set())
       adopt(new FileSession(++counter.current, doc, p, meta, known, setError))
-    } catch (e) { setError(`Anlegen fehlgeschlagen: ${e}`) }
+    } catch (e) { setError(t('Anlegen fehlgeschlagen: {e}', { e: String(e) })) }
   }
 
   /** Dokument aus der Cloud: Speicherort wählen, leere Datei mit der Anbindung anlegen; der Abgleich füllt sie. */
   const openFromCloud = async (d: CloudDoc, server: string, key?: string, enc = !!d.enc) => {
     setCloudOpen(false)
     let p: string
-    if (isMobileUI) p = await docsPath(d.name || 'Cloud-Dokument')
+    if (isMobileUI) p = await docsPath(d.name || t('Cloud-Dokument'))
     else {
       const dialog = await import('@tauri-apps/plugin-dialog')
-      const chosen = await dialog.save({ defaultPath: `${d.name || 'Cloud-Dokument'}.grid`, filters: FILTERS })
+      const chosen = await dialog.save({ defaultPath: `${d.name || t('Cloud-Dokument')}.grid`, filters: filters() })
       if (!chosen) return
       p = withExt(chosen)
     }
@@ -160,7 +162,7 @@ function Single() {
     try {
       const known = await writeGrid(p, doc, meta, new Set())
       adopt(new FileSession(++counter.current, doc, p, meta, known, setError))
-    } catch (e) { setError(`Anlegen fehlgeschlagen: ${e}`) }
+    } catch (e) { setError(t('Anlegen fehlgeschlagen: {e}', { e: String(e) })) }
   }
 
   // Beim Start das zuletzt geöffnete Dokument laden.
@@ -178,7 +180,7 @@ function Single() {
           if (alive) { remember(last); setSession(fromFile(last, o)) }
           return
         } catch (e) {
-          if (alive) setError(`„${baseName(last)}“ konnte nicht geöffnet werden: ${e}`)
+          if (alive) setError(t('„{name}“ konnte nicht geöffnet werden: {e}', { name: baseName(last), e: String(e) }))
         }
       }
       if (alive && !isMobileUI) setSession(unsaved())
@@ -201,7 +203,7 @@ function Single() {
     setMembers(session.members)
     return () => { session.onSyncState = null; session.onMembers = null }
   }, [session])
-  useEffect(() => { if (session) setWindowTitle(session.path ? baseName(session.path) : UNSAVED_TITLE) }, [session])
+  useEffect(() => { if (session) setWindowTitle(session.path ? baseName(session.path) : t(UNSAVED_TITLE)) }, [session, lang])
 
   // Befehle der Menüleiste (Rust sendet „menu“) und Fenster schließen: erst fertig speichern.
   useEffect(() => {
@@ -214,12 +216,12 @@ function Single() {
       ])
 
       const open = async () => {
-        const p = await dialog.open({ multiple: false, directory: false, filters: FILTERS })
+        const p = await dialog.open({ multiple: false, directory: false, filters: filters() })
         if (typeof p !== 'string') return
         await openPath(p)
       }
       const create = async () => {
-        const chosen = await dialog.save({ defaultPath: 'Unbenannt.grid', filters: FILTERS })
+        const chosen = await dialog.save({ defaultPath: `${t('Unbenannt')}.grid`, filters: filters() })
         if (!chosen) return
         const p = withExt(chosen)
         await current.current?.flush()
@@ -227,12 +229,12 @@ function Single() {
         try {
           const known = await writeGrid(p, doc, meta, new Set())
           adopt(new FileSession(++counter.current, doc, p, meta, known, setError))
-        } catch (e) { setError(`Anlegen fehlgeschlagen: ${e}`) }
+        } catch (e) { setError(t('Anlegen fehlgeschlagen: {e}', { e: String(e) })) }
       }
       const saveAs = async () => {
         const cur = current.current
         if (!cur) return
-        const chosen = await dialog.save({ defaultPath: `${cur.path ? baseName(cur.path) : UNSAVED_TITLE}.grid`, filters: FILTERS })
+        const chosen = await dialog.save({ defaultPath: `${cur.path ? baseName(cur.path) : t(UNSAVED_TITLE)}.grid`, filters: filters() })
         if (!chosen) return
         const p = withExt(chosen)
         await cur.flush()
@@ -240,7 +242,7 @@ function Single() {
         try {
           const known = await writeGrid(p, cur.doc, meta, new Set())
           adopt(new FileSession(cur.key, cur.doc, p, meta, known, setError)) // gleicher key: Oberfläche bleibt stehen
-        } catch (e) { setError(`Speichern fehlgeschlagen: ${e}`) }
+        } catch (e) { setError(t('Speichern fehlgeschlagen: {e}', { e: String(e) })) }
       }
       const save = async () => {
         const cur = current.current
@@ -317,14 +319,14 @@ function Single() {
   if (asOfView && asOfInfo) {
     return (
       <>
-        <ClientPane key="asof" title={UNSAVED_TITLE} doc={asOfView.doc} persist={null} asOf={asOfInfo} />
+        <ClientPane key="asof" title={t(UNSAVED_TITLE)} doc={asOfView.doc} persist={null} asOf={asOfInfo} />
         {dialogs}
       </>
     )
   }
   return (
     <>
-      <ClientPane key={session.key} title={UNSAVED_TITLE} doc={session.doc}
+      <ClientPane key={session.key} title={t(UNSAVED_TITLE)} doc={session.doc}
         persist={session.path ? null : `grid-proto-${UNSAVED_TITLE}`} sync={control}
         onHome={isMobileUI ? () => void goHome() : undefined} onAccount={isMobileUI ? () => setProfileOpen(true) : undefined} />
       {dialogs}
@@ -354,8 +356,8 @@ function Simulation() {
 export function App() {
   return (
     <main className={SIM ? undefined : 'single'}>
-      {SIM && <h1>Grid – Simulation</h1>}
-      {SIM && <p className="hint">Simulationsmodus: zwei Clients am selben Dokument. Einen offline schalten, beide bearbeiten, wieder online schalten.</p>}
+      {SIM && <h1>{t('Grid – Simulation')}</h1>}
+      {SIM && <p className="hint">{t('Simulationsmodus: zwei Clients am selben Dokument. Einen offline schalten, beide bearbeiten, wieder online schalten.')}</p>}
       {SIM ? <Simulation /> : <Single />}
     </main>
   )

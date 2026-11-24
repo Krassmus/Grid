@@ -7,13 +7,14 @@ import { ConfirmDialog, Modal } from './Modal'
 import { ItemMenu, beginLongPress } from './ItemMenu'
 import { isMobileUI } from './platform'
 import { AnimItem, useAnimatedList } from './animatedList'
+import { t } from './i18n'
 
 /** Aktuell gezogene Datei (dataTransfer ist in dragover nicht lesbar, daher Modulvariable). */
 let draggingFile: { slot: CellSlot; file: FileRef } | null = null
 
 const fmtSize = (n: number) =>
   n < 1024 ? `${n} B` : n < 1024 ** 2 ? `${(n / 1024).toFixed(0)} KB` : `${(n / 1024 ** 2).toFixed(1)} MB`
-const ext = (name: string) => (name.includes('.') ? name.split('.').pop()!.slice(0, 4).toUpperCase() : 'DATEI')
+const ext = (name: string) => (name.includes('.') ? name.split('.').pop()!.slice(0, 4).toUpperCase() : t('DATEI'))
 
 /** Lädt den ersten vorhandenen Blob aus `keys` und liefert eine Object-URL (wird beim Aufräumen freigegeben). */
 export function useBlobUrl(keys: string[]): { url: string | null; missing: boolean } {
@@ -71,13 +72,13 @@ function FileChip(props: { file: FileRef; slot: CellSlot; onOpen: () => void; on
         setIsDragging(true)
       }}
       onDragEnd={() => { draggingFile = null; setIsDragging(false) }}
-      title={missing ? `${file.name} – noch nicht auf diesem Gerät` : file.name}>
+      title={missing ? t('{name} – noch nicht auf diesem Gerät', { name: file.name }) : file.name}>
       {imageOnly
         ? <img className="thumb" src={url!} alt={file.name} />
         : <div className="ext">{isImage ? 'BILD' : ext(file.name)}</div>}
       {!imageOnly && !isImage && <div className="file-name">{file.name}</div>}
-      {menu && <ItemMenu x={menu.x} y={menu.y} label="Datei entfernen" onRemove={props.onRemove} onClose={() => setMenu(null)} />}
-      {!isMobileUI && <button type="button" className="tile-x" title="Datei entfernen"
+      {menu && <ItemMenu x={menu.x} y={menu.y} label={t('Datei entfernen')} onRemove={props.onRemove} onClose={() => setMenu(null)} />}
+      {!isMobileUI && <button type="button" className="tile-x" title={t('Datei entfernen')}
         onClick={(e) => { e.stopPropagation(); props.onRemove() }}>✕</button>}
     </div>
   )
@@ -95,13 +96,13 @@ function Preview({ file, onClose }: { file: FileRef; onClose: () => void }) {
         </div>
         <div className="preview-body">
           {url && file.mime.startsWith('image/') && <img src={url} alt={file.name} />}
-          {url && !file.mime.startsWith('image/') && <p className="hint">Keine Vorschau verfügbar.</p>}
-          {missing && <p className="hint">Diese Datei ist auf diesem Gerät noch nicht vorhanden.</p>}
-          {err && <p className="hint">Download fehlgeschlagen.</p>}
+          {url && !file.mime.startsWith('image/') && <p className="hint">{t('Keine Vorschau verfügbar.')}</p>}
+          {missing && <p className="hint">{t('Diese Datei ist auf diesem Gerät noch nicht vorhanden.')}</p>}
+          {err && <p className="hint">{t('Download fehlgeschlagen.')}</p>}
         </div>
         <div className="actions">
-          <button type="button" disabled={!url} onClick={async () => setErr(!(await download(file)))}>Speichern</button>
-          <button type="button" autoFocus className="primary" onClick={onClose}>Schließen</button>
+          <button type="button" disabled={!url} onClick={async () => setErr(!(await download(file)))}>{t('Speichern')}</button>
+          <button type="button" autoFocus className="primary" onClick={onClose}>{t('Schließen')}</button>
         </div>
       </div>
     </Modal>
@@ -134,12 +135,12 @@ export function FileCell(props: {
     let picked = Array.from(list)
     if (cfg.accept === 'images') {
       const images = picked.filter((f) => f.type.startsWith('image/'))
-      if (images.length < picked.length) setError('In dieser Spalte sind nur Bilder erlaubt')
+      if (images.length < picked.length) setError(t('In dieser Spalte sind nur Bilder erlaubt'))
       picked = images
     }
     if (cfg.single) {
-      if (files.length >= 1) { setError('In dieser Spalte ist nur eine Datei erlaubt'); return }
-      if (picked.length > 1) { setError('In dieser Spalte ist nur eine Datei erlaubt'); picked = picked.slice(0, 1) }
+      if (files.length >= 1) { setError(t('In dieser Spalte ist nur eine Datei erlaubt')); return }
+      if (picked.length > 1) { setError(t('In dieser Spalte ist nur eine Datei erlaubt')); picked = picked.slice(0, 1) }
     }
     await Promise.all(picked.map(async (f) => {
       setBusy((n) => n + 1)
@@ -148,7 +149,7 @@ export function FileCell(props: {
         addFile(doc, tableId, rowId, col.id, ref) // Chip erscheint sofort (mit Vorschaubild)
         await saved // Original wird im Hintergrund geschrieben
       } catch (e) {
-        setError(`„${f.name}“ konnte nicht gespeichert werden`)
+        setError(t('„{name}“ konnte nicht gespeichert werden', { name: f.name }))
         console.error(e)
       } finally {
         setBusy((n) => n - 1)
@@ -183,9 +184,9 @@ export function FileCell(props: {
               onRemove={() => setRemoving(e.item)} />
           </AnimItem>
         ))}
-        {!full && <button type="button" className="add-tile" title="Datei hinzufügen (oder hierher ziehen)"
+        {!full && <button type="button" className="add-tile" title={t('Datei hinzufügen (oder hierher ziehen)')}
           onClick={() => input.current?.click()}>+</button>}
-        {busy > 0 && <span className="hint">lädt …</span>}
+        {busy > 0 && <span className="hint">{t('lädt …')}</span>}
         {error && <span className="hint err">{error}</span>}
       </div>
       <input ref={input} type="file" multiple={!cfg.single} accept={cfg.accept === 'images' ? 'image/*' : undefined} hidden

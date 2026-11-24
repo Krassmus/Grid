@@ -11,6 +11,7 @@ import { Modal } from './Modal'
 import { personIds, personName, setCell, type ColumnInfo } from './model'
 import { getProfile } from './profile'
 import { useProfiles } from './useTables'
+import { t } from './i18n'
 
 // ---------- Link ----------
 
@@ -24,7 +25,7 @@ export function LinkInput({ doc, table, rowId, col, value }: { doc: Y.Doc; table
         inputMode={kind === 'email' ? 'email' : kind === 'phone' ? 'tel' : 'url'}
         onChange={(e) => setCell(doc, table, rowId, col.id, e.target.value)} />
       {href && (
-        <button type="button" className="link-open" title={kind === 'email' ? 'E-Mail schreiben' : kind === 'phone' ? 'Anrufen' : 'Öffnen'} tabIndex={-1}
+        <button type="button" className="link-open" title={kind === 'email' ? t('E-Mail schreiben') : kind === 'phone' ? t('Anrufen') : t('Öffnen')} tabIndex={-1}
           onClick={() => void openExternal(href)}>
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" /></svg>
         </button>
@@ -49,7 +50,7 @@ export function DurationInput({ doc, table, rowId, col, value }: { doc: Y.Doc; t
   return (
     <div className="c">
       <input className={`cell${invalid ? ' invalid' : ''}`} type="text" enterKeyHint="next" inputMode="text" value={shown} placeholder={col.name} spellCheck={false}
-        title={invalid ? 'Bitte so eingeben: 1:30, 90m oder 1,5 h' : undefined}
+        title={invalid ? t('Bitte so eingeben: 1:30, 90m oder 1,5 h') : undefined}
         onChange={(e) => change(e.target.value)} onBlur={() => setDraft(null)} />
     </div>
   )
@@ -80,7 +81,7 @@ export function usePeople(doc: Y.Doc, extra: string[] = []): Person[] {
   }, [profiles, me, extraKey])
 }
 
-const labelOf = (p: Person, me: string) => p.name || (p.id === me ? 'Ich' : 'Unbekannt')
+const labelOf = (p: Person, me: string) => p.name || (p.id === me ? t('Ich') : t('Unbekannt'))
 
 export function PersonCell({ doc, table, rowId, col, value }: { doc: Y.Doc; table: string; rowId: string; col: ColumnInfo; value: unknown }) {
   const multi = PERSON.config(col).multi
@@ -97,7 +98,7 @@ export function PersonCell({ doc, table, rowId, col, value }: { doc: Y.Doc; tabl
     <div className="c person-cell">
       <button type="button" className="person-btn" title={col.name} onClick={() => setOpen(true)}>
         {chosen.length === 0
-          ? <span className="select-empty">Person wählen …</span>
+          ? <span className="select-empty">{t('Person wählen …')}</span>
           : chosen.map((p) => (
               <span key={p.id} className="person-chip"><Avatar name={p.name || '?'} avatar={p.avatar} size={20} /><span>{labelOf(p, '')}</span></span>
             ))}
@@ -106,7 +107,7 @@ export function PersonCell({ doc, table, rowId, col, value }: { doc: Y.Doc; tabl
         <Modal onClose={() => setOpen(false)}>
           <div className="dialog picker person-picker" onMouseDown={(e) => e.stopPropagation()} onKeyDown={(e) => e.key === 'Escape' && setOpen(false)}>
             <h3>{col.name}</h3>
-            <p className="hint">{multi ? 'Eine oder mehrere Personen wählen.' : 'Eine Person wählen.'}</p>
+            <p className="hint">{multi ? t('Eine oder mehrere Personen wählen.') : t('Eine Person wählen.')}</p>
             <div className="picker-list" role={multi ? 'group' : 'radiogroup'}>
               {people.map((p) => (
                 <button key={p.id} type="button" className={`person-row${ids.includes(p.id) ? ' on' : ''}`} role={multi ? 'checkbox' : 'radio'} aria-checked={ids.includes(p.id)} onClick={() => toggle(p.id)}>
@@ -115,11 +116,11 @@ export function PersonCell({ doc, table, rowId, col, value }: { doc: Y.Doc; tabl
                   <i className={`pick-mark${ids.includes(p.id) ? ' on' : ''}`} aria-hidden />
                 </button>
               ))}
-              {people.length === 0 && <p className="hint">Noch keine Personen. Sobald jemand das Dokument öffnet, erscheint sie oder er hier.</p>}
+              {people.length === 0 && <p className="hint">{t('Noch keine Personen. Sobald jemand das Dokument öffnet, erscheint sie oder er hier.')}</p>}
             </div>
             <div className="actions split">
-              {ids.length > 0 ? <button type="button" onClick={() => { set([]); setOpen(false) }}>Niemand</button> : <span />}
-              <button type="button" className="primary" onClick={() => setOpen(false)}>Fertig</button>
+              {ids.length > 0 ? <button type="button" onClick={() => { set([]); setOpen(false) }}>{t('Niemand')}</button> : <span />}
+              <button type="button" className="primary" onClick={() => setOpen(false)}>{t('Fertig')}</button>
             </div>
           </div>
         </Modal>
@@ -129,7 +130,7 @@ export function PersonCell({ doc, table, rowId, col, value }: { doc: Y.Doc; tabl
 }
 
 /** Kurzer Text für die Anzeige in Formularen o. Ä. */
-export const peopleText = (doc: Y.Doc, v: unknown) => personIds(v).map((id) => personName(doc, id) || 'Unbekannt').join(', ')
+export const peopleText = (doc: Y.Doc, v: unknown) => personIds(v).map((id) => personName(doc, id) || t('Unbekannt')).join(', ')
 
 /** Dauer im Formular: Eingabetext, solange getippt wird; gespeichert wird die gelesene Dauer in Sekunden. */
 export function DurationField(props: { value: unknown; format: 'hm' | 'hms'; autoFocus?: boolean; onChange: (seconds: number | null) => void }) {
@@ -138,10 +139,10 @@ export function DurationField(props: { value: unknown; format: 'hm' | 'hms'; aut
   const invalid = draft !== null && draft.trim() !== '' && parseDuration(draft) === null
   return (
     <>
-      <input autoFocus={props.autoFocus} className={invalid ? 'invalid' : undefined} type="text" value={shown} spellCheck={false} placeholder="z. B. 1:30"
+      <input autoFocus={props.autoFocus} className={invalid ? 'invalid' : undefined} type="text" value={shown} spellCheck={false} placeholder={t('z. B. 1:30')}
         onChange={(e) => { const v = e.target.value; setDraft(v); props.onChange(v.trim() === '' ? null : parseDuration(v)) }}
         onBlur={() => setDraft(null)} />
-      {invalid && <small className="rf-error">Bitte so eingeben: 1:30, 90m oder 1,5 h</small>}
+      {invalid && <small className="rf-error">{t('Bitte so eingeben: 1:30, 90m oder 1,5 h')}</small>}
     </>
   )
 }
@@ -153,7 +154,7 @@ export function PersonField(props: { doc: Y.Doc; multi: boolean; ids: string[]; 
     return (
       <select value={props.ids[0] ?? ''} onChange={(e) => props.onChange(e.target.value ? [e.target.value] : [])}>
         <option value="">–</option>
-        {people.map((p) => <option key={p.id} value={p.id}>{p.name || 'Unbekannt'}</option>)}
+        {people.map((p) => <option key={p.id} value={p.id}>{p.name || t('Unbekannt')}</option>)}
       </select>
     )
   }
@@ -162,7 +163,7 @@ export function PersonField(props: { doc: Y.Doc; multi: boolean; ids: string[]; 
       {people.map((p) => (
         <label key={p.id} className="cfg-check">
           <input type="checkbox" checked={props.ids.includes(p.id)} onChange={(e) => props.onChange(e.target.checked ? [...props.ids, p.id] : props.ids.filter((x) => x !== p.id))} />
-          <span>{p.name || 'Unbekannt'}</span>
+          <span>{p.name || t('Unbekannt')}</span>
         </label>
       ))}
     </div>

@@ -7,6 +7,7 @@ import { readTables, type ColType, type ColumnInfo, type FilterOp, type TableInf
 import { columnCells, newCtx, summarizeGroup, type Cell, type Key } from './cells'
 import { aggLabel, allowedAggs, defaultAgg } from './aggregate'
 import { effectiveType } from './columnTypes'
+import { t } from './i18n'
 
 export { aggLabel, allowedAggs, defaultAgg }
 
@@ -36,19 +37,19 @@ export const opNeedsValue = (op: FilterOp) => !['empty', 'nempty', 'checked', 'u
 export function opLabel(type: ColType, op: FilterOp): string {
   const date = type === 'date'
   switch (op) {
-    case 'eq': return 'ist gleich'
-    case 'ne': return 'ist nicht gleich'
-    case 'contains': return 'enthält'
-    case 'ncontains': return 'enthält nicht'
-    case 'starts': return 'beginnt mit'
-    case 'gt': return date ? 'ist nach' : 'ist größer als'
-    case 'ge': return date ? 'ist am oder nach' : 'ist größer oder gleich'
-    case 'lt': return date ? 'ist vor' : 'ist kleiner als'
-    case 'le': return date ? 'ist am oder vor' : 'ist kleiner oder gleich'
-    case 'empty': return 'ist leer'
-    case 'nempty': return 'ist nicht leer'
-    case 'checked': return 'ist angehakt'
-    case 'unchecked': return 'ist nicht angehakt'
+    case 'eq': return t('ist gleich')
+    case 'ne': return t('ist nicht gleich')
+    case 'contains': return t('enthält')
+    case 'ncontains': return t('enthält nicht')
+    case 'starts': return t('beginnt mit')
+    case 'gt': return date ? t('ist nach') : t('ist größer als')
+    case 'ge': return date ? t('ist am oder nach') : t('ist größer oder gleich')
+    case 'lt': return date ? t('ist vor') : t('ist kleiner als')
+    case 'le': return date ? t('ist am oder vor') : t('ist kleiner oder gleich')
+    case 'empty': return t('ist leer')
+    case 'nempty': return t('ist nicht leer')
+    case 'checked': return t('ist angehakt')
+    case 'unchecked': return t('ist nicht angehakt')
   }
 }
 

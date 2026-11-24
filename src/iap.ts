@@ -7,6 +7,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { getIdentity } from './identity'
 import { isIOS } from './platform'
 import { authedFetch } from './syncClient'
+import { t } from './i18n'
 
 export interface StoreProduct { id: string; name: string; description: string; price: string; period: string }
 export type PurchaseResult = 'success' | 'pending' | 'cancelled'
@@ -35,7 +36,7 @@ export async function loadProducts(ids: string[]): Promise<StoreProduct[]> {
 /** Meldet dem Server einen von Apple signierten Beleg. Wirft mit der Begründung des Servers, falls er ihn nicht annimmt. */
 async function submit(server: string, jws: string): Promise<void> {
   const r = await authedFetch(server, '/billing/apple/transaction', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jws }) })
-  if (!r.ok) throw new Error((await r.text().catch(() => '')).trim() || `Server antwortet mit ${r.status}`)
+  if (!r.ok) throw new Error((await r.text().catch(() => '')).trim() || t('Server antwortet mit {status}', { status: r.status }))
 }
 
 /** Kauft ein Produkt für das Grid-Konto dieses Geräts und meldet es dem Server. */

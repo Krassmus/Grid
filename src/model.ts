@@ -1,5 +1,6 @@
 import * as Y from 'yjs'
 import { accountIdNow, getAccountName } from './identity'
+import { t } from './i18n'
 
 /**
  * Datenmodell im Yjs-Dokument:
@@ -496,7 +497,7 @@ export function summarize(doc: Y.Doc, table: TableInfo, rowId: string): RowSumma
       return v === undefined || v === null ? '' : String(v)
     })
   const [first = '', ...rest] = vals
-  return { title: first || 'Ohne Titel', subs: rest.filter(Boolean).slice(0, 2) }
+  return { title: first || t('Ohne Titel'), subs: rest.filter(Boolean).slice(0, 2) }
 }
 
 // ---------- Dateien ----------

@@ -10,6 +10,7 @@ import { GEO_FORMATS, encodeGeo, decodeGeo, formatGeo, parseGeo } from './geo'
 import { DatePicker } from './DatePicker'
 import { Modal } from './Modal'
 import { RichField } from './richText'
+import { t } from './i18n'
 
 /** Spalten, die im Formular ausgefüllt werden können; Berechnetes und Ausgeblendetes nicht. */
 export const formColumns = (table: TableInfo): ColumnInfo[] => table.columns.filter((c) => !isComputed(c) && c.type !== 'autonumber' && c.type !== 'stamp' && !c.hidden)
@@ -78,7 +79,7 @@ function ExistingFile({ file, onRemove }: { file: FileRef; onRemove: () => void 
       {url ? <img src={url} alt="" /> : <span className="rf-ext">{file.name.includes('.') ? file.name.split('.').pop()!.slice(0, 4).toUpperCase() : 'DATEI'}</span>}
       <span className="rf-name" title={file.name}>{file.name}</span>
       <small>{fmtSize(file.size)}</small>
-      <button type="button" className="tile-x" title="Entfernen" onClick={onRemove}>✕</button>
+      <button type="button" className="tile-x" title={t('Entfernen')} onClick={onRemove}>✕</button>
     </div>
   )
 }
@@ -99,11 +100,11 @@ function FileField({ col, files, onChange, existing = [], onRemoveExisting }: {
     let picked = Array.from(list)
     if (cfg.accept === 'images') {
       const images = picked.filter((f) => f.type.startsWith('image/'))
-      if (images.length < picked.length) setError('In dieser Spalte sind nur Bilder erlaubt')
+      if (images.length < picked.length) setError(t('In dieser Spalte sind nur Bilder erlaubt'))
       picked = images
     }
     if (cfg.single) {
-      if (files.length + existing.length >= 1 || picked.length > 1) setError('In dieser Spalte ist nur eine Datei erlaubt')
+      if (files.length + existing.length >= 1 || picked.length > 1) setError(t('In dieser Spalte ist nur eine Datei erlaubt'))
       picked = files.length + existing.length >= 1 ? [] : picked.slice(0, 1)
     }
     if (picked.length) onChange((prev) => [...prev, ...picked])
@@ -120,10 +121,10 @@ function FileField({ col, files, onChange, existing = [], onRemoveExisting }: {
           {urls[i] ? <img src={urls[i]!} alt="" /> : <span className="rf-ext">{f.name.includes('.') ? f.name.split('.').pop()!.slice(0, 4).toUpperCase() : 'DATEI'}</span>}
           <span className="rf-name" title={f.name}>{f.name}</span>
           <small>{fmtSize(f.size)}</small>
-          <button type="button" className="tile-x" title="Entfernen" onClick={() => onChange((prev) => prev.filter((_, j) => j !== i))}>✕</button>
+          <button type="button" className="tile-x" title={t('Entfernen')} onClick={() => onChange((prev) => prev.filter((_, j) => j !== i))}>✕</button>
         </div>
       ))}
-      {!full && <button type="button" className="rf-add" onClick={() => input.current?.click()}>+ Datei hinzufügen</button>}
+      {!full && <button type="button" className="rf-add" onClick={() => input.current?.click()}>{t('+ Datei hinzufügen')}</button>}
       {error && <small className="rf-error">{error}</small>}
       <input ref={input} type="file" hidden multiple={!cfg.single} accept={cfg.accept === 'images' ? 'image/*' : undefined}
         onChange={(e) => { if (e.target.files) add(e.target.files); e.target.value = '' }} />
@@ -188,7 +189,7 @@ export function RecordForm(props: {
     setBusy(true)
     setFailure(null)
     try { await props.onSubmit(out, { files, relations: rels, removedFiles }) } catch (e) {
-      setFailure(`Anlegen fehlgeschlagen: ${e}`)
+      setFailure(t('Anlegen fehlgeschlagen: {e}', { e: String(e) }))
       setBusy(false)
     }
   }
@@ -213,7 +214,7 @@ export function RecordForm(props: {
         )
       }
       case 'date':
-        return <DatePicker className="date-field" autoFocus={first} value={v} withTime={DATE.config(c).time} style={DATE.config(c).style} placeholder="Datum wählen" onChange={(d) => set(c.id, d)} />
+        return <DatePicker className="date-field" autoFocus={first} value={v} withTime={DATE.config(c).time} style={DATE.config(c).style} placeholder={t('Datum wählen')} onChange={(d) => set(c.id, d)} />
       case 'select':
         return (
           <select value={typeof v === 'string' ? v : ''} onChange={(e) => set(c.id, e.target.value || null)}>
@@ -234,7 +235,7 @@ export function RecordForm(props: {
         return (
           <label className="cfg-check">
             <input type="checkbox" checked={!!v} onChange={(e) => set(c.id, e.target.checked ? 1 : null)} />
-            <span>{CHECKBOX.config(c).label || 'Ja'}</span>
+            <span>{CHECKBOX.config(c).label || t('Ja')}</span>
           </label>
         )
       case 'file':
@@ -272,12 +273,12 @@ export function RecordForm(props: {
               {field(c, i === 0)}
             </div>
           ))}
-          {cols.length === 0 && <p className="hint">Diese Tabelle hat keine Felder zum Ausfüllen. Der Datensatz wird leer angelegt.</p>}
+          {cols.length === 0 && <p className="hint">{t('Diese Tabelle hat keine Felder zum Ausfüllen. Der Datensatz wird leer angelegt.')}</p>}
         </div>
         {failure && <p className="formula-error" role="alert">{failure}</p>}
         <div className="actions">
-          <button type="button" onClick={props.onClose}>Abbrechen</button>
-          <button type="submit" className="primary" disabled={!!invalid || busy}>{busy ? 'Speichert …' : props.submitLabel ?? 'Anlegen'}</button>
+          <button type="button" onClick={props.onClose}>{t('Abbrechen')}</button>
+          <button type="submit" className="primary" disabled={!!invalid || busy}>{busy ? t('Speichert …') : props.submitLabel ?? t('Anlegen')}</button>
         </div>
       </form>
     </Modal>

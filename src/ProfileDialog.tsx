@@ -7,6 +7,7 @@ import { importAccount } from './identity'
 import { confirmEmailCode, fetchRecoveryText, MIN_RECOVERY_PASSWORD, removeEmail, requestEmailCode, startRecovery, storeRecovery } from './recovery'
 import { fetchAccountInfo, normalizeServer, type AccountInfo } from './syncClient'
 import { AccountDialog, Field, lastServer, rememberServer } from './SyncDialog'
+import { t } from './i18n'
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
@@ -21,7 +22,7 @@ export function useProfile(): Profile {
 export function AccountButton(props: { onClick: () => void }) {
   const profile = useProfile()
   return (
-    <button type="button" className="account-btn" onClick={props.onClick} aria-label={`Konto${profile.name ? `: ${profile.name}` : ''}`} title={profile.name || 'Konto'}>
+    <button type="button" className="account-btn" onClick={props.onClick} aria-label={`${t('Konto')}${profile.name ? `: ${profile.name}` : ''}`} title={profile.name || t('Konto')}>
       <Avatar name={profile.name} avatar={profile.avatar} size={30} />
     </button>
   )
@@ -49,7 +50,7 @@ export function ProfileDialog(props: { onClose: () => void }) {
     try { await what() } catch (e) { setNote({ ok: false, text: message(e) }) } finally { setBusy(false) }
   }
   const load = () => run(async () => {
-    if (!url) throw new Error('Gib den Server an, bei dem du dein Konto wiederherstellen können willst')
+    if (!url) throw new Error(t('Gib den Server an, bei dem du dein Konto wiederherstellen können willst'))
     rememberServer(url)
     setInfo(await fetchAccountInfo(url))
   })
@@ -60,9 +61,9 @@ export function ProfileDialog(props: { onClose: () => void }) {
   return (
     <Modal onClose={props.onClose}>
       <div className="dialog sync-dialog profile-dialog" onMouseDown={(e) => e.stopPropagation()} onKeyDown={(e) => e.key === 'Escape' && props.onClose()}>
-        <h3>Konto</h3>
+        <h3>{t('Konto')}</h3>
         <div className="profile-head">
-          <button type="button" className="avatar-pick" onClick={() => file.current?.click()} aria-label="Avatar-Bild wählen" title="Bild wählen">
+          <button type="button" className="avatar-pick" onClick={() => file.current?.click()} aria-label={t('Avatar-Bild wählen')} title={t('Bild wählen')}>
             <Avatar name={profile.name} avatar={profile.avatar} size={64} />
           </button>
           <input ref={file} type="file" accept="image/*" hidden onChange={(e) => {
@@ -71,35 +72,35 @@ export function ProfileDialog(props: { onClose: () => void }) {
             if (f) void avatarFromFile(f).then((a) => setProfile({ avatar: a }), (err) => setNote({ ok: false, text: message(err) }))
           }} />
           <div className="profile-fields">
-            <Field label="Dein Name" value={profile.name} onChange={(v) => setProfile({ name: v })} placeholder="z. B. Anna Beispiel" autoFocus />
-            {profile.avatar && <button type="button" className="linklike" onClick={() => setProfile({ avatar: '' })}>Bild entfernen</button>}
+            <Field label={t('Dein Name')} value={profile.name} onChange={(v) => setProfile({ name: v })} placeholder={t('z. B. Anna Beispiel')} autoFocus />
+            {profile.avatar && <button type="button" className="linklike" onClick={() => setProfile({ avatar: '' })}>{t('Bild entfernen')}</button>}
           </div>
         </div>
-        <p className="hint">Den Namen sehen die Admins deiner Dokumente, wenn du anklopfst oder Mitglied bist. Name und Bild gelten für alle Dokumente und liegen nur auf diesem Gerät.</p>
-        <p className="sync-account"><span>Kennung <code>{me ? fingerprint(me.publicKey) : '…'}</code></span></p>
+        <p className="hint">{t('Den Namen sehen die Admins deiner Dokumente, wenn du anklopfst oder Mitglied bist. Name und Bild gelten für alle Dokumente und liegen nur auf diesem Gerät.')}</p>
+        <p className="sync-account"><span>{t('Kennung')} <code>{me ? fingerprint(me.publicKey) : '…'}</code></span></p>
 
-        <h4>E-Mail und Wiederherstellung</h4>
-        <p className="hint">Mit einer bestätigten Adresse kannst du dein Konto auf einem neuen Gerät wiederherstellen, falls dieses verloren geht. Der Server bewahrt nur einen mit deinem Passwort verschlüsselten Text auf; ohne das Passwort ist er wertlos, auch für den Betreiber.</p>
-        <Field label="Server" value={server} onChange={(v) => { setServer(v); setInfo(null) }} placeholder="https://townwork.eu/grid" />
-        <Field label="E-Mail-Adresse" value={email} onChange={(v) => { setEmail(v); setProfile({ email: v }); setCode(null) }} type="email" placeholder="anna@example.org" />
-        {!info && <div className="actions"><button type="button" disabled={busy || !server.trim()} onClick={() => void load()}>Stand beim Server abfragen</button></div>}
-        {info && !info.mail && <p className="sync-error">Dieser Server kann keine E-Mails senden. Wiederherstellung ist dort nicht möglich.</p>}
+        <h4>{t('E-Mail und Wiederherstellung')}</h4>
+        <p className="hint">{t('Mit einer bestätigten Adresse kannst du dein Konto auf einem neuen Gerät wiederherstellen, falls dieses verloren geht. Der Server bewahrt nur einen mit deinem Passwort verschlüsselten Text auf; ohne das Passwort ist er wertlos, auch für den Betreiber.')}</p>
+        <Field label={t('Server')} value={server} onChange={(v) => { setServer(v); setInfo(null) }} placeholder={t('https://townwork.eu/grid')} />
+        <Field label={t('E-Mail-Adresse')} value={email} onChange={(v) => { setEmail(v); setProfile({ email: v }); setCode(null) }} type="email" placeholder={t('anna@example.org')} />
+        {!info && <div className="actions"><button type="button" disabled={busy || !server.trim()} onClick={() => void load()}>{t('Stand beim Server abfragen')}</button></div>}
+        {info && !info.mail && <p className="sync-error">{t('Dieser Server kann keine E-Mails senden. Wiederherstellung ist dort nicht möglich.')}</p>}
         {info?.mail && (
           <>
             {verified
-              ? <p className="sync-status online"><span className="dot" />Adresse bestätigt{info.recovery ? ', Wiederherstellung eingerichtet' : ''}</p>
+              ? <p className="sync-status online"><span className="dot" />{t('Adresse bestätigt')}{info.recovery ? `, ${t('Wiederherstellung eingerichtet')}` : ''}</p>
               : code === null
-              ? <div className="actions"><button type="button" disabled={busy || !email.includes('@')} onClick={() => void run(async () => { await requestEmailCode(url, email.trim()); setCode('') })}>Bestätigungscode senden</button></div>
+              ? <div className="actions"><button type="button" disabled={busy || !email.includes('@')} onClick={() => void run(async () => { await requestEmailCode(url, email.trim()); setCode('') })}>{t('Bestätigungscode senden')}</button></div>
               : <>
-                  <Field label="Code aus der E-Mail" value={codeInput} onChange={setCodeInput} placeholder="6 Ziffern" />
-                  <div className="actions"><button type="button" className="primary" disabled={busy || codeInput.trim().length < 6} onClick={() => void run(async () => { await confirmEmailCode(url, codeInput.trim()); setCode(null); setCodeInput(''); setInfo(await fetchAccountInfo(url)) })}>Bestätigen</button></div>
+                  <Field label={t('Code aus der E-Mail')} value={codeInput} onChange={setCodeInput} placeholder={t('6 Ziffern')} />
+                  <div className="actions"><button type="button" className="primary" disabled={busy || codeInput.trim().length < 6} onClick={() => void run(async () => { await confirmEmailCode(url, codeInput.trim()); setCode(null); setCodeInput(''); setInfo(await fetchAccountInfo(url)) })}>{t('Bestätigen')}</button></div>
                 </>}
             {verified && (
               <>
-                <Field label={`Passwort für die Wiederherstellung (mindestens ${MIN_RECOVERY_PASSWORD} Zeichen)`} value={pass} onChange={setPass} type="password" />
+                <Field label={t('Passwort für die Wiederherstellung (mindestens {n} Zeichen)', { n: MIN_RECOVERY_PASSWORD })} value={pass} onChange={setPass} type="password" />
                 <div className="actions split">
-                  <button type="button" className="danger-outline" disabled={busy} onClick={() => void run(async () => { await removeEmail(url); setInfo(await fetchAccountInfo(url)) })}>Adresse beim Server entfernen</button>
-                  <button type="button" className="primary" disabled={busy || pass.length < MIN_RECOVERY_PASSWORD} onClick={() => void run(async () => { await storeRecovery(url, pass); setPass(''); setInfo(await fetchAccountInfo(url)); setNote({ ok: true, text: 'Wiederherstellung eingerichtet. Merke dir das Passwort: ohne es geht es nicht.' }) })}>{info.recovery ? 'Passwort ändern' : 'Wiederherstellung einrichten'}</button>
+                  <button type="button" className="danger-outline" disabled={busy} onClick={() => void run(async () => { await removeEmail(url); setInfo(await fetchAccountInfo(url)) })}>{t('Adresse beim Server entfernen')}</button>
+                  <button type="button" className="primary" disabled={busy || pass.length < MIN_RECOVERY_PASSWORD} onClick={() => void run(async () => { await storeRecovery(url, pass); setPass(''); setInfo(await fetchAccountInfo(url)); setNote({ ok: true, text: t('Wiederherstellung eingerichtet. Merke dir das Passwort: ohne es geht es nicht.') }) })}>{info.recovery ? t('Passwort ändern') : t('Wiederherstellung einrichten')}</button>
                 </div>
               </>
             )}
@@ -109,10 +110,10 @@ export function ProfileDialog(props: { onClose: () => void }) {
 
         <div className="actions split">
           <span className="profile-links">
-            <button type="button" className="linklike" onClick={() => setSub('backup')}>Sichern oder übertragen …</button>
-            <button type="button" className="linklike" onClick={() => setSub('recover')}>Per E-Mail wiederherstellen …</button>
+            <button type="button" className="linklike" onClick={() => setSub('backup')}>{t('Sichern oder übertragen …')}</button>
+            <button type="button" className="linklike" onClick={() => setSub('recover')}>{t('Per E-Mail wiederherstellen …')}</button>
           </span>
-          <button type="button" className="primary" onClick={props.onClose}>Fertig</button>
+          <button type="button" className="primary" onClick={props.onClose}>{t('Fertig')}</button>
         </div>
       </div>
     </Modal>
@@ -138,9 +139,9 @@ function RecoverDialog(props: { server: string; onClose: () => void }) {
     return (
       <Modal onClose={props.onClose}>
         <div className="dialog sync-dialog" onMouseDown={(e) => e.stopPropagation()}>
-          <h3>Konto wiederhergestellt</h3>
-          <p className="hint">Dein Konto ist auf diesem Gerät wieder da. Verschlüsselte Dokumente öffnest du über „Aus Cloud öffnen“.</p>
-          <div className="actions"><button type="button" className="primary" onClick={props.onClose}>Fertig</button></div>
+          <h3>{t('Konto wiederhergestellt')}</h3>
+          <p className="hint">{t('Dein Konto ist auf diesem Gerät wieder da. Verschlüsselte Dokumente öffnest du über „Aus Cloud öffnen“.')}</p>
+          <div className="actions"><button type="button" className="primary" onClick={props.onClose}>{t('Fertig')}</button></div>
         </div>
       </Modal>
     )
@@ -148,20 +149,20 @@ function RecoverDialog(props: { server: string; onClose: () => void }) {
   return (
     <Modal onClose={props.onClose}>
       <div className="dialog sync-dialog" onMouseDown={(e) => e.stopPropagation()} onKeyDown={(e) => e.key === 'Escape' && props.onClose()}>
-        <h3>Konto per E-Mail wiederherstellen</h3>
-        <p className="hint">Das ersetzt das Konto, das jetzt auf diesem Gerät ist. Du brauchst die Adresse, die du bestätigt hast, und das Passwort der Wiederherstellung.</p>
-        <Field label="Server" value={server} onChange={setServer} placeholder="https://townwork.eu/grid" autoFocus />
-        <Field label="E-Mail-Adresse" value={email} onChange={setEmail} type="email" />
+        <h3>{t('Konto per E-Mail wiederherstellen')}</h3>
+        <p className="hint">{t('Das ersetzt das Konto, das jetzt auf diesem Gerät ist. Du brauchst die Adresse, die du bestätigt hast, und das Passwort der Wiederherstellung.')}</p>
+        <Field label={t('Server')} value={server} onChange={setServer} placeholder={t('https://townwork.eu/grid')} autoFocus />
+        <Field label={t('E-Mail-Adresse')} value={email} onChange={setEmail} type="email" />
         {!sent
-          ? <div className="actions"><button type="button" disabled={busy || !server.trim() || !email.includes('@')} onClick={() => void run(async () => { await startRecovery(server, email.trim()); setSent(true); rememberServer(normalizeServer(server)) })}>Code senden</button></div>
+          ? <div className="actions"><button type="button" disabled={busy || !server.trim() || !email.includes('@')} onClick={() => void run(async () => { await startRecovery(server, email.trim()); setSent(true); rememberServer(normalizeServer(server)) })}>{t('Code senden')}</button></div>
           : <>
-              <p className="hint">Wenn zu dieser Adresse eine Wiederherstellung eingerichtet ist, kommt gleich eine E-Mail mit einem Code.</p>
-              <Field label="Code aus der E-Mail" value={code} onChange={setCode} placeholder="6 Ziffern" />
-              <Field label="Passwort der Wiederherstellung" value={pass} onChange={setPass} type="password" />
-              <div className="actions"><button type="button" className="primary" disabled={busy || (text === null && code.trim().length < 6) || !pass} onClick={() => void run(async () => { const t = text ?? await fetchRecoveryText(server, email.trim(), code.trim()); setText(t); await importAccount(t, pass); setDone(true) })}>Wiederherstellen</button></div>
+              <p className="hint">{t('Wenn zu dieser Adresse eine Wiederherstellung eingerichtet ist, kommt gleich eine E-Mail mit einem Code.')}</p>
+              <Field label={t('Code aus der E-Mail')} value={code} onChange={setCode} placeholder={t('6 Ziffern')} />
+              <Field label={t('Passwort der Wiederherstellung')} value={pass} onChange={setPass} type="password" />
+              <div className="actions"><button type="button" className="primary" disabled={busy || (text === null && code.trim().length < 6) || !pass} onClick={() => void run(async () => { const t = text ?? await fetchRecoveryText(server, email.trim(), code.trim()); setText(t); await importAccount(t, pass); setDone(true) })}>{t('Wiederherstellen')}</button></div>
             </>}
         {error && <p className="sync-error" role="alert">{error}</p>}
-        <div className="actions"><button type="button" onClick={props.onClose}>Abbrechen</button></div>
+        <div className="actions"><button type="button" onClick={props.onClose}>{t('Abbrechen')}</button></div>
       </div>
     </Modal>
   )

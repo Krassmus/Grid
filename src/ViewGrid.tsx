@@ -3,6 +3,7 @@ import * as Y from 'yjs'
 import type { ViewInfo } from './model'
 import { orderByKeys, type SortDir } from './sorting'
 import { computeView } from './viewEngine'
+import { t } from './i18n'
 
 const widthOf = (type: string, w?: number) =>
   w ? `${w}px` : type === 'relation' || type === 'file' ? '240px' : type === 'number' || type === 'duration' ? '120px' : type === 'stamp' ? '200px' : type === 'person' || type === 'link' ? '190px' : type === 'date' ? '170px' : type === 'checkbox' ? '110px' : type === 'select' ? '160px' : '180px'
@@ -28,7 +29,7 @@ export function ViewGrid({ doc, view }: { doc: Y.Doc; view: ViewInfo }) {
   const cycle = (colId: string) =>
     setSort((cur) => (!cur || cur.colId !== colId ? { colId, dir: 'asc' } : cur.dir === 'asc' ? { colId, dir: 'desc' } : null))
 
-  if (result.missing) return <p className="hint">Die Quelltabelle dieser abgeleiteten Tabelle existiert nicht mehr.</p>
+  if (result.missing) return <p className="hint">{t('Die Quelltabelle dieser abgeleiteten Tabelle existiert nicht mehr.')}</p>
   const template = result.columns.map((c) => widthOf(c.type, c.width)).join(' ')
   return (
     <div className="gridwrap viewgrid">
@@ -37,8 +38,8 @@ export function ViewGrid({ doc, view }: { doc: Y.Doc; view: ViewInfo }) {
           {result.columns.map((c) => (
             <div key={c.id} className="h">
               <span className="h-name static" title={c.name}>{c.name}</span>
-              <button type="button" className={`h-sort${active?.colId === c.id ? ' on' : ''}`} aria-label={`Nach ${c.name} sortieren`}
-                title={active?.colId === c.id ? (active.dir === 'asc' ? 'Aufsteigend sortiert – klicken für absteigend' : 'Absteigend sortiert – klicken für die ursprüngliche Reihenfolge') : 'Nach dieser Spalte sortieren'}
+              <button type="button" className={`h-sort${active?.colId === c.id ? ' on' : ''}`} aria-label={t('Nach {name} sortieren', { name: c.name })}
+                title={active?.colId === c.id ? (active.dir === 'asc' ? t('Aufsteigend sortiert – klicken für absteigend') : t('Absteigend sortiert – klicken für die ursprüngliche Reihenfolge')) : t('Nach dieser Spalte sortieren')}
                 onClick={() => cycle(c.id)}>{active?.colId === c.id ? (active.dir === 'asc' ? '↑' : '↓') : '↕'}</button>
             </div>
           ))}
@@ -54,7 +55,7 @@ export function ViewGrid({ doc, view }: { doc: Y.Doc; view: ViewInfo }) {
             </div>
           </div>
         ))}
-        {rows.length === 0 && <p className="hint view-empty">Keine Zeilen entsprechen den Bedingungen.</p>}
+        {rows.length === 0 && <p className="hint view-empty">{t('Keine Zeilen entsprechen den Bedingungen.')}</p>}
       </div>
     </div>
   )

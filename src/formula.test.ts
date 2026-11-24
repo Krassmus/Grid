@@ -40,6 +40,13 @@ describe('Formel-Parser', () => {
     expect(parseFormula('SUMME(Gruppen.Führer; 2)')).toMatchObject({ t: 'call', fn: 'SUM', args: [{ t: 'ref', parts: ['Gruppen', 'Führer'] }, { t: 'num', v: 2 }] })
     expect(parseFormula('[Σ Führer] & "x"')).toMatchObject({ t: 'bin', op: '&', a: { t: 'ref', parts: ['Σ Führer'] } })
   })
+  it('schreibt Felder in doppelten geschweiften Klammern, auch mit Pfad und Leerzeichen', () => {
+    expect(parseFormula('{{Σ Führer}} & "x"')).toMatchObject({ t: 'bin', op: '&', a: { t: 'ref', parts: ['Σ Führer'] } })
+    expect(parseFormula('SUMME({{Gruppen.Führer}})')).toMatchObject({ t: 'call', fn: 'SUM', args: [{ t: 'ref', parts: ['Gruppen', 'Führer'] }] })
+    expect(parseFormula('{{A}} + {{B}}')).toMatchObject({ t: 'bin', op: '+', a: { t: 'ref', parts: ['A'] }, b: { t: 'ref', parts: ['B'] } })
+    expect(() => parseFormula('{{A')).toThrow(FormulaSyntaxError)
+    expect(() => parseFormula('{{}}')).toThrow(FormulaSyntaxError)
+  })
   it('meldet Fehler mit Position', () => {
     for (const bad of ['', '1 +', '(1', 'SUMME(', '1 2', '"offen', '[offen', '1 $ 2', '1,5 + 2']) {
       expect(() => parseFormula(bad), bad).toThrow(FormulaSyntaxError)
@@ -130,6 +137,10 @@ describe('Text mit Platzhaltern', () => {
     expect(tpl(s, 'Zeile 1\n{{Name}}')[0].text).toBe('Zeile 1\nEAL 1')
     expect(tpl(s, '{{WENN([Σ Helfer] > 10; "}}viele"; "wenige")}}')[0].text).toBe('}}viele') // "}}" in Anführungszeichen beendet den Platzhalter nicht
     expect(tpl(s, '').every((c) => c.text === '')).toBe(true)
+  })
+  it('erlaubt in Platzhaltern Rechnungen mit eingeschachtelten Feldern', () => {
+    expect(parseTemplate('Summe: {{ {{A}} + {{B}} }} fertig')).toMatchObject({ t: 'bin', op: '&' })
+    expect(() => parseTemplate('{{ {{A}} + {{B}} }')).toThrow(FormulaSyntaxError)
   })
   it('meldet Fehler im Platzhalter mit seiner Formel', () => {
     expect(() => parseTemplate('Hallo {{Name')).toThrow(/nicht mit }} abgeschlossen/)

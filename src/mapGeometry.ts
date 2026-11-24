@@ -1,3 +1,4 @@
+import { locale } from './i18n'
 /** Längen und Flächen für gezeichnete Strecken und Gebiete (Punkte als [Breite, Länge] in Grad). */
 export type Pt = [number, number]
 const R = 6371008.8 // mittlerer Erdradius in Metern
@@ -27,11 +28,11 @@ export function ringArea(pts: Pt[]): number {
 }
 
 export function formatLength(m: number): string {
-  return m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toLocaleString('de-DE', { maximumFractionDigits: m < 10000 ? 2 : 1 })} km`
+  return m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toLocaleString(locale(), { maximumFractionDigits: m < 10000 ? 2 : 1 })} km`
 }
 
 export function formatArea(m2: number): string {
-  if (m2 < 10000) return `${Math.round(m2).toLocaleString('de-DE')} m²`
-  if (m2 < 1e6) return `${(m2 / 10000).toLocaleString('de-DE', { maximumFractionDigits: 2 })} ha`
-  return `${(m2 / 1e6).toLocaleString('de-DE', { maximumFractionDigits: m2 < 1e8 ? 2 : 1 })} km²`
+  if (m2 < 10000) return `${Math.round(m2).toLocaleString(locale())} m²`
+  if (m2 < 1e6) return `${(m2 / 10000).toLocaleString(locale(), { maximumFractionDigits: 2 })} ha`
+  return `${(m2 / 1e6).toLocaleString(locale(), { maximumFractionDigits: m2 < 1e8 ? 2 : 1 })} km²`
 }

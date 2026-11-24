@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import * as Y from 'yjs'
 import { setCell } from './model'
 import { Modal } from './Modal'
+import { t } from './i18n'
 
 /** Erlaubt sind nur einfache Formatierungen. Alles andere (Skripte, Attribute, Stile) wird entfernt. */
 const ALLOWED = new Set(['B', 'STRONG', 'I', 'EM', 'U', 'S', 'UL', 'OL', 'LI', 'BR', 'P', 'DIV'])
@@ -72,15 +73,15 @@ export function RichTextDialog(props: { doc: Y.Doc; tableId: string; rowId: stri
         onKeyDown={(e) => { if (e.key === 'Escape') props.onClose(); if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) save() }}>
         <h3>{props.title}</h3>
         <div className="rich-tools">
-          {TOOLS.map((t) => (
-            <button key={t.cmd} type="button" title={t.title} style={t.style}
-              onMouseDown={(e) => { e.preventDefault(); document.execCommand(t.cmd) }}>{t.label}</button>
+          {TOOLS.map((tool) => (
+            <button key={tool.cmd} type="button" title={t(tool.title)} style={tool.style}
+              onMouseDown={(e) => { e.preventDefault(); document.execCommand(tool.cmd) }}>{t(tool.label)}</button>
           ))}
         </div>
         <div ref={ref} className="rich-editor" contentEditable suppressContentEditableWarning />
         <div className="actions">
-          <button type="button" onClick={props.onClose}>Abbrechen</button>
-          <button type="button" className="primary" onClick={save}>Speichern</button>
+          <button type="button" onClick={props.onClose}>{t('Abbrechen')}</button>
+          <button type="button" className="primary" onClick={save}>{t('Speichern')}</button>
         </div>
       </div>
     </Modal>
@@ -94,9 +95,9 @@ export function RichField({ value, onChange }: { value: string; onChange: (html:
   return (
     <div className="rich-field">
       <div className="rich-tools">
-        {TOOLS.map((t) => (
-          <button key={t.cmd} type="button" title={t.title} style={t.style} tabIndex={-1}
-            onMouseDown={(e) => { e.preventDefault(); document.execCommand(t.cmd); onChange(sanitizeHtml(ref.current?.innerHTML ?? '')) }}>{t.label}</button>
+        {TOOLS.map((tool) => (
+          <button key={tool.cmd} type="button" title={t(tool.title)} style={tool.style} tabIndex={-1}
+            onMouseDown={(e) => { e.preventDefault(); document.execCommand(tool.cmd); onChange(sanitizeHtml(ref.current?.innerHTML ?? '')) }}>{t(tool.label)}</button>
         ))}
       </div>
       <div ref={ref} className="rich-editor" contentEditable suppressContentEditableWarning

@@ -9,6 +9,7 @@ import { GEO_FORMATS, type GeoFormat } from './geo'
 import type { DurationFormat } from './duration'
 import type { LinkKind } from './link'
 import { FormulaSyntaxError, inferType, parseFormula } from './formula'
+import { t } from './i18n'
 
 /** Was ein Konfigurationseditor braucht, um die Einstellungen einer Spalte anzuzeigen und zu ändern. */
 export interface ConfigContext<C> {
@@ -30,7 +31,7 @@ export interface ConfigContext<C> {
  */
 export abstract class ColumnType<C extends object> {
   abstract readonly type: ColType
-  abstract readonly label: string
+  abstract get label(): string
   abstract readonly defaults: C
   abstract renderConfig(ctx: ConfigContext<C>): ReactNode
 
@@ -64,20 +65,20 @@ function Field(props: { label: string; children: ReactNode }) {
 export interface TextConfig { mode: 'single' | 'multi' | 'rich'; bold: boolean }
 class TextColumn extends ColumnType<TextConfig> {
   readonly type = 'text'
-  readonly label = 'Text'
+  get label() { return t('Text') }
   readonly defaults: TextConfig = { mode: 'single', bold: false }
   renderConfig({ config, set }: ConfigContext<TextConfig>) {
     return (
       <>
-        <Field label="Textart">
+        <Field label={t('Textart')}>
           <select value={config.mode} onChange={(e) => set({ mode: e.target.value as TextConfig['mode'] })}>
-            <option value="single">Einzeilig</option>
-            <option value="multi">Mehrzeilig</option>
-            <option value="rich">Formatierter Text</option>
+            <option value="single">{t('Einzeilig')}</option>
+            <option value="multi">{t('Mehrzeilig')}</option>
+            <option value="rich">{t('Formatierter Text')}</option>
           </select>
         </Field>
-        {config.mode === 'rich' && <p className="hint">Ein Klick auf die Zelle öffnet einen Editor mit Fett, Kursiv, Unterstrichen und Listen.</p>}
-        {config.mode !== 'rich' && <Check checked={config.bold} onChange={(bold) => set({ bold })}>Text fett anzeigen</Check>}
+        {config.mode === 'rich' && <p className="hint">{t('Ein Klick auf die Zelle öffnet einen Editor mit Fett, Kursiv, Unterstrichen und Listen.')}</p>}
+        {config.mode !== 'rich' && <Check checked={config.bold} onChange={(bold) => set({ bold })}>{t('Text fett anzeigen')}</Check>}
       </>
     )
   }
@@ -86,20 +87,20 @@ class TextColumn extends ColumnType<TextConfig> {
 export interface NumberConfig { decimals: number; unit: string }
 class NumberColumn extends ColumnType<NumberConfig> {
   readonly type = 'number'
-  readonly label = 'Zahl'
+  get label() { return t('Zahl') }
   /** decimals −1 = beliebig viele Nachkommastellen */
   readonly defaults: NumberConfig = { decimals: -1, unit: '' }
   renderConfig({ config, set }: ConfigContext<NumberConfig>) {
     return (
       <>
-        <Field label="Nachkommastellen">
+        <Field label={t('Nachkommastellen')}>
           <select value={config.decimals} onChange={(e) => set({ decimals: Number(e.target.value) })}>
-            <option value={-1}>Beliebig</option>
+            <option value={-1}>{t('Beliebig')}</option>
             {[0, 1, 2, 3, 4].map((n) => <option key={n} value={n}>{n}</option>)}
           </select>
         </Field>
-        <Field label="Einheit">
-          <input value={config.unit} placeholder="z. B. € oder kg" maxLength={12} onChange={(e) => set({ unit: e.target.value })} />
+        <Field label={t('Einheit')}>
+          <input value={config.unit} placeholder={t('z. B. € oder kg')} maxLength={12} onChange={(e) => set({ unit: e.target.value })} />
         </Field>
       </>
     )
@@ -109,25 +110,25 @@ class NumberColumn extends ColumnType<NumberConfig> {
 export interface RelationConfig { single: boolean; backlink: boolean; display: 'default' | 'avatar'; multiTarget: boolean }
 class RelationColumn extends ColumnType<RelationConfig> {
   readonly type = 'relation'
-  readonly label = 'Relation'
+  get label() { return t('Relation') }
   readonly defaults: RelationConfig = { single: false, backlink: true, display: 'default', multiTarget: false }
   renderConfig({ config, set, column, tables }: ConfigContext<RelationConfig>) {
     return (
       <>
-        <p className="cfg-static">Zieltabelle: <strong>{tables.find((t) => t.id === column.target)?.name ?? '?'}</strong></p>
-        <Check checked={config.single} onChange={(single) => set({ single })} hint="Bereits vorhandene weitere Verknüpfungen bleiben bestehen.">
-          Höchstens eine Verknüpfung pro Zeile
+        <p className="cfg-static">{t('Zieltabelle:')} <strong>{tables.find((x) => x.id === column.target)?.name ?? '?'}</strong></p>
+        <Check checked={config.single} onChange={(single) => set({ single })} hint={t('Bereits vorhandene weitere Verknüpfungen bleiben bestehen.')}>
+          {t('Höchstens eine Verknüpfung pro Zeile')}
         </Check>
-        <Check checked={config.multiTarget} onChange={(multiTarget) => set({ multiTarget })} hint="Aus: jeder Zieldatensatz gehört zu höchstens einer Zeile dieser Tabelle, im Rückverweis steht dann höchstens ein Datensatz. Bereits vorhandene Mehrfach-Verknüpfungen bleiben bestehen.">
-          Zieldatensatz darf mehrfach verknüpft werden
+        <Check checked={config.multiTarget} onChange={(multiTarget) => set({ multiTarget })} hint={t('Aus: jeder Zieldatensatz gehört zu höchstens einer Zeile dieser Tabelle, im Rückverweis steht dann höchstens ein Datensatz. Bereits vorhandene Mehrfach-Verknüpfungen bleiben bestehen.')}>
+          {t('Zieldatensatz darf mehrfach verknüpft werden')}
         </Check>
-        <Check checked={config.backlink} onChange={(backlink) => set({ backlink })}>Rückverweis in der Zieltabelle anzeigen</Check>
-        <Field label="Darstellung der verknüpften Datensätze">
+        <Check checked={config.backlink} onChange={(backlink) => set({ backlink })}>{t('Rückverweis in der Zieltabelle anzeigen')}</Check>
+        <Field label={t('Darstellung der verknüpften Datensätze')}>
           <select value={config.display ?? 'default'} onChange={(e) => set({ display: e.target.value as 'default' | 'avatar' })}>
-            <option value="default">Wie in der Zieltabelle festgelegt</option>
-            <option value="avatar">Nur der Avatar (sofern vorhanden)</option>
+            <option value="default">{t('Wie in der Zieltabelle festgelegt')}</option>
+            <option value="avatar">{t('Nur der Avatar (sofern vorhanden)')}</option>
           </select>
-          <small className="hint">In der Auswahl zum Verknüpfen stehen immer auch die Namen.</small>
+          <small className="hint">{t('In der Auswahl zum Verknüpfen stehen immer auch die Namen.')}</small>
         </Field>
       </>
     )
@@ -137,19 +138,19 @@ class RelationColumn extends ColumnType<RelationConfig> {
 export interface FileConfig { accept: 'all' | 'images'; single: boolean }
 class FileColumn extends ColumnType<FileConfig> {
   readonly type = 'file'
-  readonly label = 'Dateien'
+  get label() { return t('Dateien') }
   readonly defaults: FileConfig = { accept: 'all', single: false }
   renderConfig({ config, set }: ConfigContext<FileConfig>) {
     return (
       <>
-        <Field label="Erlaubt">
+        <Field label={t('Erlaubt')}>
           <select value={config.accept} onChange={(e) => set({ accept: e.target.value as FileConfig['accept'] })}>
-            <option value="all">Alle Dateien</option>
-            <option value="images">Nur Bilder</option>
+            <option value="all">{t('Alle Dateien')}</option>
+            <option value="images">{t('Nur Bilder')}</option>
           </select>
         </Field>
-        <Check checked={config.single} onChange={(single) => set({ single })} hint="Bereits vorhandene weitere Dateien bleiben bestehen.">
-          Höchstens eine Datei pro Zeile
+        <Check checked={config.single} onChange={(single) => set({ single })} hint={t('Bereits vorhandene weitere Dateien bleiben bestehen.')}>
+          {t('Höchstens eine Datei pro Zeile')}
         </Check>
       </>
     )
@@ -159,18 +160,18 @@ class FileColumn extends ColumnType<FileConfig> {
 export type SelectConfig = Record<string, never>
 class SelectColumn extends ColumnType<SelectConfig> {
   readonly type = 'select'
-  readonly label = 'Auswahl'
+  get label() { return t('Auswahl') }
   readonly defaults: SelectConfig = {}
   renderConfig({ column, editOptions }: ConfigContext<SelectConfig>) {
     const options = column.options ?? []
     return (
       <div className="cfg-field">
-        <span>Optionen</span>
+        <span>{t('Optionen')}</span>
         <div className="cfg-pills">
           {options.map((o) => <Pill key={o.id} option={o} />)}
-          {options.length === 0 && <span className="hint">Noch keine Optionen.</span>}
+          {options.length === 0 && <span className="hint">{t('Noch keine Optionen.')}</span>}
         </div>
-        <button type="button" onClick={editOptions}>Optionen bearbeiten …</button>
+        <button type="button" onClick={editOptions}>{t('Optionen bearbeiten …')}</button>
       </div>
     )
   }
@@ -179,13 +180,13 @@ class SelectColumn extends ColumnType<SelectConfig> {
 export interface DateConfig { time: boolean; style: DateStyle }
 class DateColumn extends ColumnType<DateConfig> {
   readonly type = 'date'
-  readonly label = 'Datum'
+  get label() { return t('Datum') }
   readonly defaults: DateConfig = { time: false, style: 'short' }
   renderConfig({ config, set }: ConfigContext<DateConfig>) {
     return (
       <>
-        <Check checked={config.time} onChange={(time) => set({ time })}>Uhrzeit angeben</Check>
-        <Field label="Darstellung">
+        <Check checked={config.time} onChange={(time) => set({ time })}>{t('Uhrzeit angeben')}</Check>
+        <Field label={t('Darstellung')}>
           <select value={config.style} onChange={(e) => set({ style: e.target.value as DateStyle })}>
             {DATE_STYLES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
           </select>
@@ -198,12 +199,12 @@ class DateColumn extends ColumnType<DateConfig> {
 export interface CheckboxConfig { label: string }
 class CheckboxColumn extends ColumnType<CheckboxConfig> {
   readonly type = 'checkbox'
-  readonly label = 'Checkbox'
+  get label() { return t('Checkbox') }
   readonly defaults: CheckboxConfig = { label: '' }
   renderConfig({ config, set }: ConfigContext<CheckboxConfig>) {
     return (
-      <Field label="Beschriftung neben dem Kästchen">
-        <input value={config.label} placeholder="z. B. Erledigt" maxLength={40} onChange={(e) => set({ label: e.target.value })} />
+      <Field label={t('Beschriftung neben dem Kästchen')}>
+        <input value={config.label} placeholder={t('z. B. Erledigt')} maxLength={40} onChange={(e) => set({ label: e.target.value })} />
       </Field>
     )
   }
@@ -213,7 +214,7 @@ class CheckboxColumn extends ColumnType<CheckboxConfig> {
 export interface RollupConfig { rel: string; col: string; fn: AggFn; sep: string }
 class RollupColumn extends ColumnType<RollupConfig> {
   readonly type = 'rollup'
-  readonly label = 'Rollup'
+  get label() { return t('Rollup') }
   readonly defaults: RollupConfig = { rel: '', col: '', fn: 'sum', sep: ', ' }
   renderConfig({ config, set, table, tables, column }: ConfigContext<RollupConfig>) {
     const relations = table.columns.filter((c) => c.type === 'relation')
@@ -224,25 +225,25 @@ class RollupColumn extends ColumnType<RollupConfig> {
     const fns = tcol ? allowedAggs(effectiveType(tcol, tables)).filter((f) => f !== 'hide') : []
     return (
       <>
-        <Field label="Über Relation">
+        <Field label={t('Über Relation')}>
           <select value={config.rel} onChange={(e) => set({ rel: e.target.value, col: '' })}>
-            <option value="">Relation wählen …</option>
+            <option value="">{t('Relation wählen …')}</option>
             {relations.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
         </Field>
-        <Field label="Spalte der verknüpften Zeilen">
+        <Field label={t('Spalte der verknüpften Zeilen')}>
           <select value={config.col} disabled={!target} onChange={(e) => set({ col: e.target.value })}>
-            <option value="">Spalte wählen …</option>
+            <option value="">{t('Spalte wählen …')}</option>
             {targetCols.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
         </Field>
-        <Field label="Zusammenfassen als">
+        <Field label={t('Zusammenfassen als')}>
           <select value={config.fn} disabled={!tcol} onChange={(e) => set({ fn: e.target.value as AggFn })}>
             {fns.map((f) => <option key={f} value={f}>{aggLabel(tcol!.type, f)}</option>)}
           </select>
         </Field>
         {config.fn === 'concat' && (
-          <Field label="Trennzeichen">
+          <Field label={t('Trennzeichen')}>
             <input value={config.sep} maxLength={12} onChange={(e) => set({ sep: e.target.value })} />
           </Field>
         )}
@@ -255,7 +256,7 @@ class RollupColumn extends ColumnType<RollupConfig> {
 export interface FormulaConfig { expr: string; decimals: number; unit: string }
 class FormulaColumn extends ColumnType<FormulaConfig> {
   readonly type = 'formula'
-  readonly label = 'Formel'
+  get label() { return t('Formel') }
   readonly defaults: FormulaConfig = { expr: '', decimals: -1, unit: '' }
   renderConfig(ctx: ConfigContext<FormulaConfig>) { return <FormulaEditor {...ctx} /> }
 }
@@ -264,7 +265,7 @@ class FormulaColumn extends ColumnType<FormulaConfig> {
 export interface TemplateConfig { tpl: string }
 class TemplateColumn extends ColumnType<TemplateConfig> {
   readonly type = 'template'
-  readonly label = 'Text mit Platzhaltern'
+  get label() { return t('Text mit Platzhaltern') }
   readonly defaults: TemplateConfig = { tpl: '' }
   renderConfig(ctx: ConfigContext<TemplateConfig>) { return <TemplateEditor {...ctx} /> }
 }
@@ -273,16 +274,16 @@ class TemplateColumn extends ColumnType<TemplateConfig> {
 export interface GeoConfig { format: GeoFormat }
 class GeoColumn extends ColumnType<GeoConfig> {
   readonly type = 'geo'
-  readonly label = 'Geokoordinate'
+  get label() { return t('Geokoordinate') }
   readonly defaults: GeoConfig = { format: 'map' }
   renderConfig({ config, set }: ConfigContext<GeoConfig>) {
     const ex = GEO_FORMATS.find((f) => f.id === config.format)?.example
     return (
-      <Field label="Darstellung">
+      <Field label={t('Darstellung')}>
         <select value={config.format} onChange={(e) => set({ format: e.target.value as GeoFormat })}>
           {GEO_FORMATS.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
         </select>
-        <small className="hint">{ex ? `Beispiel: ${ex}` : 'Eine kleine Karte um die Position. Ein Klick öffnet die große Karte.'} Gespeichert wird immer einheitlich (WGS84); im Dialog kann man jedes Format eingeben.</small>
+        <small className="hint">{ex ? t('Beispiel: {ex}', { ex }) : t('Eine kleine Karte um die Position. Ein Klick öffnet die große Karte.')} {t('Gespeichert wird immer einheitlich (WGS84); im Dialog kann man jedes Format eingeben.')}</small>
       </Field>
     )
   }
@@ -292,10 +293,10 @@ class GeoColumn extends ColumnType<GeoConfig> {
 export type AutonumberConfig = Record<string, never>
 class AutonumberColumn extends ColumnType<AutonumberConfig> {
   readonly type = 'autonumber'
-  readonly label = 'Aufsteigende Zahl'
+  get label() { return t('Aufsteigende Zahl') }
   readonly defaults: AutonumberConfig = {}
   renderConfig() {
-    return <p className="hint">Nummeriert die Zeilen in der Reihenfolge ihres Anlegens und lässt sich nicht bearbeiten. Legen zwei Personen gleichzeitig eine Zeile an, entscheidet erst das Zusammenführen über die Reihenfolge: die Nummer kann sich dann ändern. Löscht man eine Zeile, rücken die folgenden nach.</p>
+    return <p className="hint">{t('Nummeriert die Zeilen in der Reihenfolge ihres Anlegens und lässt sich nicht bearbeiten. Legen zwei Personen gleichzeitig eine Zeile an, entscheidet erst das Zusammenführen über die Reihenfolge: die Nummer kann sich dann ändern. Löscht man eine Zeile, rücken die folgenden nach.')}</p>
   }
 }
 
@@ -303,19 +304,19 @@ class AutonumberColumn extends ColumnType<AutonumberConfig> {
 export interface StampConfig { kind: 'created' | 'modified'; by: boolean }
 class StampColumn extends ColumnType<StampConfig> {
   readonly type = 'stamp'
-  readonly label = 'Zeitstempel'
+  get label() { return t('Zeitstempel') }
   readonly defaults: StampConfig = { kind: 'created', by: true }
   renderConfig({ config, set }: ConfigContext<StampConfig>) {
     return (
       <>
-        <Field label="Zeitpunkt">
+        <Field label={t('Zeitpunkt')}>
           <select value={config.kind} onChange={(e) => set({ kind: e.target.value as StampConfig['kind'] })}>
-            <option value="created">Erstellt</option>
-            <option value="modified">Zuletzt geändert</option>
+            <option value="created">{t('Erstellt')}</option>
+            <option value="modified">{t('Zuletzt geändert')}</option>
           </select>
         </Field>
-        <Check checked={config.by} onChange={(by) => set({ by })}>Name der Person anzeigen</Check>
-        <p className="hint">Wird automatisch eingetragen und lässt sich nicht bearbeiten. Zeilen, die es schon vor dieser Spalte gab, bleiben leer, „Zuletzt geändert“ füllt sich mit der nächsten Änderung. Verknüpfungen und Dateien zählen dabei nicht als Änderung der Zeile.</p>
+        <Check checked={config.by} onChange={(by) => set({ by })}>{t('Name der Person anzeigen')}</Check>
+        <p className="hint">{t('Wird automatisch eingetragen und lässt sich nicht bearbeiten. Zeilen, die es schon vor dieser Spalte gab, bleiben leer, „Zuletzt geändert“ füllt sich mit der nächsten Änderung. Verknüpfungen und Dateien zählen dabei nicht als Änderung der Zeile.')}</p>
       </>
     )
   }
@@ -325,13 +326,13 @@ class StampColumn extends ColumnType<StampConfig> {
 export interface PersonConfig { multi: boolean }
 class PersonColumn extends ColumnType<PersonConfig> {
   readonly type = 'person'
-  readonly label = 'Person'
+  get label() { return t('Person') }
   readonly defaults: PersonConfig = { multi: false }
   renderConfig({ config, set }: ConfigContext<PersonConfig>) {
     return (
       <>
-        <Check checked={config.multi} onChange={(multi) => set({ multi })}>Mehrere Personen pro Zeile</Check>
-        <p className="hint">Zur Auswahl stehen die Mitglieder, die das Dokument geöffnet haben (Name und Avatar aus dem Konto).</p>
+        <Check checked={config.multi} onChange={(multi) => set({ multi })}>{t('Mehrere Personen pro Zeile')}</Check>
+        <p className="hint">{t('Zur Auswahl stehen die Mitglieder, die das Dokument geöffnet haben (Name und Avatar aus dem Konto).')}</p>
       </>
     )
   }
@@ -341,15 +342,15 @@ class PersonColumn extends ColumnType<PersonConfig> {
 export interface LinkConfig { kind: LinkKind }
 class LinkColumn extends ColumnType<LinkConfig> {
   readonly type = 'link'
-  readonly label = 'Link'
+  get label() { return t('Link') }
   readonly defaults: LinkConfig = { kind: 'url' }
   renderConfig({ config, set }: ConfigContext<LinkConfig>) {
     return (
-      <Field label="Art">
+      <Field label={t('Art')}>
         <select value={config.kind} onChange={(e) => set({ kind: e.target.value as LinkKind })}>
-          <option value="url">Web-Adresse</option>
-          <option value="email">E-Mail-Adresse</option>
-          <option value="phone">Telefonnummer</option>
+          <option value="url">{t('Web-Adresse')}</option>
+          <option value="email">{t('E-Mail-Adresse')}</option>
+          <option value="phone">{t('Telefonnummer')}</option>
         </select>
       </Field>
     )
@@ -360,16 +361,16 @@ class LinkColumn extends ColumnType<LinkConfig> {
 export interface DurationConfig { format: DurationFormat }
 class DurationColumn extends ColumnType<DurationConfig> {
   readonly type = 'duration'
-  readonly label = 'Dauer'
+  get label() { return t('Dauer') }
   readonly defaults: DurationConfig = { format: 'hm' }
   renderConfig({ config, set }: ConfigContext<DurationConfig>) {
     return (
-      <Field label="Anzeige">
+      <Field label={t('Anzeige')}>
         <select value={config.format} onChange={(e) => set({ format: e.target.value as DurationFormat })}>
-          <option value="hm">Stunden:Minuten (1:30)</option>
-          <option value="hms">Stunden:Minuten:Sekunden (1:30:00)</option>
+          <option value="hm">{t('Stunden:Minuten (1:30)')}</option>
+          <option value="hms">{t('Stunden:Minuten:Sekunden (1:30:00)')}</option>
         </select>
-        <small className="hint">Eingabe zum Beispiel „1:30“, „90m“, „1h 30m“ oder „1,5 h“. Eine nackte Zahl zählt als Minuten. In Formeln zählt die Dauer in Sekunden.</small>
+        <small className="hint">{t('Eingabe zum Beispiel „1:30“, „90m“, „1h 30m“ oder „1,5 h“. Eine nackte Zahl zählt als Minuten. In Formeln zählt die Dauer in Sekunden.')}</small>
       </Field>
     )
   }

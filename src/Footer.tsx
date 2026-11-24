@@ -4,6 +4,7 @@ import { setColumnFooter, type ColumnInfo, type TableInfo } from './model'
 import { allowedFooters, footerLabel, type FooterFn } from './aggregate'
 import { footerText, type Cell } from './cells'
 import { effectiveType } from './columnTypes'
+import { t } from './i18n'
 
 /** Eine Zelle der Summenzeile: zeigt die gewählte Auswertung der Spalte, ein Klick öffnet die Auswahl. */
 export function FooterCell(props: { doc: Y.Doc; tableId: string; col: ColumnInfo; tables: TableInfo[]; cells: Map<string, Cell> | undefined }) {
@@ -25,13 +26,13 @@ export function FooterCell(props: { doc: Y.Doc; tableId: string; col: ColumnInfo
   return (
     <div className={`c foot-cell${open ? ' open' : ''}${type === 'number' ? ' num' : ''}`}>
       <button type="button" className={`foot-btn${fn ? ' set' : ''}`} aria-haspopup="menu" aria-expanded={open}
-        title={fn ? `${footerLabel(type, fn)} – klicken zum Ändern` : 'Auswertung unter der Spalte wählen'}
+        title={fn ? t('{label} – klicken zum Ändern', { label: footerLabel(type, fn) }) : t('Auswertung unter der Spalte wählen')}
         onClick={() => setOpen((o) => !o)}>
-        {fn ? <><strong>{value || '–'}</strong>{(fn !== 'sum' || type === 'checkbox') && <small>{footerLabel(type, fn)}</small>}</> : <span className="foot-hint">Berechnen</span>}
+        {fn ? <><strong>{value || '–'}</strong>{(fn !== 'sum' || type === 'checkbox') && <small>{footerLabel(type, fn)}</small>}</> : <span className="foot-hint">{t('Berechnen')}</span>}
       </button>
       {open && (
         <div className="foot-popup" role="menu">
-          <button type="button" role="menuitem" className={!fn ? 'on' : ''} onClick={() => choose(undefined)}>Keine</button>
+          <button type="button" role="menuitem" className={!fn ? 'on' : ''} onClick={() => choose(undefined)}>{t('Keine')}</button>
           {options.map((f) => (
             <button key={f} type="button" role="menuitem" className={f === fn ? 'on' : ''} onClick={() => choose(f)}>{footerLabel(type, f)}</button>
           ))}

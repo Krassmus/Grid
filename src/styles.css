@@ -837,3 +837,4 @@ button.invite-row:hover .plus-avatar { border-color: #0a84ff; color: #0a84ff; }
 .asof-play, .asof-close { flex: none; width: 46px; height: 46px; padding: 0; display: flex; align-items: center; justify-content: center; border-radius: 8px; font-size: 18px; line-height: 1; }
 .asof-close { font-size: 22px; }
 .asof-axis { display: flex; justify-content: space-between; color: var(--c-666677); font-size: 11px; margin-top: 2px; }
+.doclist footer span:nth-of-type(2) { margin-left: auto; }

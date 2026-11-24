@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { t } from './i18n'
 
 /** Symbole für die Reiter: Linienzeichnungen auf 24×24, die Farbe kommt vom Text (currentColor). */
 const ICONS: Record<string, { label: string; draw: ReactNode }> = {
@@ -46,17 +47,17 @@ export function IconPicker(props: { value: string; kind: 'table' | 'view' | 'map
   const custom = props.value && !ICONS[props.value] ? props.value : ''
   return (
     <div className="icon-picker">
-      <span className="icon-picker-label">Symbol</span>
-      <div className="icon-grid" role="radiogroup" aria-label="Symbol">
-        <button type="button" role="radio" aria-checked={!props.value} className={!props.value ? 'on' : ''} title="Standard" onClick={() => props.onChange('')}>
+      <span className="icon-picker-label">{t('Symbol')}</span>
+      <div className="icon-grid" role="radiogroup" aria-label={t('Symbol')}>
+        <button type="button" role="radio" aria-checked={!props.value} className={!props.value ? 'on' : ''} title={t('Standard')} onClick={() => props.onChange('')}>
           <SheetIcon kind={props.kind} />
         </button>
         {ICON_KEYS.filter((k) => k !== DEFAULT_ICON[props.kind]).map((k) => (
-          <button key={k} type="button" role="radio" aria-checked={props.value === k} className={props.value === k ? 'on' : ''} title={ICONS[k].label} onClick={() => props.onChange(k)}>
+          <button key={k} type="button" role="radio" aria-checked={props.value === k} className={props.value === k ? 'on' : ''} title={t(ICONS[k].label)} onClick={() => props.onChange(k)}>
             <Svg name={k} />
           </button>
         ))}
-        <input className={custom ? 'on' : ''} value={custom} placeholder="🚒" maxLength={4} aria-label="Eigenes Zeichen oder Emoji" title="Eigenes Zeichen oder Emoji"
+        <input className={custom ? 'on' : ''} value={custom} placeholder="🚒" maxLength={4} aria-label={t('Eigenes Zeichen oder Emoji')} title={t('Eigenes Zeichen oder Emoji')}
           onChange={(e) => props.onChange([...e.target.value.trim()].slice(0, 2).join(''))} />
       </div>
     </div>
