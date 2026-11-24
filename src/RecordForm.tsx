@@ -149,6 +149,12 @@ export function RecordForm(props: {
   submitLabel?: string
   /** Nur ansehen: Felder gesperrt, kein Speichern. */
   readOnly?: boolean
+  /** Nur diese Spalten zeigen (z. B. beim Schreiben über eine abgeleitete Tabelle). */
+  only?: (c: ColumnInfo) => boolean
+  /** Erlaubte Auswahlwerte einer Auswahlspalte (`null`: alle). */
+  limitOptions?: (c: ColumnInfo) => string[] | null
+  /** Prüft die Werte vor dem Speichern; liefert eine Meldung, wenn sie nicht gelten dürfen. */
+  validate?: (values: Record<string, CellValue>) => string | null
   /** Beim Bearbeiten: Dateien und Verknüpfungen, die die Zeile schon hat. */
   existing?: ExistingRecord
   /** Feld für eine Relationsspalte (Auswahl der Zielzeilen); fehlt es, werden Relationen im Formular ausgelassen. */
@@ -156,7 +162,7 @@ export function RecordForm(props: {
   onSubmit: (values: Record<string, CellValue>, extras: RecordExtras) => void | Promise<void>
   onClose: () => void
 }) {
-  const cols = formColumns(props.table).filter((c) => (c.type !== 'relation' || props.relationField) && (c.type !== 'person' || props.doc))
+  const cols = formColumns(props.table).filter((c) => (c.type !== 'relation' || props.relationField) && (c.type !== 'person' || props.doc) && (!props.only || props.only(c)))
   const [files, setFiles] = useState<Record<string, File[]>>({})
   const [rels, setRels] = useState<Record<string, string[]>>(() => ({ ...(props.existing?.relations ?? {}) }))
   const [removedFiles, setRemovedFiles] = useState<Record<string, string[]>>({})
@@ -188,6 +194,8 @@ export function RecordForm(props: {
       const r = t ? parseGeo(t, GEO.config(c).format === 'lonlat' ? 'lonlat' : 'latlon') : null
       out[c.id] = r && r.ok ? encodeGeo(r.point) : null
     }
+    const bad = props.validate?.(out)
+    if (bad) { setFailure(bad); return }
     setBusy(true)
     setFailure(null)
     try { await props.onSubmit(out, { files, relations: rels, removedFiles }) } catch (e) {
@@ -196,6 +204,7 @@ export function RecordForm(props: {
     }
   }
 
+  const limit = (c: ColumnInfo) => props.limitOptions?.(c) ?? null
   const field = (c: ColumnInfo, first: boolean): ReactNode => {
     const v = values[c.id]
     switch (c.type) {
@@ -221,7 +230,7 @@ export function RecordForm(props: {
         return (
           <select value={typeof v === 'string' ? v : ''} onChange={(e) => set(c.id, e.target.value || null)}>
             <option value="">–</option>
-            {(c.options ?? []).map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+            {(c.options ?? []).filter((o) => !limit(c) || limit(c)!.includes(o.id) || o.id === v).map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
           </select>
         )
       case 'link': {

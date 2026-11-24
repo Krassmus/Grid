@@ -62,7 +62,7 @@ export function aggOf(def: ViewDef, col: ColumnInfo, tables: TableInfo[]): ViewA
 
 // ---------- Bedingungen ----------
 
-function matches(c: Cell, type: ColType, op: FilterOp, value: string): boolean {
+export function matches(c: Cell, type: ColType, op: FilterOp, value: string): boolean {
   const v = value.trim().toLowerCase()
   const text = c.text.toLowerCase()
   switch (op) {
@@ -97,6 +97,16 @@ export interface ViewCell { text: string; key: Key }
 export interface ViewRow { id: string; cells: Record<string, ViewCell> }
 export interface ViewResult { missing: boolean; sourceName: string; columns: ViewColumn[]; rows: ViewRow[]; matched: number }
 
+/** Bedingungen, die wirken: unvollständige (ohne Wert) und solche auf gelöschte Spalten werden ignoriert. */
+export function activeFilters(def: ViewDef, table: TableInfo, tables: TableInfo[]) {
+  return def.filters.flatMap((f) => {
+    const col = table.columns.find((c) => c.id === f.col)
+    const type = col && effectiveType(col, tables)
+    if (!col || !type || !OPS_BY_TYPE[type].includes(f.op) || (opNeedsValue(f.op) && !f.value.trim())) return []
+    return [{ col, type, op: f.op, value: f.value }]
+  })
+}
+
 export function computeView(doc: Y.Doc, def: ViewDef): ViewResult {
   const tables = readTables(doc)
   const table = tables.find((t) => t.id === def.source)
@@ -105,13 +115,7 @@ export function computeView(doc: Y.Doc, def: ViewDef): ViewResult {
   const ctx = newCtx()
   for (const c of table.columns) cells.set(c.id, columnCells(doc, tables, table, c, ctx))
 
-  // Bedingungen: unvollständige (ohne Wert) und solche auf gelöschte Spalten werden ignoriert
-  const active = def.filters.flatMap((f) => {
-    const col = table.columns.find((c) => c.id === f.col)
-    const type = col && effectiveType(col, tables)
-    if (!col || !type || !OPS_BY_TYPE[type].includes(f.op) || (opNeedsValue(f.op) && !f.value.trim())) return []
-    return [{ col, type, op: f.op, value: f.value }]
-  })
+  const active = activeFilters(def, table, tables)
   const test = (rid: string) => {
     if (active.length === 0) return true
     const hit = (f: (typeof active)[number]) => matches(cells.get(f.col.id)!.get(rid)!, f.type, f.op, f.value)

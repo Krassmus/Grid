@@ -23,7 +23,7 @@ export interface MembersControl {
   changeGroups: (changes: GroupChange[]) => Promise<void>
   invite: () => Promise<string>
   /** Tabellen, abgeleitete Tabellen und Karten des Dokuments (für die Rechte) */
-  objects?: { id: string; name: string; kind: 'table' | 'view' | 'map' }[]
+  objects?: { id: string; name: string; kind: 'table' | 'view' | 'map'; /** Abgeleitete Tabelle: Grund, warum Schreiben nicht möglich ist (fehlt, wenn es geht) */ blocked?: string }[]
 }
 
 const message = (e: unknown) => String((e as Error).message ?? e)

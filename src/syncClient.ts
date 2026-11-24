@@ -426,7 +426,16 @@ export class SyncConnection {
     if (diff.length > 2) await this.sendEnc(diff)
   }
 
-  private async sendEnc(update: Uint8Array) {
+  /** Einträge gehen in der Reihenfolge der Änderungen hinaus: Unterschreiben und Verschlüsseln sind asynchron und würden sonst überholen,
+   * und ein Empfänger, der Rechte prüft, kann eine Änderung nur beurteilen, wenn die vorherigen desselben Autors schon da sind. */
+  private sendChain: Promise<unknown> = Promise.resolve()
+  private sendEnc(update: Uint8Array): Promise<void> {
+    const p = this.sendChain.then(() => this.putEnc(update))
+    this.sendChain = p.catch(() => undefined)
+    return p
+  }
+
+  private async putEnc(update: Uint8Array) {
     const keys = this.cfg.keys!
     const epoch = keys.top
     const key = keys.key(epoch)

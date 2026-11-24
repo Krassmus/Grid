@@ -9,6 +9,12 @@ import * as Y from 'yjs'
 export interface Scope {
   /** Tabellen, an deren Zeilen, Verknüpfungen oder Dateien etwas geändert wird */
   tables: Set<string>
+  /** Je Tabelle die Zeilen, an deren Zellen etwas geändert, die angelegt oder gelöscht werden */
+  rows: Map<string, Set<string>>
+  /** Tabellen, an deren Zeilenreihenfolge etwas geändert wird (Anlegen und Löschen eingeschlossen) */
+  order: Set<string>
+  /** Tabellen, an deren Verknüpfungen oder Dateien etwas geändert wird */
+  extras: Set<string>
   /** Karten, an deren Objekten (Punkte, Strecken, Gebiete) etwas geändert wird */
   maps: Set<string>
   /** Änderungen an Tabellen, Spalten, Relationen, Sichten, Karten selbst, Reihenfolge, Einstellungen: nur Admins */
@@ -34,7 +40,7 @@ function typePath(type: Y.AbstractType<any>): Seg[] | null {
 }
 
 export function scopeOf(doc: Y.Doc, update: Uint8Array): Scope {
-  const scope: Scope = { tables: new Set(), maps: new Set(), structure: false, unknown: false }
+  const scope: Scope = { tables: new Set(), rows: new Map(), order: new Set(), extras: new Set(), maps: new Set(), structure: false, unknown: false }
   const { structs, ds } = Y.decodeUpdate(update)
   const store = doc.store
 
@@ -91,13 +97,20 @@ export function scopeOf(doc: Y.Doc, update: Uint8Array): Scope {
       case 'tables': {
         const tid = p[1]
         if (p.length <= 2) { scope.structure = true; return }
-        if ((p[2] === 'rows' || p[2] === 'rowOrder') && p.length > 3) { scope.tables.add(tid); return }
+        if (p[2] === 'rows' && p.length > 3) {
+          scope.tables.add(tid)
+          const set = scope.rows.get(tid) ?? new Set<string>()
+          set.add(String(p[3]))
+          scope.rows.set(tid, set)
+          return
+        }
+        if (p[2] === 'rowOrder' && p.length > 3) { scope.tables.add(tid); scope.order.add(tid); return }
         scope.structure = true
         return
       }
       case 'links': case 'files': {
         const tid = String(p[1]).split('|')[0]
-        if (p.length === 2 && TABLE_ID.test(tid)) scope.tables.add(tid); else scope.structure = true
+        if (p.length === 2 && TABLE_ID.test(tid)) { scope.tables.add(tid); scope.extras.add(tid) } else scope.structure = true
         return
       }
       case 'maps': {

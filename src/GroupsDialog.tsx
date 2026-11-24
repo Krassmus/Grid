@@ -71,13 +71,13 @@ export function GroupsDialog(props: { control: MembersControl; onClose: () => vo
                 <tbody>
                   {objects.map((o) => (
                     <tr key={o.id}>
-                      <td><strong>{o.name}</strong> <small>{kindLabel(o.kind)}</small></td>
+                      <td><strong>{o.name}</strong> <small>{kindLabel(o.kind)}</small>{o.kind === 'view' && o.blocked && <small className="hint" style={{ display: 'block' }}>{o.blocked}</small>}</td>
                       <td>
                         <select value={levelOf(id, o.id)} disabled={busy} aria-label={t('Zugriff auf {name}', { name: o.name })}
                           onChange={(e) => void act([{ type: 'grant', group: id, object: o.id, level: e.target.value as Level }])}>
                           <option value="none">{t('Kein Zugriff')}</option>
                           <option value="read">{t('Lesen')}</option>
-                          {o.kind !== 'view' && <option value="write">{t('Schreiben')}</option>}
+                          {(o.kind !== 'view' || !o.blocked) && <option value="write">{t('Schreiben')}</option>}
                         </select>
                       </td>
                     </tr>

@@ -154,4 +154,70 @@ describe.skipIf(!have)('Rechte mit echtem Server und echten Clients', () => {
     expect(D.cell(t2, row2, col2)).toBe('ben-vorher')
     expect(D.tables()).toEqual(A.tables()) // dieselben Daten wie beim Admin
   }, 120000)
+
+  it('Schreiben über eine abgeleitete Tabelle: nur Zeilen, die der Sicht genügen', async () => {
+    const A = await client('Anna2'), B = await client('Ben2')
+    await A.open()
+    const docId = A.session.meta.docId
+    const m = A.model
+    const t = m.addTable(A.doc, 'Einheiten', { firstRow: false })
+    const name = m.readTables(A.doc).find((x: any) => x.id === t).columns[0].id
+    const typ = m.addColumn(A.doc, t, 'Typ', 'select', undefined, ['X', 'Y', 'Z'])
+    const opt = (n: string) => m.readTables(A.doc).find((x: any) => x.id === t).columns.find((c: any) => c.id === typ).options.find((o: any) => o.name === n).id
+    const [X, Y, Z] = [opt('X'), opt('Y'), opt('Z')]
+    const view = m.addView(A.doc, 'X oder Y', { ...m.emptyViewDef(t), match: 'any', filters: [{ col: typ, op: 'eq', value: X }, { col: typ, op: 'eq', value: Y }] })
+    const rx = m.createRecord(A.doc, t, { [name]: 'x1', [typ]: X }), rz = m.createRecord(A.doc, t, { [name]: 'z1', [typ]: Z })
+
+    await B.knock(docId)
+    let req: any
+    for (let i = 0; i < 100 && !req; i++) { await A.session.refreshMembers(); req = A.session.members?.requests.find((r: any) => r.account === B.me.id); if (!req) await quiet(50) }
+    await A.session.accept(req)
+    await B.open(docId)
+    await until('Tabelle bei Ben', () => Object.keys(B.tables()).length === 1 && B.cell(t, rz, name) === 'z1')
+
+    // Ben darf nur über die Sicht schreiben, nicht an der Tabelle
+    const G = crypto.randomUUID()
+    await A.session.changeGroups([
+      { type: 'group', group: G, name: 'Sicht' },
+      { type: 'join-group', group: G, account: B.me.id },
+      { type: 'grant', group: G, object: view, level: 'write' },
+    ])
+    await until('Gruppe bei Ben', () => B.session.members?.state?.groups.size === 1)
+
+    // Erlaubt: neue Zeile vom Typ Y, Änderung einer X-Zeile (auch Typ X→Y)
+    const ok1 = m.createRecord(B.doc, t, { [name]: 'ben-y', [typ]: Y })
+    m.setCell(B.doc, t, rx, name, 'x1-geaendert')
+    m.setCell(B.doc, t, rx, typ, Y)
+    await until('erlaubt bei Anna', () => A.cell(t, ok1, name) === 'ben-y' && A.cell(t, rx, name) === 'x1-geaendert' && A.cell(t, rx, typ) === Y).catch((e) => { throw new Error(e.message + ' ' + JSON.stringify({ rej: A.session.rejections, vals: [A.cell(t, ok1, name), A.cell(t, rx, name), A.cell(t, rx, typ)] })) })
+
+    // Nicht erlaubt: Zeile vom Typ Z anlegen, Z-Zeile ändern, X-Zeile aus der Sicht herausnehmen, leere Zeile anlegen, Z-Zeile löschen
+    const bad = A.session.rejected
+    const ok2 = m.createRecord(B.doc, t, { [name]: 'ben-z', [typ]: Z })
+    m.setCell(B.doc, t, rz, name, 'z1-geaendert')
+    m.setCell(B.doc, t, rx, typ, Z)
+    const empty = m.addRow(B.doc, t)
+    m.deleteRow(B.doc, t, rz)
+    await until('Ablehnungen bei Anna', () => A.session.rejected >= bad + 5)
+    await quiet(300)
+    expect(A.cell(t, ok2, name)).toBeUndefined()
+    expect(A.cell(t, rz, name)).toBe('z1')
+    expect(A.cell(t, rx, typ)).toBe(Y)
+    expect(m.tablesOf(A.doc).get(t).get('rows').has(empty)).toBe(false)
+    expect(m.tablesOf(A.doc).get(t).get('rows').has(rz)).toBe(true)
+
+    // Erlaubt: eigene Zeile löschen
+    m.deleteRow(B.doc, t, ok1)
+    await until('Löschen bei Anna', () => !m.tablesOf(A.doc).get(t).get('rows').has(ok1))
+
+    // Ein später Beigetretener kommt zum selben Stand
+    const D = await client('Dora2')
+    await D.knock(docId)
+    req = undefined
+    for (let i = 0; i < 100 && !req; i++) { await A.session.refreshMembers(); req = A.session.members?.requests.find((r: any) => r.account === D.me.id); if (!req) await quiet(50) }
+    await A.session.accept(req)
+    await D.open(docId)
+    await until('Dora hat den Stand', () => Object.keys(D.tables()).length === 1 && D.cell(t, rz, name) !== undefined, 20000)
+    await quiet(500)
+    expect(D.tables()).toEqual(A.tables())
+  }, 120000)
 })

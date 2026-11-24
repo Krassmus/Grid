@@ -21,6 +21,7 @@ import { beginTileDrag, registerDropTarget, type DragPayload } from './tileDrag'
 import { computeView } from './viewEngine'
 import { FooterCell } from './Footer'
 import { GeoCell } from './GeoCell'
+import { writeBlocker } from './viewWrite'
 import { RecordForm, commitRecord, firstTextColumn, formColumns, updateRecord, type ExistingRecord } from './RecordForm'
 import { ReprContext, TileContent, tileClasses, useReprs } from './ReprTile'
 import { initials, reprMap, type Repr } from './repr'
@@ -1092,7 +1093,7 @@ export function ClientPane(props: {
 
       {!synced && <p className="hint">{t('Lade lokale Daten …')}</p>}
       {synced && !tab && <p className="hint">{rights.active && !rights.admin ? t('Noch keine Rechte: Ein Admin muss dir Zugriff auf Tabellen geben.') : t('Noch keine Tabelle. Lege eine an.')}</p>}
-      {view && <ViewGrid key={view.id} doc={doc} view={view} />}
+      {view && <ViewGrid key={view.id} doc={doc} view={view} tables={tables} writable={!props.asOf && rights.access(view.id) === 'write'} />}
       {mapTab && <MapView key={mapTab.id} doc={doc} map={mapTab} tables={tables} onOpenRecord={(tableId, rowId) => setMapRecord({ tableId, rowId })} />}
 
       {table && (
@@ -1224,7 +1225,10 @@ export function ClientPane(props: {
         </div>
       )}
 
-      {syncOpen && props.sync && <SyncDialog control={{ ...props.sync, objects: tabs.map((x) => ({ id: x.id, name: x.name, kind: x.kind })) }} onClose={() => setSyncOpen(false)} />}
+      {syncOpen && props.sync && <SyncDialog control={{ ...props.sync, objects: tabs.map((x) => {
+        const v = x.kind === 'view' ? views.find((y) => y.id === x.id) : undefined
+        return { id: x.id, name: x.name, kind: x.kind, blocked: v ? writeBlocker(v.def, tables.find((y) => y.id === v.def.source), tables) ?? undefined : undefined }
+      }) }} onClose={() => setSyncOpen(false)} />}
 
       {editing && (() => {
         const col = editing.kind === 'column' ? table?.columns.find((c) => c.id === editing.id) : undefined

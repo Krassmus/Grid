@@ -220,6 +220,23 @@ function plainCells(doc: Y.Doc, tables: TableInfo[], table: TableInfo, col: Colu
   return out
 }
 
+/** Spaltentypen, deren Zelle sich allein aus dem gespeicherten Wert ergibt (ohne Dokument, Verknüpfungen oder andere Zeilen). */
+export const SIMPLE_TYPES: readonly string[] = ['text', 'number', 'date', 'select', 'checkbox']
+
+/** Zelle aus dem gespeicherten Wert, genau wie in `plainCells` (für Prüfungen einzelner Zeilen, z. B. Bedingungen abgeleiteter Tabellen). */
+export function simpleCell(col: ColumnInfo, raw: unknown): Cell {
+  let text = ''
+  let key: Key = null
+  switch (col.type) {
+    case 'number': if (typeof raw === 'number') { text = fmtNumber(raw, col); key = raw } break
+    case 'date': { const d = DATE.config(col); if (typeof raw === 'string' && raw) { text = formatDate(raw, d.style, d.time); key = raw } break }
+    case 'select': { const i = (col.options ?? []).findIndex((o) => o.id === raw); if (i >= 0) { text = col.options![i].name; key = i } break }
+    case 'checkbox': text = raw ? '✓' : ''; key = raw ? 1 : 0; break
+    default: if (typeof raw === 'string' && raw) { text = col.type === 'text' && TEXT.config(col).mode === 'rich' ? plainText(raw).trim() : raw; key = text || null }
+  }
+  return { raw, text, key }
+}
+
 // ---------- Formeln ----------
 
 class FErr { constructor(readonly code: string, readonly msg: string) {} }

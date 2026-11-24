@@ -913,4 +913,13 @@ export const en: Record<string, string> = {
   "Nur Admins ändern die Struktur": "Only admins change the structure",
   "Kein Schreibrecht an der Tabelle": "No write access to the table",
   "Kein Schreibrecht an der Karte": "No write access to the map",
+  "Die Zeile würde den Bedingungen der abgeleiteten Tabelle nicht genügen.": "The row would no longer meet the conditions of the derived table.",
+  "Datensatz bearbeiten": "Edit record",
+  "Die Zeile gehört nicht zu den Zeilen dieser abgeleiteten Tabelle": "The row is not part of this derived table",
+  "Die Zeile würde den Bedingungen der abgeleiteten Tabelle nicht mehr genügen": "The row would no longer meet the conditions of the derived table",
+  "Ausgeblendete Spalte „{name}“ geändert": "Hidden column “{name}” changed",
+  "Reihenfolge der Zeilen geändert": "Row order changed",
+  "Die Quelltabelle fehlt.": "The source table is missing.",
+  "Gruppierte abgeleitete Tabellen sind nicht schreibbar.": "Grouped derived tables cannot be written to.",
+  "Die Bedingung auf „{name}“ bezieht sich auf eine Spalte, deren Wert nicht in der Zeile selbst steht.": "The condition on “{name}” refers to a column whose value is not stored in the row itself."
 }

@@ -15,7 +15,7 @@ Stand: Phase 1 (Modell, Gruppen-Dialog, Anzeige) und Phase 2 (signierte Änderun
 ## Offene Punkte (mit Vorschlag)
 
 - **Standard:** Ein neues Dokument hat nur die Admins. Wer zugelassen wird, aber in keiner Gruppe ist, sieht nichts (nur den Hinweis „Noch keine Rechte“). *Vorschlag:* Beim Zulassen fragt Grid, in welche Gruppen die Person soll. Zusätzlich kann ein Admin eine Gruppe „Alle Mitglieder“ anlegen (gewöhnliche Gruppe, der neue Mitglieder automatisch zugeordnet werden).
-- **Abgeleitete Tabellen:** Sie sind immer nur lesbar. Das Leserecht an einer abgeleiteten Tabelle gilt unabhängig von der Quelle; der Admin entscheidet also bewusst, ob die Auswertung sichtbar sein soll, auch wenn die Quelltabelle verborgen bleibt. Zeigt die Gruppe auf eine Quelle ohne Leserecht, weist Grid beim Vergeben darauf hin.
+- **Abgeleitete Tabellen:** Das Leserecht an einer abgeleiteten Tabelle gilt unabhängig von der Quelle; der Admin entscheidet also bewusst, ob die Auswertung sichtbar sein soll, auch wenn die Quelltabelle verborgen bleibt. Zeigt die Gruppe auf eine Quelle ohne Leserecht, weist Grid beim Vergeben darauf hin. **Schreiben** ist möglich, wenn die Sicht dafür taugt (Abschnitt „Schreiben über Sichten“).
 - **Admin entfernen/herabstufen:** Wie bisher bleibt mindestens ein Admin. Admins gehören keiner Gruppe an.
 
 ## Datenmodell (Admin-Protokoll)
@@ -74,3 +74,17 @@ Gilt nur für **verschlüsselte** Dokumente (alle neuen Cloud-Dokumente). In unv
 - Lesen ist Sichtbarkeit, nicht Geheimnis (siehe oben).
 - Unverschlüsselte Dokumente (Firmenserver mit `--allow-plaintext`) könnten später zusätzlich vom Server geprüft werden; das ist nicht Teil dieses Entwurfs.
 - Rechte wirken nur, wenn alle Clients die neue Grid-Version nutzen. Ältere Clients kennen das Protokoll nicht und werden von neuen Clients zurückgewiesen, sobald ein Dokument Gruppen hat.
+
+## Schreiben über Sichten
+
+Eine Gruppe kann an einer abgeleiteten Tabelle *Schreiben* bekommen, ohne an der Quelltabelle etwas zu dürfen. Dann darf sie genau die Zeilen der Quelltabelle ändern, anlegen und löschen, die den Bedingungen der Sicht genügen.
+
+- **Wann taugt eine Sicht dafür** (`src/viewWrite.ts`, `writeBlocker`): keine Gruppierung, und alle wirksamen Bedingungen beziehen sich auf Spalten der Quelltabelle, deren Wert in der Zeile selbst steht (Text, Zahl, Datum, Auswahl, Kontrollkästchen). Bedingungen auf Relationen, Rollups, Formeln oder Vorlagen hängen von anderen Zeilen ab und lassen sich nicht verlässlich prüfen. Der Dialog „Gruppen und Rechte“ bietet *Schreiben* nur für taugliche Sichten an und nennt sonst den Grund.
+- **Regeln beim Empfang** (`src/viewJudge.ts`, aufgerufen aus `judge`): Für jede geänderte Zeile einer Tabelle ohne Schreibrecht muss eine schreibbare Sicht des Autors existieren, bei der die Zeile
+  - *geändert* wird: vorher **und** nachher den Bedingungen genügt (fremde Zeilen lassen sich weder ändern noch hereinholen, eine Zeile kann die Sicht nicht verlassen; Bedingungsspalten dürfen geändert werden, solange der neue Wert passt);
+  - *angelegt* wird: nachher genügt (die Zeile muss in einer einzigen Änderung mit ihren Werten entstehen; eine leere Zeile genügt „Typ ist X“ nicht);
+  - *gelöscht* wird: vorher genügte.
+  Ausgeblendete Spalten (Tabelleneinstellung „ausgeblendet“) bleiben unverändert, die Reihenfolge der übrigen Zeilen auch. Verknüpfungen und Dateien an der Tabelle sowie alles andere (Struktur, Karten) verlangen weiterhin das Recht an der Tabelle bzw. Admins. Zeitmarken und Autonummern schreibt Grid selbst und werden nicht geprüft.
+- **Wie der Zustand „nachher“ entsteht:** Das Update wird zur Probe auf ein Arbeitsabbild des Dokuments angewendet (`probeDoc`), das mit einem Differenz-Update auf dem Stand des echten gehalten wird; wird abgelehnt oder hat es Angenommenes, das das echte nicht hat, wird es neu aufgebaut. Alle Clients bewerten in Strom-Reihenfolge, sehen also denselben Zustand; auch ein spät Beigetretener kommt zum selben Ergebnis (Ende-zu-Ende-Test).
+- **Oberfläche:** Eine schreibbare Sicht zeigt „+ Zeile“ und ein Löschkreuz; ein Klick auf eine Zeile öffnet das Formular nur mit den Wertspalten, die die Sicht zeigt. Auswahlspalten bieten nur Werte an, die die Bedingungen auf diese Spalte zulassen (`allowedOptions`); bei „ist gleich“ unter „alle Bedingungen“ ist der Wert vorbelegt (`presetValues`); beim Speichern prüft `rowMatches` dieselben Regeln wie später der Empfang und meldet, wenn die Zeile nicht passen würde. Bei „enthält“, Zahl- oder Datumsgrenzen gibt es keine Auswahl, nur diese Meldung.
+- **Grenzen:** Lesen bleibt Sichtbarkeit. Eine Sicht, deren Definition ein Admin nachträglich unschreibbar macht, gewährt kein Schreiben mehr (die Prüfung beim Empfang prüft die Definition zum Zeitpunkt der Änderung). Rich-Text-Felder im Formular sind nur bedingt gesperrt.
