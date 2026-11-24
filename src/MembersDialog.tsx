@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Modal } from './Modal'
+import { GroupsDialog } from './GroupsDialog'
 import { Avatar } from './Avatar'
 import { fingerprint, getAccountName, getIdentity, setAccountName } from './identity'
 import { Field as ProfileField } from './SyncDialog'
@@ -7,7 +8,7 @@ import { parseInvite, type Invite } from './invite'
 import { requestJoin } from './members'
 import { AuthError, pinServer, pinnedKey } from './syncClient'
 import type { Role } from './adminLog'
-import type { JoinRequest, MembersInfo } from './members'
+import type { GroupChange, JoinRequest, MembersInfo } from './members'
 import { t } from './i18n'
 
 /** Was die Oberfläche über die Mitglieder des Dokuments wissen und tun darf. */
@@ -19,7 +20,10 @@ export interface MembersControl {
   reject: (account: string) => Promise<void>
   remove: (account: string) => Promise<void>
   changeRole: (account: string, role: Role) => Promise<void>
+  changeGroups: (changes: GroupChange[]) => Promise<void>
   invite: () => Promise<string>
+  /** Tabellen, abgeleitete Tabellen und Karten des Dokuments (für die Rechte) */
+  objects?: { id: string; name: string; kind: 'table' | 'view' | 'map' }[]
 }
 
 const message = (e: unknown) => String((e as Error).message ?? e)
@@ -36,6 +40,7 @@ export function MembersDialog(props: { control: MembersControl; onClose: () => v
   const [copied, setCopied] = useState(false)
   const [open, setOpen] = useState<string | null>(null) // Mitglied, dessen Aktionen aufgeklappt sind
   const [removing, setRemoving] = useState<string | null>(null)
+  const [groupsOpen, setGroupsOpen] = useState(false)
   useEffect(() => { void getIdentity().then((i) => setMe(i.id)).catch(() => {}) }, [])
   const admin = members?.role === 'admin'
   const act = async (f: () => Promise<void>) => {
@@ -45,6 +50,7 @@ export function MembersDialog(props: { control: MembersControl; onClose: () => v
   const list = members?.state ? [...members.state.members.entries()] : []
   const requests = admin ? members?.requests ?? [] : []
   const admins = list.filter(([, m]) => m.role === 'admin').length
+  if (groupsOpen) return <GroupsDialog control={props.control} onClose={() => setGroupsOpen(false)} />
   return (
     <Modal onClose={props.onClose}>
       <div className="dialog sync-dialog members-dialog cloud-dialog" onMouseDown={(e) => e.stopPropagation()} onKeyDown={(e) => e.key === 'Escape' && props.onClose()}>
@@ -138,6 +144,12 @@ export function MembersDialog(props: { control: MembersControl; onClose: () => v
           </section>
         )}
 
+        {admin && members?.state && (
+          <button type="button" className="member-line groups-row" onClick={() => setGroupsOpen(true)}>
+            <span className="member-who"><strong>{t('Gruppen und Rechte …')}</strong><small>{members.state.groups.size === 0 ? t('Noch keine Gruppen: alle dürfen alles') : t('{n} Gruppen', { n: members.state.groups.size })}</small></span>
+            <span className="chev" aria-hidden>›</span>
+          </button>
+        )}
         {error && <p className="sync-error" role="alert">{error}</p>}
         <div className="actions"><button type="button" className="primary" onClick={props.onClose}>{t('Fertig')}</button></div>
       </div>

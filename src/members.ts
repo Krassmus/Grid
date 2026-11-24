@@ -2,7 +2,7 @@
  * Mitglieder eines Dokuments: Abfrage und Änderungen über das signierte Admin-Protokoll (siehe adminLog.ts).
  * Der Server entscheidet über den Zugriff; die Kette wird hier zusätzlich selbst geprüft.
  */
-import { applyEntry, buildEntry, emptyState, replay, type AdminEntry, type AdminState, type Role } from './adminLog'
+import { applyEntry, buildEntry, buildGroupEntry, emptyState, replay, type AdminEntry, type AdminState, type Level, type Role } from './adminLog'
 import { getAccountName, getIdentity } from './identity'
 import { authedFetch } from './syncClient'
 import { t } from './i18n'
@@ -125,4 +125,24 @@ export async function markEncrypted(server: string, doc: string): Promise<void> 
 export async function announceMove(server: string, doc: string, newServer: string, newKey: string) {
   const me = await getIdentity()
   await append(server, doc, (state) => buildEntry(me, state, doc, 'move', { id: me.id, pub: newKey }, 'admin', newServer))
+}
+
+/** Änderungen an Gruppen und Rechten (nur Admins, docs/RIGHTS.md). */
+export type GroupChange =
+  | { type: 'group'; group: string; name: string }
+  | { type: 'ungroup'; group: string }
+  | { type: 'join-group' | 'leave-group'; group: string; account: string }
+  | { type: 'grant'; group: string; object: string; level: Level }
+
+export async function changeGroups(server: string, doc: string, changes: GroupChange[]): Promise<void> {
+  const me = await getIdentity()
+  for (const c of changes) {
+    await append(server, doc, (state) => {
+      if (c.type === 'join-group' || c.type === 'leave-group') {
+        const m = state.members.get(c.account)
+        return m ? buildGroupEntry(me, state, doc, { ...c, pub: m.pub }) : null
+      }
+      return buildGroupEntry(me, state, doc, c as Exclude<GroupChange, { type: 'join-group' | 'leave-group' }>)
+    })
+  }
 }

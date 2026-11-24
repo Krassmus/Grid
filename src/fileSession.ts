@@ -2,14 +2,14 @@ import * as Y from 'yjs'
 import { appendGrid, writeGrid, type GridMeta } from './gridFile'
 import { Materializer } from './tableSync'
 import { SyncConnection, fetchServerInfo, normalizeServer, onServerKey, pinServer, pinnedKey, type SyncState } from './syncClient'
-import { acceptRequest, announceMove, claimDocument, ensureGenesis, fetchMembers, markEncrypted, rejectRequest, removeMember, setRole, type JoinRequest, type MembersInfo } from './members'
+import { acceptRequest, announceMove, changeGroups, claimDocument, ensureGenesis, fetchMembers, markEncrypted, rejectRequest, removeMember, setRole, type GroupChange, type JoinRequest, type MembersInfo } from './members'
 import { fingerprint, getIdentity } from './identity'
 import { makeInvite } from './invite'
 import { DocKeys } from './docKeys'
 import { iapAvailable, syncPurchases } from './iap'
 import { publishProfile } from './model'
 import { getProfile, onProfileChange } from './profile'
-import type { Role } from './adminLog'
+import { replay, type AdminState, type Role } from './adminLog'
 import { t } from './i18n'
 
 /** Ab so vielen Einträgen im Protokoll ersetzt ein Gesamtzustand die Updates. */
@@ -147,6 +147,14 @@ export class FileSession {
   /** Als Admin ein unverschlüsseltes Dokument auf Ende-zu-Ende-Verschlüsselung umstellen (der Server löscht dabei den Klartext). */
   encryptDocument = () => this.change((s, d) => markEncrypted(s, d))
   changeRole = (account: string, role: Role) => this.change((s, d) => setRole(s, d, account, role))
+  /** Gruppen und Rechte ändern (als Admin) */
+  changeGroups = (changes: GroupChange[]) => this.change((s, d) => changeGroups(s, d, changes))
+  /** Stand des Admin-Protokolls für die Rechte: vom Server, sonst aus der Datei (damit sie auch offline gelten) */
+  get adminState(): AdminState | null {
+    if (this.members?.state) return this.members.state
+    if (!this.meta.adminLog?.length) return null
+    try { return replay(this.meta.docId, this.meta.adminLog) } catch { return null }
+  }
 
   /** Einladungstext für dieses Dokument (der Empfänger klopft damit an). */
   async invite(): Promise<string> {

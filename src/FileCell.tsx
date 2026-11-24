@@ -8,6 +8,7 @@ import { ItemMenu, beginLongPress } from './ItemMenu'
 import { isMobileUI } from './platform'
 import { AnimItem, useAnimatedList } from './animatedList'
 import { t } from './i18n'
+import { useRights } from './rights'
 
 /** Aktuell gezogene Datei (dataTransfer ist in dragover nicht lesbar, daher Modulvariable). */
 let draggingFile: { slot: CellSlot; file: FileRef } | null = null
@@ -52,7 +53,7 @@ async function download(ref: FileRef): Promise<boolean> {
   return true
 }
 
-function FileChip(props: { file: FileRef; slot: CellSlot; onOpen: () => void; onRemove: () => void }) {
+function FileChip(props: { file: FileRef; slot: CellSlot; locked?: boolean; onOpen: () => void; onRemove: () => void }) {
   const { file } = props
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null) // Touch: langes Drücken statt Kreuz
   const [isDragging, setIsDragging] = useState(false)
@@ -62,7 +63,7 @@ function FileChip(props: { file: FileRef; slot: CellSlot; onOpen: () => void; on
   const imageOnly = isImage && !!url
   return (
     <div className={`filechip ${imageOnly ? 'image-only' : ''} ${missing ? 'missing' : ''} ${isDragging ? 'dragging' : ''}`} onClick={props.onOpen}
-      draggable={!isMobileUI}
+      draggable={!isMobileUI && !props.locked}
       onPointerDown={isMobileUI ? (e) => beginLongPress(e.nativeEvent, (x, y) => setMenu({ x, y })) : undefined}
       onContextMenu={isMobileUI ? (e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY }) } : undefined}
       onDragStart={(e) => {
@@ -119,6 +120,7 @@ export function FileCell(props: {
   const { doc, tableId, rowId, col, index } = props
   const files = index.get(`${rowId}|${col.id}`) ?? []
   const slot: CellSlot = { tableId, rowId, colId: col.id }
+  const writable = useRights().access(tableId) === 'write'
   const anim = useAnimatedList(files, (f) => f.hash)
   const acceptsInternal = () => !!draggingFile && !(draggingFile.slot.rowId === rowId && draggingFile.slot.colId === col.id)
   const input = useRef<HTMLInputElement>(null)
@@ -160,12 +162,14 @@ export function FileCell(props: {
   return (
     <div className={`c filecell ${cfg.accept === 'images' ? 'images' : ''} ${over ? 'over' : ''}`}
       onDragOver={(e) => {
+        if (!writable) return
         if (acceptsInternal()) { e.preventDefault(); e.dataTransfer.dropEffect = e.altKey ? 'copy' : 'move'; setOver(true) }
         else if (!draggingFile && e.dataTransfer.types.includes('Files')) { e.preventDefault(); setOver(true) }
       }}
       onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setOver(false) }}
       onDrop={(e) => {
         setOver(false)
+        if (!writable) return
         if (draggingFile) { // Datei aus einer anderen Zelle: verschieben (Alt/Option = kopieren)
           if (!acceptsInternal()) return
           e.preventDefault()
@@ -181,7 +185,7 @@ export function FileCell(props: {
         {anim.entries.map((e) => (
           <AnimItem key={e.key} phase={e.phase} onExited={() => anim.done(e.key)}>
             <FileChip file={e.item} slot={slot} onOpen={() => setPreview(e.item)}
-              onRemove={() => setRemoving(e.item)} />
+              locked={!writable} onRemove={() => { if (writable) setRemoving(e.item) }} />
           </AnimItem>
         ))}
         {!full && <button type="button" className="add-tile" title={t('Datei hinzufügen (oder hierher ziehen)')}

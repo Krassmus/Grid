@@ -7,7 +7,7 @@ import { effectiveType } from './columnTypes'
 import { t } from './i18n'
 
 /** Eine Zelle der Summenzeile: zeigt die gewählte Auswertung der Spalte, ein Klick öffnet die Auswahl. */
-export function FooterCell(props: { doc: Y.Doc; tableId: string; col: ColumnInfo; tables: TableInfo[]; cells: Map<string, Cell> | undefined }) {
+export function FooterCell(props: { doc: Y.Doc; tableId: string; col: ColumnInfo; tables: TableInfo[]; cells: Map<string, Cell> | undefined; /** Auswertung nur ansehen (kein Recht, die Struktur zu ändern) */ locked?: boolean }) {
   const { doc, tableId, col, tables } = props
   const type = effectiveType(col, tables)
   const options = allowedFooters(type)
@@ -27,8 +27,8 @@ export function FooterCell(props: { doc: Y.Doc; tableId: string; col: ColumnInfo
     <div className={`c foot-cell${open ? ' open' : ''}${type === 'number' ? ' num' : ''}`}>
       <button type="button" className={`foot-btn${fn ? ' set' : ''}`} aria-haspopup="menu" aria-expanded={open}
         title={fn ? t('{label} – klicken zum Ändern', { label: footerLabel(type, fn) }) : t('Auswertung unter der Spalte wählen')}
-        onClick={() => setOpen((o) => !o)}>
-        {fn ? <><strong>{value || '–'}</strong>{(fn !== 'sum' || type === 'checkbox') && <small>{footerLabel(type, fn)}</small>}</> : <span className="foot-hint">{t('Berechnen')}</span>}
+        onClick={() => { if (!props.locked) setOpen((o) => !o) }} disabled={props.locked}>
+        {fn ? <><strong>{value || '–'}</strong>{(fn !== 'sum' || type === 'checkbox') && <small>{footerLabel(type, fn)}</small>}</> : props.locked ? <span /> : <span className="foot-hint">{t('Berechnen')}</span>}
       </button>
       {open && (
         <div className="foot-popup" role="menu">

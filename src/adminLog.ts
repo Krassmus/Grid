@@ -11,7 +11,17 @@ import { t } from './i18n'
 export type Role = 'admin' | 'member'
 /** `encrypt`: Dokument als Ende-zu-Ende-verschlüsselt festlegen (`subject` = `actor`, einmalig; docs/E2E.md).
  * `move`: Umzug ankündigen (`name` = neue Server-Adresse, `subjectPub` = Schlüssel des neuen Servers, `subject` = `actor`) */
-export type EntryType = 'genesis' | 'set' | 'remove' | 'move' | 'encrypt'
+export type EntryType = 'genesis' | 'set' | 'remove' | 'move' | 'encrypt' | GroupEntryType
+/** Rechte (docs/RIGHTS.md), nur von Admins:
+ * `group`: Gruppe anlegen oder umbenennen (`subject` = Gruppen-ID, `name` = Name, `role` = `member`, `subjectPub` = 64 Nullen).
+ * `ungroup`: Gruppe löschen (`subject` = Gruppen-ID).
+ * `join-group` / `leave-group`: `subject` = Konto, `name` = Gruppen-ID.
+ * `grant`: `subject` = Gruppen-ID, `name` = `<Objekt-ID>|<Stufe>`. */
+export type GroupEntryType = 'group' | 'ungroup' | 'join-group' | 'leave-group' | 'grant'
+const GROUP_TYPES: readonly string[] = ['group', 'ungroup', 'join-group', 'leave-group', 'grant']
+/** Stufe einer Gruppe an einer Tabelle, Sicht oder Karte (`none` steht nur im Eintrag und löscht das Recht). */
+export type Level = 'none' | 'read' | 'write'
+export const NO_KEY = '0'.repeat(64)
 
 export interface AdminEntry {
   v: 1
@@ -35,11 +45,17 @@ export interface AdminState {
   moved: { server: string; key: string } | null
   /** Ein Admin hat das Dokument als verschlüsselt festgelegt */
   enc: boolean
+  /** Gruppen: ID → Name */
+  groups: Map<string, string>
+  /** Konto → Gruppen, in denen es ist */
+  memberGroups: Map<string, Set<string>>
+  /** Gruppe → (Objekt-ID → `read` | `write`); fehlt der Eintrag, gibt es keinen Zugriff */
+  grants: Map<string, Map<string, 'read' | 'write'>>
   len: number
   head: string
 }
 
-export const emptyState = (): AdminState => ({ members: new Map(), moved: null, enc: false, len: 0, head: '' })
+export const emptyState = (): AdminState => ({ members: new Map(), moved: null, enc: false, groups: new Map(), memberGroups: new Map(), grants: new Map(), len: 0, head: '' })
 
 export const signingText = (e: Omit<AdminEntry, 'sig'>) =>
   ['grid-admin-v1', e.doc, String(e.seq), e.prev, e.type, e.actor, e.subject, e.subjectPub, e.role, e.name, String(e.time)].join('\n')
@@ -59,6 +75,9 @@ export function applyEntry(state: AdminState, doc: string, e: AdminEntry): Admin
   if (!/^[0-9a-f]{64}$/.test(e.subjectPub)) throw new Error(t('Schlüssel ungültig'))
 
   const members = new Map(state.members)
+  const groups = new Map(state.groups)
+  const memberGroups = new Map([...state.memberGroups].map(([k, v]) => [k, new Set(v)]))
+  const grants = new Map([...state.grants].map(([k, v]) => [k, new Map(v)]))
   let moved = state.moved
   let enc = state.enc
   let signer: string
@@ -67,7 +86,7 @@ export function applyEntry(state: AdminState, doc: string, e: AdminEntry): Admin
     if (e.actor !== e.subject || e.role !== 'admin') throw new Error(t('Der Anfang gehört dem Ersteller als Admin'))
     members.set(e.subject, { pub: e.subjectPub, role: 'admin', name: e.name })
     signer = e.subjectPub
-  } else if (e.type === 'set' || e.type === 'remove' || e.type === 'move' || e.type === 'encrypt') {
+  } else if (e.type === 'set' || e.type === 'remove' || e.type === 'move' || e.type === 'encrypt' || GROUP_TYPES.includes(e.type)) {
     const actor = state.members.get(e.actor)
     if (!actor) throw new Error(t('Nur Mitglieder dürfen das'))
     // Jedes Mitglied darf sich selbst entfernen (verlassen); alles andere dürfen nur Admins
@@ -81,11 +100,36 @@ export function applyEntry(state: AdminState, doc: string, e: AdminEntry): Admin
       if (e.subject !== e.actor || e.subjectPub !== actor.pub) throw new Error(t('Verschlüsseln: subject muss der Unterzeichner sein'))
       if (state.enc) throw new Error(t('Das Dokument ist schon verschlüsselt'))
       enc = true
+    } else if (GROUP_TYPES.includes(e.type)) {
+      // Das Format prüfen Server und Client gleich; Unstimmiges (unbekannte Gruppe, Konto ohne Mitgliedschaft) bewirkt nichts, damit eine Kette nie unlesbar wird
+      if (actor.role !== 'admin') throw new Error(t('Nur Admins dürfen das'))
+      if (e.type === 'group') {
+        if (e.role !== 'member' || e.subjectPub !== NO_KEY || !e.name.trim()) throw new Error(t('Gruppe ungültig'))
+        groups.set(e.subject, e.name)
+      } else if (e.type === 'ungroup') {
+        groups.delete(e.subject)
+        grants.delete(e.subject)
+        for (const g of memberGroups.values()) g.delete(e.subject)
+      } else if (e.type === 'join-group' || e.type === 'leave-group') {
+        if (!validId(e.name)) throw new Error(t('Gruppe ungültig'))
+        if (e.type === 'join-group') {
+          if (groups.has(e.name) && members.has(e.subject)) memberGroups.set(e.subject, (memberGroups.get(e.subject) ?? new Set()).add(e.name))
+        } else memberGroups.get(e.subject)?.delete(e.name)
+      } else {
+        const m = /^([0-9a-zA-Z-]{8,64})\|(none|read|write)$/.exec(e.name)
+        if (!m) throw new Error(t('Recht ungültig'))
+        if (groups.has(e.subject)) {
+          const g = grants.get(e.subject) ?? new Map()
+          if (m[2] === 'none') g.delete(m[1]); else g.set(m[1], m[2] as 'read' | 'write')
+          grants.set(e.subject, g)
+        }
+      }
     } else if (e.type === 'set') {
       const old = state.members.get(e.subject)
       if (old && old.pub !== e.subjectPub) throw new Error(t('Schlüssel passt nicht zum Mitglied'))
       members.set(e.subject, { pub: e.subjectPub, role: e.role, name: e.name })
     } else if (!members.delete(e.subject)) throw new Error(t('Kein Mitglied'))
+    else memberGroups.delete(e.subject)
     if (![...members.values()].some((m) => m.role === 'admin')) throw new Error(t('Es muss mindestens ein Admin bleiben'))
     signer = actor.pub
   } else throw new Error(t('Unbekannter Eintragstyp'))
@@ -93,11 +137,27 @@ export function applyEntry(state: AdminState, doc: string, e: AdminEntry): Admin
   if (!/^[0-9a-f]{128}$/.test(e.sig) || !ed25519.verify(fromHex(e.sig), new TextEncoder().encode(signingText(e)), fromHex(signer))) {
     throw new Error(t('Signatur falsch'))
   }
-  return { members, moved, enc, len: e.seq, head: entryHash(e) }
+  return { members, moved, enc, groups, memberGroups, grants, len: e.seq, head: entryHash(e) }
 }
 
 /** Spielt eine ganze Kette ab (wirft beim ersten ungültigen Eintrag). */
 export const replay = (doc: string, entries: AdminEntry[]) => entries.reduce((s, e) => applyEntry(s, doc, e), emptyState())
+
+/** Eintrag für eine Gruppenänderung (nur Admins); die Felder sind je Typ belegt wie bei `GroupEntryType` beschrieben. */
+export function buildGroupEntry(
+  me: Identity, state: AdminState, doc: string,
+  c: { type: 'group'; group: string; name: string } | { type: 'ungroup'; group: string }
+    | { type: 'join-group' | 'leave-group'; group: string; account: string; pub: string }
+    | { type: 'grant'; group: string; object: string; level: Level },
+  time = Math.floor(Date.now() / 1000),
+): AdminEntry {
+  switch (c.type) {
+    case 'group': return buildEntry(me, state, doc, 'group', { id: c.group, pub: NO_KEY }, 'member', c.name.trim().slice(0, 60), time)
+    case 'ungroup': return buildEntry(me, state, doc, 'ungroup', { id: c.group, pub: NO_KEY }, 'member', '', time)
+    case 'join-group': case 'leave-group': return buildEntry(me, state, doc, c.type, { id: c.account, pub: c.pub }, 'member', c.group, time)
+    case 'grant': return buildEntry(me, state, doc, 'grant', { id: c.group, pub: NO_KEY }, 'member', `${c.object}|${c.level}`, time)
+  }
+}
 
 /** Neuer, mit dem Konto unterschriebener Eintrag, der an `state` anschließt. */
 export function buildEntry(

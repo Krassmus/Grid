@@ -27,6 +27,8 @@ import { initials, reprMap, type Repr } from './repr'
 import { columnCells, newCtx, type Cell as CellData } from './cells'
 import { FormulaSyntaxError, parseFormula, parseTemplate } from './formula'
 import { effectiveType } from './columnTypes'
+import { useRights } from './rights'
+import { hiddenByRights } from './rightsView'
 import { ViewDialog } from './ViewDialog'
 import { ViewGrid } from './ViewGrid'
 import { MapView } from './MapView'
@@ -232,6 +234,7 @@ function RelationCell(props: {
   index: LinkIndex
 }) {
   const { doc, tables, table, rowId, col, index } = props
+  const ro = useRights().access(table.id) !== 'write'
   const target = tables.find((t) => t.id === col.target)
   const ids = index.forward.get(`${rowId}|${col.id}`) ?? []
   const anim = useAnimatedList(ids, (id) => id)
@@ -332,9 +335,9 @@ function RelationCell(props: {
             <AnimItem key={e.key} phase={e.phase} onExited={() => anim.done(e.key)}>
               <Tile doc={doc} table={target} rowId={e.item}
                 display={RELATION.config(col).display === 'avatar' ? 'avatar' : undefined}
-                drag={{ slot, targetTable: col.target }}
-                onClick={() => setEditingRow(e.item)}
-                onRemove={() => removeLink(doc, table.id, rowId, col.id, e.item)} />
+                drag={ro ? undefined : { slot, targetTable: col.target }}
+                onClick={ro ? undefined : () => setEditingRow(e.item)}
+                onRemove={ro ? undefined : () => removeLink(doc, table.id, rowId, col.id, e.item)} />
             </AnimItem>
           ))
           if (ins) nodes.splice(Math.min(ins.index, nodes.length), 0, <DropGap key="drop-gap" width={ins.width} height={ins.height} />)
@@ -371,12 +374,13 @@ function BacklinkCell(props: {
   const [linking, setLinking] = useState<{ current: string | null } | null>(null) // Rückverweis ändern (current) oder neu hinzufügen (null)
   const target = props.tables.find((t) => t.id === props.col.target)
   const multi = allowsMultiTarget(props.col) // sonst steht im Rückverweis höchstens ein Datensatz
+  const ro = useRights().access(props.source.id) !== 'write'
   return (
     <div className="c rel backlink">
       <div className="tiles">
         {anim.entries.map((e) => (
           <AnimItem key={e.key} phase={e.phase} onExited={() => anim.done(e.key)}>
-            <Tile doc={props.doc} table={props.source} rowId={e.item} muted onClick={() => setLinking({ current: e.item })} />
+            <Tile doc={props.doc} table={props.source} rowId={e.item} muted onClick={ro ? undefined : () => setLinking({ current: e.item })} />
           </AnimItem>
         ))}
         {anim.entries.length === 0 && <span className="empty">–</span>}
@@ -701,7 +705,15 @@ export function ClientPane(props: {
   // Wird das Dokument geschlossen, endet auch seine GPS-Verfolgung (sonst schriebe sie ins Leere).
   useEffect(() => () => { if (currentTracking()?.target.doc === props.doc) stopTracking() }, [props.doc])
   const { doc } = props
-  const { tables, views, maps, tabs } = useTabs(doc)
+  const all = useTabs(doc)
+  const rights = useRights()
+  // Ohne Leserecht sind Tabellen, abgeleitete Tabellen und Karten für diesen Betrachter nicht vorhanden (docs/RIGHTS.md)
+  const { tables, views, maps, tabs } = useMemo(() => {
+    if (!rights.active || rights.admin) return all
+    const see = (id: string) => rights.access(id) !== 'none'
+    return { tables: all.tables.filter((x) => see(x.id)), views: all.views.filter((x) => see(x.id)), maps: all.maps.filter((x) => see(x.id)), tabs: all.tabs.filter((x) => see(x.id)) }
+  }, [all, rights])
+  const structure = rights.structure
   const index = useLinkIndex(doc)
   const fileIndex = useFileIndex(doc)
   const [active, setActive] = useState<string | null>(null)
@@ -714,6 +726,8 @@ export function ClientPane(props: {
   const table = tab?.kind === 'table' ? tables.find((t) => t.id === tab.id) : undefined
   const view = tab?.kind === 'view' ? views.find((v) => v.id === tab.id) : undefined
   const mapTab = tab?.kind === 'map' ? maps.find((m) => m.id === tab.id) : undefined
+  const writable = !props.asOf && !!table && rights.access(table.id) === 'write'
+  const hiddenCols = useMemo(() => (table ? hiddenByRights(table, tables) : new Set<string>()), [table, tables])
   // Menü der gewählten Tabelle (Bearbeiten, Abgeleitete Tabelle, Löschen)
   const [menuOpen, setMenuOpen] = useState(false)
   const [addOpen, setAddOpen] = useState(false) // Menü des „+“ (Tabelle oder Karte)
@@ -764,7 +778,7 @@ export function ClientPane(props: {
     return e.clientX < r.left + r.width / 2 ? 'before' : 'after'
   }
   /** Drag-Handler zum Umsortieren von Tabs und Spaltenköpfen (horizontale Listen). */
-  const reorderProps = (kind: ReorderKind, id: string, label: string) => ({
+  const reorderProps = (kind: ReorderKind, id: string, label: string) => !structure ? {} : ({
     draggable: true,
     onDragStart: (e: DragEvent) => {
       dragReorder = { kind, id }
@@ -907,7 +921,7 @@ export function ClientPane(props: {
     return () => { document.removeEventListener('pointerdown', away); document.removeEventListener('keydown', esc) }
   }, [selectedCol])
 
-  const shownColumns = table ? table.columns.filter((c) => !c.hidden) : [] // ausgeblendete Spalten bleiben für Formeln und Darstellung nutzbar
+  const shownColumns = table ? table.columns.filter((c) => !c.hidden && !hiddenCols.has(c.id)) : [] // ausgeblendete Spalten bleiben für Formeln und Darstellung nutzbar
 
   // Suche: nur Zeilen, bei denen der Suchtext (ohne Beachtung der Groß-/Kleinschreibung) in einer sichtbaren Spalte vorkommt.
   // Wie die Sortierung wird sie während der Eingabe in der Tabelle nicht neu ausgewertet, damit Zeilen nicht unter dem Cursor verschwinden.
@@ -1033,13 +1047,13 @@ export function ClientPane(props: {
           return (
             <span key={tb.id} className={`tabgroup ${hintClass('table', tb.id)}${current && menuOpen ? ' menu-open' : ''}`}>
               <button className={current ? 'active' : ''} aria-haspopup={current ? 'menu' : undefined} aria-expanded={current ? menuOpen : undefined}
-                onClick={() => { if (current) setMenuOpen((o) => !o); else { setActive(tb.id); setMenuOpen(false) } }}
-                title={current ? t('Menü öffnen – Ziehen zum Umsortieren') : t('Ziehen zum Umsortieren')}
+                onClick={() => { if (current && structure) setMenuOpen((o) => !o); else { setActive(tb.id); setMenuOpen(false) } }}
+                title={structure ? (current ? t('Menü öffnen – Ziehen zum Umsortieren') : t('Ziehen zum Umsortieren')) : undefined}
                 {...reorderProps('table', tb.id, tb.name)}>
                 <SheetIcon icon={tb.icon} kind={tb.kind} />
                 <span className="tab-name">{tb.name}</span>
-                {current && <span className="tab-caret">▾</span>}</button>
-              {current && menuOpen && (
+                {current && structure && <span className="tab-caret">▾</span>}</button>
+              {structure && current && menuOpen && (
                 <div className="tab-popup" role="menu">
                   <button type="button" role="menuitem" autoFocus onClick={() => {
                     setMenuOpen(false)
@@ -1057,7 +1071,7 @@ export function ClientPane(props: {
             </span>
           )
         })}
-        <span className={`tabgroup${addOpen ? ' menu-open' : ''}`}>
+        {structure && <span className={`tabgroup${addOpen ? ' menu-open' : ''}`}>
           <button aria-haspopup="menu" aria-expanded={addOpen} title={t('Tabelle oder Karte hinzufügen')} aria-label={t('Hinzufügen')}
             onClick={() => { setAddOpen((o) => !o); setMenuOpen(false) }}>+</button>
           {addOpen && (
@@ -1066,11 +1080,11 @@ export function ClientPane(props: {
               <button type="button" role="menuitem" onClick={() => { setAddOpen(false); setMapDialog({ mode: 'new' }) }}>{t('Neue Karte …')}</button>
             </div>
           )}
-        </span>
+        </span>}
       </nav>
 
       {!synced && <p className="hint">{t('Lade lokale Daten …')}</p>}
-      {synced && !tab && <p className="hint">{t('Noch keine Tabelle. Lege eine an.')}</p>}
+      {synced && !tab && <p className="hint">{rights.active && !rights.admin ? t('Noch keine Rechte: Ein Admin muss dir Zugriff auf Tabellen geben.') : t('Noch keine Tabelle. Lege eine an.')}</p>}
       {view && <ViewGrid key={view.id} doc={doc} view={view} />}
       {mapTab && <MapView key={mapTab.id} doc={doc} map={mapTab} tables={tables} onOpenRecord={(tableId, rowId) => setMapRecord({ tableId, rowId })} />}
 
@@ -1088,7 +1102,7 @@ export function ClientPane(props: {
               const col = Array.from(cellEl.parentElement!.children).indexOf(cellEl)
               const next = visibleIds[visibleIds.indexOf(rowEl.dataset.row!) + 1]
               if (next) setFocusRow(next, col)
-              else { setSearches((s) => ({ ...s, [table.id]: '' })); setFocusRow(addRow(doc, table.id), col) }
+              else if (writable) { setSearches((s) => ({ ...s, [table.id]: '' })); setFocusRow(addRow(doc, table.id), col) }
             }}
             onFocus={() => { editingInGrid.current = true }}
             onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) { editingInGrid.current = false; setSortTick((n) => n + 1) } }}>
@@ -1096,21 +1110,21 @@ export function ClientPane(props: {
               <div className="grid-head">
                 {shownColumns.map((c) => (
                   <div key={c.id} className={`h reorderable ${hintClass('column', c.id)}${isMobileUI && selectedCol === c.id ? ' col-selected' : ''}`} {...reorderProps('column', c.id, c.name)}>
-                    <button type="button" className="h-name" title={t('Spalte konfigurieren')}
+                    <button type="button" className="h-name" title={structure ? t('Spalte konfigurieren') : undefined}
                       aria-expanded={isMobileUI ? selectedCol === c.id : undefined}
-                      onClick={() => { if (isMobileUI) setSelectedCol((cur) => (cur === c.id ? null : c.id)); else setEditing({ kind: 'column', id: c.id }) }}>{c.name}</button>
+                      onClick={() => { if (!structure) return; if (isMobileUI) setSelectedCol((cur) => (cur === c.id ? null : c.id)); else setEditing({ kind: 'column', id: c.id }) }}>{c.name}</button>
                     {(!isMobileUI || selectedCol === c.id) && (
                       <button type="button" draggable={false} className={`h-sort${sort?.colId === c.id ? ' on' : ''}`}
                         title={sort?.colId === c.id ? (sort.dir === 'asc' ? t('Aufsteigend sortiert – klicken für absteigend') : t('Absteigend sortiert – klicken für die ursprüngliche Reihenfolge')) : t('Nach dieser Spalte sortieren')}
                         aria-label={t('Nach {name} sortieren', { name: c.name })}
                         onClick={() => cycleSort(c.id)}><SortIcon dir={sort?.colId === c.id ? sort.dir : null} /></button>
                     )}
-                    <span className="col-resize" title={t('Ziehen: Breite ändern, Doppelklick: zurücksetzen')} draggable={false}
+                    {structure && <span className="col-resize" title={t('Ziehen: Breite ändern, Doppelklick: zurücksetzen')} draggable={false}
                       onMouseDown={(e) => startResize(e, c.id)}
                       onPointerDown={(e) => { if (e.pointerType !== 'mouse') startResize(e, c.id) }}
                       onDragStart={(e) => { e.preventDefault(); e.stopPropagation() }}
-                      onDoubleClick={() => setColumnWidth(doc, table.id, c.id, undefined)} />
-                    {isMobileUI && selectedCol === c.id && (
+                      onDoubleClick={() => setColumnWidth(doc, table.id, c.id, undefined)} />}
+                    {structure && isMobileUI && selectedCol === c.id && (
                       <div className="col-menu" role="menu">
                         <button type="button" role="menuitem" onClick={() => { setSelectedCol(null); setEditing({ kind: 'column', id: c.id }) }}>{t('Bearbeiten')}</button>
                       </div>
@@ -1122,9 +1136,10 @@ export function ClientPane(props: {
                     ← {source.name}<small>{col.name}</small>
                   </div>
                 ))}
-                <div className="h"><button className="add-col" onClick={() => setDialog('column')} title={t('Spalte hinzufügen')} aria-label={t('Spalte hinzufügen')}>+</button></div>
+                {structure ? <div className="h"><button className="add-col" onClick={() => setDialog('column')} title={t('Spalte hinzufügen')} aria-label={t('Spalte hinzufügen')}>+</button></div> : <div className="h" />}
               </div>
               {virt.virtual && <div ref={virt.anchorRef} style={{ height: virt.topPad }} aria-hidden />}
+              <fieldset className="ro-fs" disabled={!writable}>
               {visibleIds.slice(virt.start, virt.end).map((rid) => (
                 <div key={rid} className="row-outer" data-row={rid}>
                   <div className="row-inner">
@@ -1148,15 +1163,16 @@ export function ClientPane(props: {
                     {backlinks.map(({ source, col }) => (
                       <BacklinkCell key={col.id} doc={doc} tables={tables} source={source} rowId={rid} col={col} index={index} />
                     ))}
-                    <div className="c actions-c"><button className="del" title={t('Zeile löschen')} onClick={() => setDeleting(rid)}>✕</button></div>
+                    {writable ? <div className="c actions-c"><button className="del" title={t('Zeile löschen')} onClick={() => setDeleting(rid)}>✕</button></div> : <div className="c actions-c" />}
                   </div>
                 </div>
               ))}
+              </fieldset>
               {virt.virtual && <div style={{ height: virt.bottomPad }} aria-hidden />}
               <div className="grid-foot">
                 <div className="row-inner">
                   {shownColumns.map((c) => (
-                    <FooterCell key={c.id} doc={doc} tableId={table.id} col={c} tables={tables} cells={cellData.get(c.id)} />
+                    <FooterCell key={c.id} locked={!structure} doc={doc} tableId={table.id} col={c} tables={tables} cells={cellData.get(c.id)} />
                   ))}
                   {backlinks.map(({ col }) => <div key={col.id} className="c" />)}
                   <div className="c" />
@@ -1183,7 +1199,7 @@ export function ClientPane(props: {
       )}
       {!props.asOf && table && (
         <div className="addrow-bar">
-          <button className="add-row" onClick={() => { setSearches((s) => ({ ...s, [table.id]: '' })); setFocusRow(addRow(doc, table.id)) }}>{t('+ Zeile')}</button>
+          {writable && <button className="add-row" onClick={() => { setSearches((s) => ({ ...s, [table.id]: '' })); setFocusRow(addRow(doc, table.id)) }}>{t('+ Zeile')}</button>}
           <span className="rowsearch">
             <input ref={searchRef} type="search" placeholder={t('Suchen …')} aria-label={t('Tabelle durchsuchen')} value={searches[table.id] ?? ''}
               onChange={(e) => setSearches((s) => ({ ...s, [table.id]: e.target.value }))}
@@ -1201,7 +1217,7 @@ export function ClientPane(props: {
         </div>
       )}
 
-      {syncOpen && props.sync && <SyncDialog control={props.sync} onClose={() => setSyncOpen(false)} />}
+      {syncOpen && props.sync && <SyncDialog control={{ ...props.sync, objects: tabs.map((x) => ({ id: x.id, name: x.name, kind: x.kind })) }} onClose={() => setSyncOpen(false)} />}
 
       {editing && (() => {
         const col = editing.kind === 'column' ? table?.columns.find((c) => c.id === editing.id) : undefined

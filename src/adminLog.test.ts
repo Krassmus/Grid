@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { ed25519 } from '@noble/curves/ed25519.js'
-import { applyEntry, buildEntry, emptyState, entryHash, replay } from './adminLog'
+import { applyEntry, buildEntry, buildGroupEntry, emptyState, entryHash, replay } from './adminLog'
+import { rightsFor } from './rights'
 import { toHex, type Identity } from './identity'
 
 const DOC = 'd0c00000-0000-0000-0000-000000000001'
@@ -93,5 +94,86 @@ describe('Admin-Protokoll', () => {
     expect(() => applyEntry(s, DOC, buildEntry(a, s, DOC, 'remove', sub(a), 'admin', '', T))).toThrow() // der einzige Admin bleibt
     s = applyEntry(s, DOC, buildEntry(b, s, DOC, 'remove', sub(b), 'member', '', T)) // Ben verlässt das Dokument
     expect([...s.members.keys()]).toEqual([a.id, c.id])
+  })
+})
+
+describe('Gruppen und Rechte', () => {
+  const [a, b, c] = [person(1), person(2), person(3)]
+  const G1 = 'gggggggg-0000-0000-0000-000000000001', G2 = 'gggggggg-0000-0000-0000-000000000002'
+  const build = () => {
+    let s = emptyState()
+    const log: ReturnType<typeof buildEntry>[] = []
+    const add = (e: ReturnType<typeof buildEntry>) => { s = applyEntry(s, DOC, e); log.push(e) }
+    add(buildEntry(a, s, DOC, 'genesis', sub(a), 'admin', 'Anna', T))
+    add(buildEntry(a, s, DOC, 'set', sub(b), 'member', 'Ben', T))
+    add(buildEntry(a, s, DOC, 'set', sub(c), 'member', 'Cora', T))
+    const g = (c: Parameters<typeof buildGroupEntry>[3]) => add(buildGroupEntry(a, s, DOC, c, T))
+    return { get s() { return s }, log, g }
+  }
+
+  it('legt Gruppen an, ordnet Mitglieder zu und vergibt Rechte', () => {
+    const w = build()
+    w.g({ type: 'group', group: G1, name: 'Redaktion' })
+    w.g({ type: 'group', group: G2, name: 'Gäste' })
+    w.g({ type: 'join-group', group: G1, account: b.id, pub: b.publicKey })
+    w.g({ type: 'join-group', group: G2, account: b.id, pub: b.publicKey })
+    w.g({ type: 'grant', group: G1, object: 'tab00001', level: 'write' })
+    w.g({ type: 'grant', group: G2, object: 'tab00001', level: 'read' })
+    w.g({ type: 'grant', group: G2, object: 'tab00002', level: 'read' })
+    const s = replay(DOC, w.log)
+    expect([...s.groups.values()]).toEqual(['Redaktion', 'Gäste'])
+    expect(rightsFor(s, b.id).access('tab00001')).toBe('write') // höchste Stufe der Gruppen
+    expect(rightsFor(s, b.id).access('tab00002')).toBe('read')
+    expect(rightsFor(s, b.id).access('tab00003')).toBe('none')
+    expect(rightsFor(s, b.id).structure).toBe(false)
+    expect(rightsFor(s, c.id).access('tab00001')).toBe('none') // ohne Gruppe nichts
+    expect(rightsFor(s, a.id)).toMatchObject({ admin: true, structure: true })
+    expect(rightsFor(s, a.id).access('irgendwas')).toBe('write')
+  })
+
+  it('vor der ersten Gruppe gilt wie bisher alles für alle; ohne Protokoll ebenso', () => {
+    const w = build()
+    expect(rightsFor(w.s, b.id)).toMatchObject({ active: false, structure: true })
+    expect(rightsFor(w.s, b.id).access('x')).toBe('write')
+    expect(rightsFor(null, b.id).access('x')).toBe('write')
+  })
+
+  it('Rechte entfallen mit Austritt aus der Gruppe, Löschen der Gruppe, Entfernen des Mitglieds und Stufe „none“', () => {
+    const w = build()
+    w.g({ type: 'group', group: G1, name: 'Redaktion' })
+    w.g({ type: 'join-group', group: G1, account: b.id, pub: b.publicKey })
+    w.g({ type: 'grant', group: G1, object: 'tab00001', level: 'write' })
+    expect(rightsFor(w.s, b.id).access('tab00001')).toBe('write')
+    w.g({ type: 'grant', group: G1, object: 'tab00001', level: 'none' })
+    expect(rightsFor(w.s, b.id).access('tab00001')).toBe('none')
+    w.g({ type: 'grant', group: G1, object: 'tab00001', level: 'read' })
+    w.g({ type: 'leave-group', group: G1, account: b.id, pub: b.publicKey })
+    expect(rightsFor(w.s, b.id).access('tab00001')).toBe('none')
+    w.g({ type: 'join-group', group: G1, account: b.id, pub: b.publicKey })
+    w.g({ type: 'ungroup', group: G1 })
+    expect(w.s.groups.size).toBe(0)
+    expect(w.s.grants.size).toBe(0)
+    expect(rightsFor(w.s, b.id).active).toBe(false) // keine Gruppe mehr: wieder wie bisher
+  })
+
+  it('ein entferntes Mitglied verliert seine Gruppen; Unstimmiges bewirkt nichts', () => {
+    const w = build()
+    w.g({ type: 'group', group: G1, name: 'Redaktion' })
+    w.g({ type: 'join-group', group: G1, account: b.id, pub: b.publicKey })
+    w.g({ type: 'join-group', group: G2, account: c.id, pub: c.publicKey }) // unbekannte Gruppe
+    w.g({ type: 'grant', group: G2, object: 'tab00001', level: 'read' }) // unbekannte Gruppe
+    expect(w.s.memberGroups.get(c.id)).toBeUndefined()
+    expect(w.s.grants.size).toBe(0)
+    w.log.push(buildEntry(a, w.s, DOC, 'remove', sub(b), 'member', '', T))
+    expect(replay(DOC, w.log).memberGroups.has(b.id)).toBe(false)
+  })
+
+  it('nur Admins dürfen Gruppen verwalten; Format wird geprüft', () => {
+    const w = build()
+    const bad = buildGroupEntry(b, w.s, DOC, { type: 'group', group: G1, name: 'Hack' }, T)
+    expect(() => applyEntry(w.s, DOC, bad)).toThrow()
+    expect(() => applyEntry(w.s, DOC, buildGroupEntry(a, w.s, DOC, { type: 'group', group: G1, name: '   ' }, T))).toThrow()
+    expect(() => applyEntry(w.s, DOC, buildEntry(a, w.s, DOC, 'grant', { id: G1, pub: '0'.repeat(64) }, 'member', 'tab00001|admin', T))).toThrow()
+    expect(() => applyEntry(w.s, DOC, buildEntry(a, w.s, DOC, 'join-group', sub(b), 'member', 'x', T))).toThrow()
   })
 })

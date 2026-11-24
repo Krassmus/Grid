@@ -27,6 +27,8 @@ import { isMobileUI } from './platform'
 import { uniqueName } from './documents'
 import { forgetRecent, noteRecent, readRecent, writeRecent } from './recentFiles'
 import { t, useLanguage } from './i18n'
+import { RightsContext, rightsFor } from './rights'
+import { accountIdNow } from './identity'
 
 /** Normalfall: ein Dokument, ein Client. Mit ?sim in der URL: zwei simulierte Clients zum Testen von Merges. */
 const SIM = new URLSearchParams(location.search).has('sim')
@@ -65,6 +67,10 @@ function Single() {
   const [asOfTick, setAsOfTick] = useState(0)
   const [members, setMembers] = useState<MembersInfo | null>(null)
   const profiles = useProfiles(session?.doc ?? NO_DOC)
+  // Rechte dieses Kontos (Gruppen im Admin-Protokoll, docs/RIGHTS.md); ohne Protokoll oder ohne Gruppen gilt alles
+  const rights = useMemo(() => rightsFor(session?.adminState ?? null, accountIdNow()), [session, members, members?.state]) // eslint-disable-line react-hooks/exhaustive-deps
+  const adminOnlyLogsRef = useRef(false)
+  adminOnlyLogsRef.current = rights.active && !rights.admin // Änderungsprotokoll und Zeitreise nennen Tabellen und Werte: bei aktiver Rechteverwaltung nur für Admins
   useEffect(() => (session ? installAudit(session.doc) : undefined), [session?.doc]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (!session) { setLogsOpen(false); setRetentionOpen(false) } setAsOfState(null) }, [session])
   // Eine Kopie des Dokuments, die sich in der Zeit bewegen lässt; Änderungsversuche verwerfen sie wieder (neu aufbauen)
@@ -252,7 +258,7 @@ function Single() {
         await cur.flush()
       }
 
-      const actions: Record<string, () => Promise<void>> = { open, new: create, save, save_as: saveAs, open_cloud: async () => setCloudOpen(true), join: async () => setJoinOpen(true), account: async () => setProfileOpen(true), settings: async () => setSettingsOpen(true), logs_all: async () => { if (current.current) setLogsOpen(true) }, logs_asof: async () => { if (current.current) setAsOfState({ at: Date.now(), pos: null }) }, logs_settings: async () => { if (current.current) setRetentionOpen(true) } }
+      const actions: Record<string, () => Promise<void>> = { open, new: create, save, save_as: saveAs, open_cloud: async () => setCloudOpen(true), join: async () => setJoinOpen(true), account: async () => setProfileOpen(true), settings: async () => setSettingsOpen(true), logs_all: async () => { if (current.current && !adminOnlyLogsRef.current) setLogsOpen(true) }, logs_asof: async () => { if (current.current && !adminOnlyLogsRef.current) setAsOfState({ at: Date.now(), pos: null }) }, logs_settings: async () => { if (current.current && !adminOnlyLogsRef.current) setRetentionOpen(true) } }
       const unlisten = await listen<string>('menu', (e) => {
         if (e.payload === 'clear_recent') { writeRecent([]); return }
         if (e.payload === 'undo' || e.payload === 'redo') { runUndoCommand(e.payload); return }
@@ -304,7 +310,7 @@ function Single() {
     state: syncState,
     members,
     profiles,
-    accept: session.accept, reject: session.reject, remove: session.remove, changeRole: session.changeRole, invite: () => session.invite(),
+    accept: session.accept, reject: session.reject, remove: session.remove, changeRole: session.changeRole, changeGroups: session.changeGroups, invite: () => session.invite(),
     server: session.meta.sync?.server ?? null,
     enc: !!session.meta.sync?.enc,
     encryptDocument: async () => { await session.encryptDocument(); bump((n) => n + 1) },
@@ -318,19 +324,19 @@ function Single() {
   }
   if (asOfView && asOfInfo) {
     return (
-      <>
+      <RightsContext.Provider value={rights}>
         <ClientPane key="asof" title={t(UNSAVED_TITLE)} doc={asOfView.doc} persist={null} asOf={asOfInfo} />
         {dialogs}
-      </>
+      </RightsContext.Provider>
     )
   }
   return (
-    <>
+    <RightsContext.Provider value={rights}>
       <ClientPane key={session.key} title={t(UNSAVED_TITLE)} doc={session.doc}
         persist={session.path ? null : `grid-proto-${UNSAVED_TITLE}`} sync={control}
         onHome={isMobileUI ? () => void goHome() : undefined} onAccount={isMobileUI ? () => setProfileOpen(true) : undefined} />
       {dialogs}
-    </>
+    </RightsContext.Provider>
   )
 }
 

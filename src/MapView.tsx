@@ -12,6 +12,7 @@ import { useFileIndex, useLinkIndex } from './useTables'
 import { glide, type Tag } from './markerGlide'
 import { formatArea, formatLength, pathLength, ringArea, type Pt } from './mapGeometry'
 import { t } from './i18n'
+import { useRights } from './rights'
 
 type Mode = 'select' | 'point' | 'line' | 'area'
 /** Marker einer Zeile: dazu ein laufendes Ausblenden (Zeitgeber) und die zuletzt gezeigte Darstellung, die während des Ausblendens stehen bleibt */
@@ -32,6 +33,12 @@ const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&l
  */
 export function MapView(props: { doc: Y.Doc; map: MapInfo; tables: TableInfo[]; onOpenRecord: (tableId: string, rowId: string) => void }) {
   const { doc, map, tables } = props
+  const rights = useRights()
+  const rightsRef = useRef(rights)
+  rightsRef.current = rights
+  const mapWrite = rights.access(map.id) === 'write' // Objekte der Karte zeichnen und ändern
+  const mapWriteRef = useRef(mapWrite)
+  mapWriteRef.current = mapWrite
   const index = useLinkIndex(doc)
   const fileIndex = useFileIndex(doc)
   const el = useRef<HTMLDivElement>(null)
@@ -177,7 +184,7 @@ export function MapView(props: { doc: Y.Doc; map: MapInfo; tables: TableInfo[]; 
           }
           // Verschieben: die Spitze (Pfeil bzw. Punkt) ziehen und loslassen; ein Klick auf die Kachel öffnet weiter das Formular
           // Leaflet schwenkt die Karte bei mousedown/touchstart: dort darf die Spitze nicht durchgereicht werden
-          const onTip = (e: Event) => !(e.target as HTMLElement).closest('.tile') && live.current.mode === 'select'
+          const onTip = (e: Event) => !(e.target as HTMLElement).closest('.tile') && live.current.mode === 'select' && rightsRef.current.access(t.id) === 'write'
           for (const type of ['mousedown', 'touchstart']) host.addEventListener(type, (e) => { if (onTip(e)) e.stopPropagation() })
           host.addEventListener('pointerdown', (e: PointerEvent) => {
             if (e.button !== 0 || !onTip(e)) return
@@ -248,7 +255,7 @@ export function MapView(props: { doc: Y.Doc; map: MapInfo; tables: TableInfo[]; 
           className: 'mapmark-wrap', iconSize: [0, 0], iconAnchor: [0, 0],
           html: `<div class="mapmark${sel ? ' sel' : ''}" style="--c:${shape.color}"><i class="geo-pin"><span></span></i>${shape.label ? `<b>${esc(shape.label)}</b>` : ''}</div>`,
         })
-        const m = L.marker([shape.lat, shape.lon], { icon, draggable: sel, interactive, keyboard: false }).addTo(g.shapes)
+        const m = L.marker([shape.lat, shape.lon], { icon, draggable: sel && mapWriteRef.current, interactive, keyboard: false }).addTo(g.shapes)
         m.on('click', pick)
         m.on('dragend', () => { const ll = m.getLatLng(); setMapShape(doc, map.id, id, { ...shape, lat: r7(ll.lat), lon: r7(normLon(ll.lng)) }) })
         continue
@@ -257,7 +264,7 @@ export function MapView(props: { doc: Y.Doc; map: MapInfo; tables: TableInfo[]; 
       const layer = (shape.kind === 'line' ? L.polyline(shape.pts, style) : L.polygon(shape.pts, style)).addTo(g.shapes)
       layer.on('click', pick)
       if (shape.label) layer.bindTooltip(shape.label, { permanent: true, direction: 'center', className: 'map-label', interactive: false })
-      if (!sel) continue
+      if (!sel || !mapWriteRef.current) continue
       // Eckpunkte ziehen; die Mitte einer Kante ziehen fügt einen Punkt ein; Doppelklick auf einen Eckpunkt entfernt ihn
       const write = (pts: Pt[]) => setMapShape(doc, map.id, id, { ...shape, pts })
       const handle = (at: Pt, mid: boolean) =>
@@ -299,7 +306,7 @@ export function MapView(props: { doc: Y.Doc; map: MapInfo; tables: TableInfo[]; 
       if (e.key === 'Enter' && (mode === 'line' || mode === 'area') && !typing) { e.preventDefault(); finishRef.current(false) }
       else if (e.key === 'Escape' && !typing) {
         if (mode !== 'select') cancelDraw(); else if (selected) setSelected(null)
-      } else if ((e.key === 'Delete' || e.key === 'Backspace') && selected && !typing) { e.preventDefault(); removeShape(selected) }
+      } else if ((e.key === 'Delete' || e.key === 'Backspace') && selected && !typing && mapWriteRef.current) { e.preventDefault(); removeShape(selected) }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -318,7 +325,7 @@ export function MapView(props: { doc: Y.Doc; map: MapInfo; tables: TableInfo[]; 
         h.repr
           ? <div className="geo-tag"><div className="tile"><TileContent repr={h.repr} /></div><i className="geo-tag-arrow" /></div>
           : <i className="geo-pin"><span /></i>, h.el, h.key))}
-      <div className="map-tools" role="toolbar" aria-label={t('Zeichenwerkzeuge')}>
+      {mapWrite && <div className="map-tools" role="toolbar" aria-label={t('Zeichenwerkzeuge')}>
         {([['select', t('Auswählen')], ['point', t('+ Punkt')], ['line', t('+ Strecke')], ['area', t('+ Gebiet')]] as const).map(([m, label]) => (
           <button key={m} type="button" className={mode === m ? 'on' : ''} onClick={() => choose(m)}>{label}</button>
         ))}
@@ -328,9 +335,9 @@ export function MapView(props: { doc: Y.Doc; map: MapInfo; tables: TableInfo[]; 
             <button type="button" onClick={cancelDraw}>{t('Abbrechen')}</button>
           </>
         )}
-      </div>
+      </div>}
       {hint && <div className="map-hint">{hint}</div>}
-      {sel && <ShapePanel key={sel.id} shape={sel.shape}
+      {sel && mapWrite && <ShapePanel key={sel.id} shape={sel.shape}
         onChange={(patch) => setMapShape(doc, map.id, sel.id, { ...sel.shape, ...patch } as MapShape)}
         onDelete={() => removeShape(sel.id)} onClose={() => setSelected(null)} />}
     </div>

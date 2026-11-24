@@ -838,3 +838,21 @@ button.invite-row:hover .plus-avatar { border-color: #0a84ff; color: #0a84ff; }
 .asof-close { font-size: 22px; }
 .asof-axis { display: flex; justify-content: space-between; color: var(--c-666677); font-size: 11px; margin-top: 2px; }
 .doclist footer span:nth-of-type(2) { margin-left: auto; }
+.groups-dialog .group-card { border: 1px solid var(--c-e1e7ea); border-radius: 14px; background: var(--c-f9faf8); padding: 0 14px; }
+.groups-dialog .group-card summary { cursor: pointer; padding: 12px 0; list-style: none; display: flex; gap: 10px; align-items: baseline; }
+.groups-dialog .group-card summary::-webkit-details-marker { display: none; }
+.groups-dialog .group-card summary small { color: var(--c-666677); }
+.groups-dialog .group-body { padding: 0 0 12px; display: flex; flex-direction: column; gap: 8px; }
+.groups-dialog h4 { margin: 8px 0 0; font-size: 13px; color: var(--c-667781); text-transform: uppercase; letter-spacing: .06em; }
+.groups-dialog .rights-table { width: 100%; border-collapse: collapse; }
+.groups-dialog .rights-table td { padding: 5px 0; }
+.groups-dialog .rights-table td:last-child { text-align: right; }
+.groups-dialog .rights-table small { color: var(--c-666677); margin-left: 6px; }
+.groups-dialog .group-add { display: flex; gap: 8px; }
+.groups-dialog .group-add input { flex: 1; font: inherit; padding: 8px 10px; border: 1px solid var(--c-d5dce0); border-radius: 8px; background: var(--c-ffffff); }
+.members-dialog .groups-row { margin-top: 8px; }
+.ro-fs { border: 0; margin: 0; padding: 0; min-width: 0; display: contents; }
+.ro-fs .row-outer:last-child { border-bottom: 1px solid var(--c-e8ecee); }
+.ro-fs .row-outer:last-child .row-inner { border-radius: 0; }
+.ro-fs:disabled input, .ro-fs:disabled textarea, .ro-fs:disabled select { color: inherit; -webkit-text-fill-color: currentColor; opacity: 1; cursor: default; }
+.ro-fs:disabled button { cursor: default; }

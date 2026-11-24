@@ -17,7 +17,7 @@ pub struct Entry {
     pub seq: u64,
     /// Hash des vorigen Eintrags (leer beim ersten)
     pub prev: String,
-    /// `genesis`, `set` (Mitglied hinzufügen oder Rolle/Namen ändern), `remove`, `encrypt` (Dokument verschlüsseln, `subject` = `actor`) oder `move`
+    /// `genesis`, `set` (Mitglied hinzufügen oder Rolle/Namen ändern), `remove`, Rechte (`group`, `ungroup`, `join-group`, `leave-group`, `grant`, docs/RIGHTS.md), `encrypt` (Dokument verschlüsseln, `subject` = `actor`) oder `move`
     /// (Umzug ankündigen: `name` = neue Server-Adresse, `subjectPub` = Schlüssel des neuen Servers, `subject` = `actor`)
     #[serde(rename = "type")]
     pub kind: String,
@@ -93,7 +93,7 @@ impl State {
                 next.members.insert(e.subject.clone(), Member { pubkey: e.subject_pub.clone(), role: "admin".into(), name: e.name.clone() });
                 e.subject_pub.clone()
             }
-            "set" | "remove" | "move" | "encrypt" => {
+            "set" | "remove" | "move" | "encrypt" | "group" | "ungroup" | "join-group" | "leave-group" | "grant" => {
                 let actor = self.members.get(&e.actor).ok_or("Nur Mitglieder dürfen das")?;
                 // Jedes Mitglied darf sich selbst entfernen (verlassen); alles andere dürfen nur Admins
                 let leaving = e.kind == "remove" && e.subject == e.actor;
@@ -106,6 +106,18 @@ impl State {
                     if e.subject != e.actor || e.subject_pub != actor.pubkey { return Err("Verschlüsseln: subject muss der Unterzeichner sein"); }
                     if self.enc { return Err("Das Dokument ist schon verschlüsselt"); }
                     next.enc = true;
+                } else if matches!(e.kind.as_str(), "group" | "ungroup" | "join-group" | "leave-group" | "grant") {
+                    // Rechte (docs/RIGHTS.md): der Server prüft nur Unterzeichner und Format. Die Gruppen selbst wertet der Client aus; Unstimmiges bewirkt dort nichts.
+                    if actor.role != "admin" { return Err("Nur Admins dürfen das"); }
+                    match e.kind.as_str() {
+                        "group" => { if e.role != "member" || e.subject_pub != "0".repeat(64) || e.name.trim().is_empty() { return Err("Gruppe ungültig"); } }
+                        "join-group" | "leave-group" => { if !valid_id(&e.name) { return Err("Gruppe ungültig"); } }
+                        "grant" => {
+                            let ok = e.name.split_once('|').map_or(false, |(obj, level)| valid_id(obj) && matches!(level, "none" | "read" | "write"));
+                            if !ok { return Err("Recht ungültig"); }
+                        }
+                        _ => {}
+                    }
                 } else if e.kind == "set" {
                     if let Some(old) = self.members.get(&e.subject) {
                         if old.pubkey != e.subject_pub { return Err("Schlüssel passt nicht zum Mitglied"); }
@@ -234,6 +246,40 @@ mod tests {
         bad.subject_pub = person(9).pubhex();
         bad.sig = hex(&a.key.sign(bad.signing_text().as_bytes()).to_bytes());
         assert_eq!(s3.apply(DOC, &bad), Err("Umzug: Server-Adresse ungültig"));
+    }
+
+    #[test]
+    fn group_entries_need_an_admin_and_valid_format() {
+        let (a, b) = (person(1), person(2));
+        let s0 = State::default();
+        let s1 = s0.apply(DOC, &entry(&s0, &a, "genesis", &a, "admin", "Anna")).unwrap();
+        let s2 = s1.apply(DOC, &entry(&s1, &a, "set", &b, "member", "Ben")).unwrap();
+        let gid = Person { id: "gggggggg-0000-0000-0000-000000000001".into(), key: SigningKey::from_bytes(&[7; 32]) };
+        let sign = |signer: &Person, mut e: Entry| { e.sig = hex(&signer.key.sign(e.signing_text().as_bytes()).to_bytes()); e };
+        let mut group = entry(&s2, &a, "group", &gid, "member", "Redaktion");
+        group.subject_pub = "0".repeat(64);
+        let group = sign(&a, group);
+        let s3 = s2.apply(DOC, &group).unwrap();
+        // Mitglieder dürfen keine Gruppen anlegen
+        let mut by_member = entry(&s3, &b, "group", &gid, "member", "Hack");
+        by_member.subject_pub = "0".repeat(64);
+        assert_eq!(s3.apply(DOC, &sign(&b, by_member)), Err("Nur Admins dürfen das"));
+        // Zuordnung und Recht: Format
+        let join = entry(&s3, &a, "join-group", &b, "member", &gid.id);
+        let s4 = s3.apply(DOC, &join).unwrap();
+        assert_eq!(s4.members, s3.members);
+        let mut bad_join = entry(&s4, &a, "join-group", &b, "member", "x");
+        bad_join.sig = sign(&a, bad_join.clone()).sig;
+        assert_eq!(s4.apply(DOC, &bad_join), Err("Gruppe ungültig"));
+        let mut grant = entry(&s4, &a, "grant", &gid, "member", "tttttttt|write");
+        grant.subject_pub = "0".repeat(64);
+        assert!(s4.apply(DOC, &sign(&a, grant)).is_ok());
+        let mut bad_grant = entry(&s4, &a, "grant", &gid, "member", "tttttttt|admin");
+        bad_grant.subject_pub = "0".repeat(64);
+        assert_eq!(s4.apply(DOC, &sign(&a, bad_grant)), Err("Recht ungültig"));
+        let mut empty = entry(&s4, &a, "group", &gid, "member", "  ");
+        empty.subject_pub = "0".repeat(64);
+        assert_eq!(s4.apply(DOC, &sign(&a, empty)), Err("Gruppe ungültig"));
     }
 
     /// Dieselben Werte prüft src/adminLog.test.ts: beide Seiten müssen dieselbe Signatur und denselben Hash erzeugen.
