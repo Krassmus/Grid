@@ -865,19 +865,21 @@ export function ClientPane(props: {
   const { cellData, reprs } = useMemo(() => {
     const m = new Map<string, Map<string, CellData>>()
     const r = new Map<string, Map<string, Repr>>()
-    if (!table) return { cellData: m, reprs: r }
+    if (!table && !mapRecord) return { cellData: m, reprs: r }
     const ctx = newCtx() // gemeinsamer Zwischenspeicher: jede Spalte (auch von Formeln benutzte) wird nur einmal berechnet
-    for (const c of table.columns) if (isComputed(c) || c.type === 'autonumber' || c.type === 'stamp' || c.footer) m.set(c.id, columnCells(doc, tables, table, c, ctx))
+    for (const c of table?.columns ?? []) if (isComputed(c) || c.type === 'autonumber' || c.type === 'stamp' || c.footer) m.set(c.id, columnCells(doc, tables, table!, c, ctx))
     // Darstellung der Zeilen für alles, was hier als Kachel erscheint: Ziele der Relationen, Quellen der Rückverweise, die Tabelle selbst
-    const wanted = new Set<string>([table.id])
-    for (const c of table.columns) if (c.type === 'relation' && c.target) wanted.add(c.target)
-    for (const t of tables) if (t.columns.some((c) => c.type === 'relation' && c.target === table.id)) wanted.add(t.id)
+    // (auf der Karte gibt es keine Tabelle; dort braucht das Formular der angeklickten Zeile die Darstellung ihrer Tabelle und der Relationsziele)
+    const wanted = new Set<string>(table ? [table.id] : [])
+    if (mapRecord) wanted.add(mapRecord.tableId)
+    for (const c of table?.columns ?? []) if (c.type === 'relation' && c.target) wanted.add(c.target)
+    if (table) for (const t of tables) if (t.columns.some((c) => c.type === 'relation' && c.target === table.id)) wanted.add(t.id)
     // Formulare für neue Datensätze zeigen deren Relationen: auch die Ziele der Zieltabellen
     for (const id of [...wanted]) for (const c of tables.find((t) => t.id === id)?.columns ?? []) if (c.type === 'relation' && c.target) wanted.add(c.target)
     for (const t of tables) if (wanted.has(t.id)) r.set(t.id, reprMap(doc, tables, t, ctx))
     return { cellData: m, reprs: r }
     // `index` (Verknüpfungen), `fileIndex` (Bilder) und `tables` (Werte, Struktur) decken alle Änderungen ab, die das Ergebnis beeinflussen
-  }, [doc, tables, table?.id, index, fileIndex])
+  }, [doc, tables, table?.id, index, fileIndex, mapRecord?.tableId])
   const reprOf = useCallback((id: string) => reprs.get(id), [reprs])
 
   const [liveWidth, setLiveWidth] = useState<{ id: string; w: number } | null>(null)
