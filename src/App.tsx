@@ -60,7 +60,6 @@ function Single() {
   // Ansicht eines früheren Standes: Zeitpunkt (ms) und, wenn per Schritt gewählt, die genaue Stelle im Protokoll
   const [asOfState, setAsOfState] = useState<{ at: number; pos: number | null } | null>(null)
   const [playing, setPlaying] = useState(false)
-  const [speed, setSpeed] = useState(2)
   const [asOfTick, setAsOfTick] = useState(0)
   const [members, setMembers] = useState<MembersInfo | null>(null)
   const profiles = useProfiles(session?.doc ?? NO_DOC)
@@ -85,16 +84,16 @@ function Single() {
       const next = machine.step(1)
       if (next === null) { setPlaying(false); return }
       setAsOfState({ at: machine.entries[next - 1].t, pos: next })
-    }, 900 / speed)
+    }, 300) // feste Geschwindigkeit: dreimal so schnell wie 900 ms
     return () => clearTimeout(id)
-  }, [playing, speed, machine, asOfView])
+  }, [playing, machine, asOfView])
   const asOfInfo = machine && asOfView && asOfState ? (() => {
     const cur = machine.current()
     return {
       at: asOfState.at, earliest: machine.earliest, latest: machine.latest, incomplete: machine.incomplete,
       pos: asOfView.pos, total: machine.entries.length, histogram: machine.histogram(80),
       caption: cur && session ? describeEntry(cur, cur.a ? personName(session.doc, cur.a) || cur.a.slice(0, 8) : 'Unbekannt') : null, captionTime: cur?.t ?? null,
-      playing, speed,
+      playing,
       onChange: (at: number) => setAsOfState({ at, pos: null }),
       onSeek: (at: number) => { setPlaying(false); setAsOfState({ at, pos: null }) },
       onStep: (dir: 1 | -1) => {
@@ -107,7 +106,6 @@ function Single() {
         if (machine.pos >= machine.entries.length) setAsOfState({ at: (machine.earliest ?? Date.now()) - 1, pos: 0 }) // am Ende: von vorn
         setPlaying(true)
       },
-      onSpeed: setSpeed,
       onExit: () => { setPlaying(false); setAsOfState(null) },
     }
   })() : null

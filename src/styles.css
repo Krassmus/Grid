@@ -818,10 +818,8 @@ button.invite-row:hover .plus-avatar { border-color: #0a84ff; color: #0a84ff; }
 
 /* Stand zu einem früheren Zeitpunkt (nur ansehen) */
 .asof-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.asof-bar .asof-label { font-weight: 600; }
-.asof-bar .asof-date { font: inherit; padding: 5px 10px; border: 1px solid var(--c-d5dce0); border-radius: 8px; background: var(--c-ffffff); cursor: pointer; min-width: 150px; text-align: left; }
-.asof-bar .asof-note { color: var(--c-666677); font-size: 13px; }
-.asof-bar .asof-warn { color: color-mix(in srgb, #ff9f0a 75%, var(--c-3b4a52)); font-size: 13px; }
+.asof-bar .asof-date { margin-left: auto; font: inherit; padding: 5px 10px; border: 1px solid var(--c-d5dce0); border-radius: 8px; background: var(--c-ffffff); cursor: pointer; min-width: 150px; text-align: left; }
+.asof-timeline .asof-warn { color: color-mix(in srgb, #ff9f0a 75%, var(--c-3b4a52)); font-size: 13px; }
 .clientpane.asof .add-row, .clientpane.asof .del, .clientpane.asof .actions-c { display: none; }
 
 /* Zeitleiste */
@@ -833,5 +831,9 @@ button.invite-row:hover .plus-avatar { border-color: #0a84ff; color: #0a84ff; }
 .asof-bars { position: absolute; inset: 3px 4px 0; display: flex; align-items: flex-end; gap: 1px; }
 .asof-bars span { flex: 1; min-width: 1px; height: 0; border-radius: 2px 2px 0 0; }
 .asof-bars span.has { background: color-mix(in srgb, #0a84ff 55%, transparent); }
-.asof-marker { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: #0a84ff; pointer-events: none; }
+.asof-progress { position: absolute; left: 0; bottom: 0; height: 5px; background: #0a84ff; pointer-events: none; }
+.asof-row { display: flex; align-items: flex-start; gap: 10px; }
+.asof-trackbox { flex: 1; min-width: 0; }
+.asof-play, .asof-close { flex: none; width: 46px; height: 46px; padding: 0; display: flex; align-items: center; justify-content: center; border-radius: 8px; font-size: 18px; line-height: 1; }
+.asof-close { font-size: 22px; }
 .asof-axis { display: flex; justify-content: space-between; color: var(--c-666677); font-size: 11px; margin-top: 2px; }
