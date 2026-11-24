@@ -1078,7 +1078,7 @@ export function ClientPane(props: {
             </span>
           )
         })}
-        {structure && <span className={`tabgroup${addOpen ? ' menu-open' : ''}`}>
+        {structure && <span className={`tabgroup add-tab${addOpen ? ' menu-open' : ''}`}>
           <button aria-haspopup="menu" aria-expanded={addOpen} title={t('Tabelle oder Karte hinzufügen')} aria-label={t('Hinzufügen')}
             onClick={() => { setAddOpen((o) => !o); setMenuOpen(false) }}>+</button>
           {addOpen && (

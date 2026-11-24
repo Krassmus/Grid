@@ -440,7 +440,7 @@ textarea.cell { resize: none; line-height: 1.35; overflow: hidden; display: bloc
 .sheet-icon { width: 19px; height: 19px; flex: none; display: inline-block; }
 .sheet-icon.emoji { display: inline-flex; align-items: center; justify-content: center; font-size: 16px; line-height: 1; width: 19px; }
 .tab-caret { font-size: 10px; margin-left: -2px; opacity: .7; }
-.tabs .tabgroup:last-child > button { font-size: 22px; font-weight: 400; padding: 8px 6px 6px; line-height: 1; }
+.tabs .tabgroup.add-tab > button { font-size: 22px; font-weight: 400; padding: 8px 6px 6px; line-height: 1; }
 .icon-picker { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
 .icon-picker-label { font-size: 12px; color: var(--c-666677); }
 .icon-grid { display: flex; flex-wrap: wrap; gap: 4px; }
@@ -452,7 +452,7 @@ textarea.cell { resize: none; line-height: 1.35; overflow: hidden; display: bloc
 .grid-head .add-col { border: none; background: none; box-shadow: none; padding: 0 6px; font-size: 22px; font-weight: 400; line-height: 1; color: var(--c-666677); cursor: pointer; }
 .grid-head .add-col:hover { color: var(--c-0a58ca); background: none; }
 .grid-head .add-col { position: relative; top: -3px; }
-.tabs .tabgroup:last-child > button { position: relative; top: -4px; }
+.tabs .tabgroup.add-tab > button { position: relative; top: -4px; }
 /* Kachel nur mit Avatar (kein Text): keine Fläche und kein Rahmen um das Bild, es sieht aus wie ein Bild in einer Bilderspalte */
 .tiles .tile:not(:has(.tile-body)) { padding: 0; background: none; border: none; box-shadow: none; border-radius: 10px; }
 .tiles .tile:not(:has(.tile-body)) .avatar { width: 52px; height: 52px; border-radius: 10px; border: 1px solid var(--c-e1e7ea); box-sizing: border-box; }
