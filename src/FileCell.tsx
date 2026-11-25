@@ -120,7 +120,7 @@ export function FileCell(props: {
   const { doc, tableId, rowId, col, index } = props
   const files = index.get(`${rowId}|${col.id}`) ?? []
   const slot: CellSlot = { tableId, rowId, colId: col.id }
-  const writable = useRights().access(tableId) === 'write'
+  const writable = useRights().colAccess(tableId, col.id) === 'write'
   const anim = useAnimatedList(files, (f) => f.hash)
   const acceptsInternal = () => !!draggingFile && !(draggingFile.slot.rowId === rowId && draggingFile.slot.colId === col.id)
   const input = useRef<HTMLInputElement>(null)

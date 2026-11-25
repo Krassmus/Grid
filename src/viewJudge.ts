@@ -1,5 +1,5 @@
 /**
- * Prüft Änderungen von Konten, die an einer Tabelle kein Schreibrecht haben, aber an einer abgeleiteten Tabelle (docs/RIGHTS.md).
+ * Prüft Änderungen von Konten, die an einer Tabelle kein volles Schreibrecht haben: Schreibrecht an Spalten oder an einer abgeleiteten Tabelle (docs/RIGHTS.md).
  * Eine Zeile darf geändert werden, wenn sie vorher und nachher den Bedingungen einer schreibbaren Sicht genügt, angelegt werden, wenn sie nachher genügt,
  * gelöscht werden, wenn sie vorher genügte. Ausgeblendete Spalten bleiben unberührt, Verknüpfungen und Dateien sind ausgenommen.
  * Den Zustand „nachher“ liefert ein Arbeitsabbild des Dokuments, auf das das Update zur Probe angewendet wird.
@@ -29,30 +29,59 @@ function probeDoc(live: Y.Doc): Y.Doc {
 const rowsOf = (doc: Y.Doc, tid: string): Y.Map<Y.Map<any>> | undefined => tablesOf(doc).get(tid)?.get('rows')
 const orderOf = (doc: Y.Doc, tid: string): string[] => tablesOf(doc).get(tid)?.get('rowOrder')?.toArray() ?? []
 
-/** `null`, wenn die Änderungen an den Tabellen `ids` über Sichten des Autors erlaubt sind, sonst der Grund. */
+/**
+ * `null`, wenn die Änderungen an den Tabellen `ids` erlaubt sind, obwohl dem Autor das Schreiben an der ganzen Tabelle fehlt: entweder über Schreibrechte
+ * an den berührten Spalten (docs/RIGHTS.md, „Rechte je Spalte“) oder über eine schreibbare abgeleitete Tabelle; sonst der Grund.
+ */
 export function judgeViaViews(live: Y.Doc, update: Uint8Array, scope: Scope, ids: string[], rights: Rights): string | null {
   const tables = readTables(live)
   const views = readViews(live)
   const noWrite = t('Kein Schreibrecht an der Tabelle')
-  const usable = new Map<string, typeof views>()
-  for (const id of ids) {
-    const table = tables.find((x) => x.id === id)
-    if (!table || scope.extras.has(id)) return noWrite
-    const mine = views.filter((v) => v.def.source === id && rights.access(v.id) === 'write' && !writeBlocker(v.def, table, tables))
-    if (mine.length === 0) return noWrite
-    usable.set(id, mine)
-  }
-  const after = probeDoc(live)
+  // Das Arbeitsabbild entsteht erst, wenn es gebraucht wird (Reihenfolge, Zeilen einer Sicht)
+  let probe: Y.Doc | null = null
+  const after = () => { if (!probe) { probe = probeDoc(live); Y.applyUpdate(probe, update) } return probe }
   let why: string | null = null
   try {
-    Y.applyUpdate(after, update)
     for (const id of ids) {
-      why = judgeTable(live, after, tables.find((x) => x.id === id)!, tables, usable.get(id)!, scope) ?? null
-      if (why) break
+      const table = tables.find((x) => x.id === id)
+      if (!table) { why = noWrite; break }
+      const writesColumns = table.columns.some((c) => rights.colAccess(id, c.id) === 'write')
+      const byColumns = writesColumns ? columnReason(live, after, scope, table, rights) : noWrite
+      if (!byColumns) continue
+      const mine = views.filter((v) => v.def.source === id && rights.access(v.id) === 'write' && !writeBlocker(v.def, table, tables))
+      const byView = mine.length === 0 || scope.extras.has(id) ? noWrite : judgeTable(live, after(), table, tables, mine, scope)
+      if (!byView) continue
+      why = writesColumns ? byColumns : byView
+      break
     }
   } catch { why = t('Änderung nicht lesbar') }
-  if (why) scratch.delete(live) // das Arbeitsabbild enthält jetzt Abgelehntes
+  if (why && probe) scratch.delete(live) // das Arbeitsabbild enthält jetzt Abgelehntes
   return why
+}
+
+/** Spalten: jede berührte Zelle, Verknüpfung oder Datei muss in einer Spalte mit Schreibrecht liegen; Zeilen anlegen geht, löschen nicht. */
+function columnReason(live: Y.Doc, after: () => Y.Doc, scope: Scope, table: TableInfo, rights: Rights): string | null {
+  const cols = new Map(table.columns.map((c) => [c.id, c]))
+  const need = (id: string): string | null => {
+    const c = cols.get(id)
+    if (!c) return t('Änderung betrifft eine unbekannte Spalte')
+    if (c.type === 'autonumber' || c.type === 'stamp') return null // entstehen beim Anlegen und Ändern von selbst
+    return rights.colAccess(table.id, id) === 'write' ? null : t('Kein Schreibrecht an der Spalte „{name}“', { name: c.name })
+  }
+  const before = rowsOf(live, table.id)
+  for (const rid of scope.rowItems.get(table.id) ?? []) if (before?.has(rid)) return t('Zeilen löschen erfordert Schreibrecht an der ganzen Tabelle')
+  for (const set of scope.cells.get(table.id)?.values() ?? []) for (const id of set) { const why = need(id); if (why) return why }
+  for (const id of scope.extraCols.get(table.id) ?? []) { const why = need(id); if (why) return why }
+  return scope.order.has(table.id) ? orderReason(live, after(), table.id, scope.rows.get(table.id) ?? new Set()) : null
+}
+
+/** Die Reihenfolge der Zeilen darf sich nur durch angelegte oder gelöschte Zeilen ändern (`touched`), die übrigen behalten ihre Reihenfolge. */
+function orderReason(live: Y.Doc, after: Y.Doc, tid: string, touched: Set<string>): string | null {
+  const a = orderOf(live, tid), b = orderOf(after, tid)
+  const sa = new Set(a), sb = new Set(b)
+  for (const id of [...a.filter((x) => !sb.has(x)), ...b.filter((x) => !sa.has(x))]) if (!touched.has(id)) return t('Reihenfolge der Zeilen geändert')
+  if (a.filter((x) => sb.has(x)).join('|') !== b.filter((x) => sa.has(x)).join('|')) return t('Reihenfolge der Zeilen geändert')
+  return null
 }
 
 function judgeTable(live: Y.Doc, after: Y.Doc, table: TableInfo, tables: TableInfo[], views: ReturnType<typeof readViews>, scope: Scope): string | null {
@@ -69,11 +98,5 @@ function judgeTable(live: Y.Doc, after: Y.Doc, table: TableInfo, tables: TableIn
     if (is && !isOk) return t('Die Zeile würde den Bedingungen der abgeleiteten Tabelle nicht mehr genügen')
     if (is) for (const c of hidden) if ((was?.get(c.id) ?? null) !== (is.get(c.id) ?? null)) return t('Ausgeblendete Spalte „{name}“ geändert', { name: c.name })
   }
-  if (scope.order.has(table.id)) {
-    const a = orderOf(live, table.id), b = orderOf(after, table.id)
-    const sa = new Set(a), sb = new Set(b)
-    for (const id of [...a.filter((x) => !sb.has(x)), ...b.filter((x) => !sa.has(x))]) if (!touched.has(id)) return t('Reihenfolge der Zeilen geändert')
-    if (a.filter((x) => sb.has(x)).join('|') !== b.filter((x) => sa.has(x)).join('|')) return t('Reihenfolge der Zeilen geändert')
-  }
-  return null
+  return scope.order.has(table.id) ? orderReason(live, after, table.id, touched) : null
 }

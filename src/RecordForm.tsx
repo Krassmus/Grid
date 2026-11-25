@@ -149,6 +149,8 @@ export function RecordForm(props: {
   submitLabel?: string
   /** Nur ansehen: Felder gesperrt, kein Speichern. */
   readOnly?: boolean
+  /** Stufe je Spalte (Rechte je Spalte): Spalten ohne Leserecht fehlen, Spalten ohne Schreibrecht sind gesperrt. */
+  access?: (c: ColumnInfo) => 'none' | 'read' | 'write'
   /** Nur diese Spalten zeigen (z. B. beim Schreiben über eine abgeleitete Tabelle). */
   only?: (c: ColumnInfo) => boolean
   /** Erlaubte Auswahlwerte einer Auswahlspalte (`null`: alle). */
@@ -162,7 +164,7 @@ export function RecordForm(props: {
   onSubmit: (values: Record<string, CellValue>, extras: RecordExtras) => void | Promise<void>
   onClose: () => void
 }) {
-  const cols = formColumns(props.table).filter((c) => (c.type !== 'relation' || props.relationField) && (c.type !== 'person' || props.doc) && (!props.only || props.only(c)))
+  const cols = formColumns(props.table).filter((c) => (c.type !== 'relation' || props.relationField) && (c.type !== 'person' || props.doc) && (!props.only || props.only(c)) && (!props.access || props.access(c) !== 'none'))
   const [files, setFiles] = useState<Record<string, File[]>>({})
   const [rels, setRels] = useState<Record<string, string[]>>(() => ({ ...(props.existing?.relations ?? {}) }))
   const [removedFiles, setRemovedFiles] = useState<Record<string, string[]>>({})
@@ -279,10 +281,10 @@ export function RecordForm(props: {
         <h3>{props.title}</h3>
         <fieldset className="rf-fields" disabled={props.readOnly}>
           {cols.map((c, i) => (
-            <div key={c.id} className="cfg-field">
+            <fieldset key={c.id} className="cfg-field rf-one" disabled={!!props.access && props.access(c) !== 'write'}>
               <span>{c.name}</span>
               {field(c, i === 0)}
-            </div>
+            </fieldset>
           ))}
           {cols.length === 0 && <p className="hint">{t('Diese Tabelle hat keine Felder zum Ausfüllen. Der Datensatz wird leer angelegt.')}</p>}
         </fieldset>

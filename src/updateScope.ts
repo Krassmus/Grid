@@ -11,6 +11,12 @@ export interface Scope {
   tables: Set<string>
   /** Je Tabelle die Zeilen, an deren Zellen etwas geändert, die angelegt oder gelöscht werden */
   rows: Map<string, Set<string>>
+  /** Je Tabelle und Zeile die Spalten, deren Zelle sich ändert (Wert, Inhalt eines Rich-Text-Felds) */
+  cells: Map<string, Map<string, Set<string>>>
+  /** Je Tabelle die Zeilen, die als Ganzes angelegt oder gelöscht werden */
+  rowItems: Map<string, Set<string>>
+  /** Je Tabelle die Spalten, an deren Verknüpfungen oder Dateien etwas geändert wird */
+  extraCols: Map<string, Set<string>>
   /** Tabellen, an deren Zeilenreihenfolge etwas geändert wird (Anlegen und Löschen eingeschlossen) */
   order: Set<string>
   /** Tabellen, an deren Verknüpfungen oder Dateien etwas geändert wird */
@@ -22,6 +28,8 @@ export interface Scope {
   /** Stellen, die sich nicht zuordnen ließen (Eltern fehlen): wie Struktur behandeln */
   unknown: boolean
 }
+
+const addTo = (m: Map<string, Set<string>>, key: string, value: string) => { const set = m.get(key) ?? new Set<string>(); set.add(value); m.set(key, set) }
 
 type Seg = string | '#'
 type Loc = { container: Seg[]; key: Seg } | null
@@ -40,7 +48,7 @@ function typePath(type: Y.AbstractType<any>): Seg[] | null {
 }
 
 export function scopeOf(doc: Y.Doc, update: Uint8Array): Scope {
-  const scope: Scope = { tables: new Set(), rows: new Map(), order: new Set(), extras: new Set(), maps: new Set(), structure: false, unknown: false }
+  const scope: Scope = { tables: new Set(), rows: new Map(), cells: new Map(), rowItems: new Map(), extraCols: new Map(), order: new Set(), extras: new Set(), maps: new Set(), structure: false, unknown: false }
   const { structs, ds } = Y.decodeUpdate(update)
   const store = doc.store
 
@@ -102,6 +110,12 @@ export function scopeOf(doc: Y.Doc, update: Uint8Array): Scope {
           const set = scope.rows.get(tid) ?? new Set<string>()
           set.add(String(p[3]))
           scope.rows.set(tid, set)
+          if (p.length === 4) addTo(scope.rowItems, tid, String(p[3]))
+          else {
+            const byRow = scope.cells.get(tid) ?? new Map<string, Set<string>>()
+            addTo(byRow, String(p[3]), String(p[4]))
+            scope.cells.set(tid, byRow)
+          }
           return
         }
         if (p[2] === 'rowOrder' && p.length > 3) { scope.tables.add(tid); scope.order.add(tid); return }
@@ -109,8 +123,11 @@ export function scopeOf(doc: Y.Doc, update: Uint8Array): Scope {
         return
       }
       case 'links': case 'files': {
-        const tid = String(p[1]).split('|')[0]
-        if (p.length === 2 && TABLE_ID.test(tid)) { scope.tables.add(tid); scope.extras.add(tid) } else scope.structure = true
+        const [tid, , col] = String(p[1]).split('|')
+        if (p.length === 2 && TABLE_ID.test(tid)) {
+          scope.tables.add(tid); scope.extras.add(tid)
+          addTo(scope.extraCols, tid, col ?? '')
+        } else scope.structure = true
         return
       }
       case 'maps': {

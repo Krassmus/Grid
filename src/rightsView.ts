@@ -22,10 +22,13 @@ const exprRefs = (c: ColumnInfo): string[] => {
   return []
 }
 
-/** IDs der Spalten von `table`, die ausgeblendet werden, wenn nur `readable` lesbar ist. */
-export function hiddenByRights(table: TableInfo, readable: TableInfo[]): Set<string> {
+/**
+ * IDs der Spalten von `table`, die ausgeblendet werden, wenn nur `readable` lesbar ist und die Spalten `unreadable` (aller Tabellen) nicht
+ * gelesen werden dürfen; mit ihnen verschwindet, was auf ihnen aufbaut (Formeln, Texte, Rollups).
+ */
+export function hiddenByRights(table: TableInfo, readable: TableInfo[], unreadable: ReadonlySet<string> = new Set()): Set<string> {
   const ok = new Set(readable.map((x) => x.id))
-  const hidden = new Set<string>()
+  const hidden = new Set<string>(table.columns.filter((c) => unreadable.has(c.id)).map((c) => c.id))
   for (let changed = true; changed;) {
     changed = false
     const names = new Set(table.columns.filter((c) => hidden.has(c.id)).map((c) => c.name.toLowerCase()))
@@ -33,7 +36,7 @@ export function hiddenByRights(table: TableInfo, readable: TableInfo[]): Set<str
       if (hidden.has(c.id)) continue
       const hide =
         (c.type === 'relation' && !!c.target && !ok.has(c.target)) ||
-        (c.type === 'rollup' && hidden.has(ROLLUP.config(c).rel)) ||
+        (c.type === 'rollup' && (hidden.has(ROLLUP.config(c).rel) || unreadable.has(ROLLUP.config(c).col))) ||
         ((c.type === 'formula' || c.type === 'template') && exprRefs(c).some((r) => names.has(r)))
       if (hide) { hidden.add(c.id); changed = true }
     }

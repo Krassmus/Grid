@@ -921,5 +921,10 @@ export const en: Record<string, string> = {
   "Reihenfolge der Zeilen geändert": "Row order changed",
   "Die Quelltabelle fehlt.": "The source table is missing.",
   "Gruppierte abgeleitete Tabellen sind nicht schreibbar.": "Grouped derived tables cannot be written to.",
-  "Die Bedingung auf „{name}“ bezieht sich auf eine Spalte, deren Wert nicht in der Zeile selbst steht.": "The condition on “{name}” refers to a column whose value is not stored in the row itself."
+  "Die Bedingung auf „{name}“ bezieht sich auf eine Spalte, deren Wert nicht in der Zeile selbst steht.": "The condition on “{name}” refers to a column whose value is not stored in the row itself.",
+  "Spaltenweise": "By column",
+  "Zugriff auf Spalte {name}": "Access to column {name}",
+  "Änderung betrifft eine unbekannte Spalte": "The change affects an unknown column",
+  "Kein Schreibrecht an der Spalte „{name}“": "No write access to column “{name}”",
+  "Zeilen löschen erfordert Schreibrecht an der ganzen Tabelle": "Deleting rows requires write access to the whole table"
 }

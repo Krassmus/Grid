@@ -351,6 +351,7 @@ textarea.cell { resize: none; line-height: 1.35; overflow: hidden; display: bloc
 
 /* Formular für einen Datensatz */
 .recordform { width: min(460px, 94vw); max-height: 90vh; display: flex; flex-direction: column; gap: 12px; }
+.rf-fields fieldset.rf-one { border: 0; margin: 0; padding: 0; min-width: 0; }
 .rf-fields { border: 0; margin: 0; min-width: 0; display: grid; gap: 12px; overflow: auto; padding: 2px; }
 .rf-unit { display: flex; align-items: center; gap: 8px; }
 .rf-unit input { flex: 1; min-width: 0; }
@@ -847,6 +848,7 @@ button.invite-row:hover .plus-avatar { border-color: #0a84ff; color: #0a84ff; }
 .groups-dialog .rights-table { width: 100%; border-collapse: collapse; }
 .groups-dialog .rights-table td { padding: 5px 0; }
 .groups-dialog .rights-table td:last-child { text-align: right; }
+.groups-dialog .rights-table .col-right td:first-child { padding-left: 18px; }
 .groups-dialog .rights-table small { color: var(--c-666677); margin-left: 6px; }
 .groups-dialog .group-add { display: flex; gap: 8px; }
 .groups-dialog .group-add input { flex: 1; font: inherit; padding: 8px 10px; border: 1px solid var(--c-d5dce0); border-radius: 8px; background: var(--c-ffffff); }

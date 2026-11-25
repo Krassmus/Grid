@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import { Modal, ConfirmDialog } from './Modal'
 import type { Level } from './adminLog'
 import type { GroupChange } from './members'
@@ -18,6 +18,8 @@ export function GroupsDialog(props: { control: MembersControl; onClose: () => vo
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [deleting, setDeleting] = useState<string | null>(null)
+  // Tabellen, bei denen die Spaltenliste offen ist („Spaltenweise“ gewählt), je Gruppe
+  const [byColumn, setByColumn] = useState<Record<string, true>>({})
   const act = async (changes: GroupChange[]) => {
     setBusy(true); setError(null)
     try { await props.control.changeGroups(changes) } catch (e) { setError(message(e)) } finally { setBusy(false) }
@@ -33,6 +35,22 @@ export function GroupsDialog(props: { control: MembersControl; onClose: () => vo
     void act([{ type: 'group', group: crypto.randomUUID(), name: n }])
   }
   const levelOf = (g: string, id: string): Level => state.grants.get(g)?.get(id) ?? 'none'
+  const grantedColumns = (g: string, o: NonNullable<typeof objects>[number]) => (o.columns ?? []).filter((c) => levelOf(g, c.id) !== 'none')
+  /** Auswahl einer Tabelle: Stufe, oder „Spaltenweise“ (kein Tabellenrecht, aber Rechte an Spalten oder Liste geöffnet). */
+  const modeOf = (g: string, o: NonNullable<typeof objects>[number]): Level | 'columns' =>
+    o.kind === 'table' && levelOf(g, o.id) === 'none' && (grantedColumns(g, o).length > 0 || byColumn[`${g}|${o.id}`]) ? 'columns' : levelOf(g, o.id)
+  const choose = (g: string, o: NonNullable<typeof objects>[number], v: string) => {
+    const key = `${g}|${o.id}`
+    if (v === 'columns') {
+      setByColumn((s) => ({ ...s, [key]: true }))
+      // Das Recht an der ganzen Tabelle entfällt: ab jetzt zählen nur die Spalten
+      if (levelOf(g, o.id) !== 'none') void act([{ type: 'grant', group: g, object: o.id, level: 'none' }])
+      return
+    }
+    setByColumn((s) => { const { [key]: _gone, ...rest } = s; return rest })
+    // Wer die ganze Tabelle bekommt oder verliert, braucht keine Spaltenrechte mehr
+    void act([...grantedColumns(g, o).map((c) => ({ type: 'grant' as const, group: g, object: c.id, level: 'none' as Level })), { type: 'grant', group: g, object: o.id, level: v as Level }])
+  }
   const kindLabel = (k: 'table' | 'view' | 'map') => (k === 'table' ? t('Tabelle') : k === 'view' ? t('Abgeleitete Tabelle') : t('Karte'))
   return (
     <Modal onClose={props.onClose}>
@@ -47,7 +65,7 @@ export function GroupsDialog(props: { control: MembersControl; onClose: () => vo
           <details key={id} className="group-card">
             <summary><strong>{gname}</strong> <small>{t('{people} · {tables}', {
               people: [...state.memberGroups.entries()].filter(([, s]) => s.has(id)).length === 1 ? t('1 Person') : t('{n} Personen', { n: [...state.memberGroups.entries()].filter(([, s]) => s.has(id)).length }),
-              tables: t('{n} mit Zugriff', { n: state.grants.get(id)?.size ?? 0 }),
+              tables: t('{n} mit Zugriff', { n: objects.filter((o) => levelOf(id, o.id) !== 'none' || grantedColumns(id, o).length > 0).length }),
             })}</small></summary>
             <div className="group-body">
               <label className="cfg-field">
@@ -69,19 +87,37 @@ export function GroupsDialog(props: { control: MembersControl; onClose: () => vo
               {objects.length === 0 && <p className="hint">{t('Noch keine Tabellen.')}</p>}
               <table className="rights-table">
                 <tbody>
-                  {objects.map((o) => (
-                    <tr key={o.id}>
-                      <td><strong>{o.name}</strong> <small>{kindLabel(o.kind)}</small>{o.kind === 'view' && o.blocked && <small className="hint" style={{ display: 'block' }}>{o.blocked}</small>}</td>
-                      <td>
-                        <select value={levelOf(id, o.id)} disabled={busy} aria-label={t('Zugriff auf {name}', { name: o.name })}
-                          onChange={(e) => void act([{ type: 'grant', group: id, object: o.id, level: e.target.value as Level }])}>
-                          <option value="none">{t('Kein Zugriff')}</option>
-                          <option value="read">{t('Lesen')}</option>
-                          {(o.kind !== 'view' || !o.blocked) && <option value="write">{t('Schreiben')}</option>}
-                        </select>
-                      </td>
-                    </tr>
-                  ))}
+                  {objects.map((o) => {
+                    const mode = modeOf(id, o)
+                    return (
+                      <Fragment key={o.id}>
+                        <tr>
+                          <td><strong>{o.name}</strong> <small>{kindLabel(o.kind)}</small>{o.kind === 'view' && o.blocked && <small className="hint" style={{ display: 'block' }}>{o.blocked}</small>}</td>
+                          <td>
+                            <select value={mode} disabled={busy} aria-label={t('Zugriff auf {name}', { name: o.name })} onChange={(e) => choose(id, o, e.target.value)}>
+                              <option value="none">{t('Kein Zugriff')}</option>
+                              <option value="read">{t('Lesen')}</option>
+                              {(o.kind !== 'view' || !o.blocked) && <option value="write">{t('Schreiben')}</option>}
+                              {o.kind === 'table' && <option value="columns">{t('Spaltenweise')}</option>}
+                            </select>
+                          </td>
+                        </tr>
+                        {mode === 'columns' && (o.columns ?? []).map((c) => (
+                          <tr key={c.id} className="col-right">
+                            <td><small>{c.name}</small></td>
+                            <td>
+                              <select value={levelOf(id, c.id)} disabled={busy} aria-label={t('Zugriff auf Spalte {name}', { name: c.name })}
+                                onChange={(e) => void act([{ type: 'grant', group: id, object: c.id, level: e.target.value as Level }])}>
+                                <option value="none">{t('Kein Zugriff')}</option>
+                                <option value="read">{t('Lesen')}</option>
+                                {!c.readOnly && <option value="write">{t('Schreiben')}</option>}
+                              </select>
+                            </td>
+                          </tr>
+                        ))}
+                      </Fragment>
+                    )
+                  })}
                 </tbody>
               </table>
               <div className="actions"><button type="button" className="danger-outline" disabled={busy} onClick={() => setDeleting(id)}>{t('Gruppe löschen …')}</button></div>

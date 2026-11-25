@@ -111,12 +111,14 @@ function Picker(props: {
   const [q, setQ] = useState('')
   const [creating, setCreating] = useState(false)
   const reprs = useReprs()
+  const rights = useRights()
+  const mayCreate = rights.canAdd(props.target.id, props.target.columns.map((c) => c.id))
   // Gesucht wird in der Darstellung (Titel, Untertitel) und in allen Spalten des Datensatzes, auch in ausgeblendeten
   const needle = q.trim().toLowerCase()
   const columnTexts = useMemo(() => {
     if (!needle) return null
     const ctx = newCtx()
-    return props.target.columns.map((c) => columnCells(props.doc, props.tables, props.target, c, ctx))
+    return props.target.columns.filter((c) => rights.colAccess(props.target.id, c.id) !== 'none').map((c) => columnCells(props.doc, props.tables, props.target, c, ctx))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.doc, props.target, props.tables, needle])
   const rows = props.target.rowIds
@@ -144,11 +146,11 @@ function Picker(props: {
           {sorted.length === 0 && <p className="hint">{t('Keine passenden Datensätze.')}</p>}
         </div>
         <div className="actions split">
-          {props.allowCreate !== false ? <button type="button" onClick={() => setCreating(true)}>{t('+ Neuer Datensatz …')}</button> : <span />}
+          {props.allowCreate !== false && mayCreate ? <button type="button" onClick={() => setCreating(true)}>{t('+ Neuer Datensatz …')}</button> : <span />}
           <button type="button" onClick={props.onClose}>{t('Fertig')}</button>
         </div>
         {creating && (
-          <RecordForm doc={props.doc} table={props.target} title={t('Neuer Datensatz in „{name}“', { name: props.target.name })}
+          <RecordForm doc={props.doc} table={props.target} title={t('Neuer Datensatz in „{name}“', { name: props.target.name })} access={(c) => rights.colAccess(props.target.id, c.id)}
             initial={q.trim() && firstTextColumn(props.target) ? { [firstTextColumn(props.target)!.id]: q.trim() } : undefined}
             onClose={() => setCreating(false)}
             relationField={(col, ids, update) => <RelationDraftField doc={props.doc} tables={props.tables} col={col} ids={ids} update={update} />}
@@ -167,7 +169,9 @@ function Picker(props: {
 /** Bestehenden Datensatz im Formular bearbeiten (Klick auf eine Kachel). Änderungen werden erst mit „Speichern“ übernommen. */
 function EditRecordDialog(props: { doc: Y.Doc; tables: TableInfo[]; table: TableInfo; rowId: string; onClose: () => void }) {
   const { doc, tables, table, rowId } = props
-  const readOnly = useRights().access(table.id) !== 'write'
+  const rights = useRights()
+  const colAccess = (c: ColumnInfo) => rights.colAccess(table.id, c.id)
+  const readOnly = !table.columns.some((c) => colAccess(c) === 'write')
   const reprs = useReprs()
   const title = reprs(table.id)?.get(rowId)?.title ?? summarize(doc, table, rowId).title
   // Stand beim Öffnen: Werte, Dateien, Verknüpfungen
@@ -184,9 +188,9 @@ function EditRecordDialog(props: { doc: Y.Doc; tables: TableInfo[]; table: Table
     return { values, existing }
   })
   return (
-    <RecordForm doc={doc} table={table} title={t('„{title}“ bearbeiten', { title })} submitLabel={t('Speichern')} readOnly={readOnly} initial={snap.values} existing={snap.existing}
+    <RecordForm doc={doc} table={table} title={t('„{title}“ bearbeiten', { title })} submitLabel={t('Speichern')} readOnly={readOnly} access={colAccess} initial={snap.values} existing={snap.existing}
       onClose={props.onClose}
-      relationField={(col, ids, update) => <RelationDraftField doc={doc} tables={tables} col={col} ids={ids} update={update} rowId={rowId} readOnly={readOnly} />}
+      relationField={(col, ids, update) => <RelationDraftField doc={doc} tables={tables} col={col} ids={ids} update={update} rowId={rowId} readOnly={colAccess(col) !== 'write'} />}
       onSubmit={async (values, extras) => {
         await updateRecord(doc, table.id, rowId, values, snap.values, extras, snap.existing.relations)
         props.onClose()
@@ -236,7 +240,7 @@ function RelationCell(props: {
   index: LinkIndex
 }) {
   const { doc, tables, table, rowId, col, index } = props
-  const ro = useRights().access(table.id) !== 'write'
+  const ro = useRights().colAccess(table.id, col.id) !== 'write'
   const target = tables.find((t) => t.id === col.target)
   const ids = index.forward.get(`${rowId}|${col.id}`) ?? []
   const anim = useAnimatedList(ids, (id) => id)
@@ -376,7 +380,7 @@ function BacklinkCell(props: {
   const [linking, setLinking] = useState<{ current: string | null } | null>(null) // Rückverweis ändern (current) oder neu hinzufügen (null)
   const target = props.tables.find((t) => t.id === props.col.target)
   const multi = allowsMultiTarget(props.col) // sonst steht im Rückverweis höchstens ein Datensatz
-  const ro = useRights().access(props.source.id) !== 'write'
+  const ro = useRights().colAccess(props.source.id, props.col.id) !== 'write'
   const [viewing, setViewing] = useState<string | null>(null) // nur lesen: Datensatz im Formular ansehen
   return (
     <div className="c rel backlink">
@@ -716,7 +720,8 @@ export function ClientPane(props: {
   // Ohne Leserecht sind Tabellen, abgeleitete Tabellen und Karten für diesen Betrachter nicht vorhanden (docs/RIGHTS.md)
   const { tables, views, maps, tabs } = useMemo(() => {
     if (!rights.active || rights.admin) return all
-    const see = (id: string) => rights.access(id) !== 'none'
+    const cols = new Map(all.tables.map((x) => [x.id, x.columns.map((c) => c.id)]))
+    const see = (id: string) => rights.visible(id, cols.get(id) ?? [])
     return { tables: all.tables.filter((x) => see(x.id)), views: all.views.filter((x) => see(x.id)), maps: all.maps.filter((x) => see(x.id)), tabs: all.tabs.filter((x) => see(x.id)) }
   }, [all, rights])
   const structure = rights.structure
@@ -733,7 +738,10 @@ export function ClientPane(props: {
   const view = tab?.kind === 'view' ? views.find((v) => v.id === tab.id) : undefined
   const mapTab = tab?.kind === 'map' ? maps.find((m) => m.id === tab.id) : undefined
   const writable = !props.asOf && !!table && rights.access(table.id) === 'write'
-  const hiddenCols = useMemo(() => (table ? hiddenByRights(table, tables) : new Set<string>()), [table, tables])
+  // Spalten, die ein Betrachter ohne Leserecht an der Spalte nicht sehen darf (aller sichtbaren Tabellen, für Rollups)
+  const unreadable = useMemo(() => new Set(tables.flatMap((x) => x.columns.filter((c) => rights.colAccess(x.id, c.id) === 'none').map((c) => c.id))), [tables, rights])
+  const hiddenCols = useMemo(() => (table ? hiddenByRights(table, tables, unreadable) : new Set<string>()), [table, tables, unreadable])
+  const canAdd = !props.asOf && !!table && rights.canAdd(table.id, table.columns.map((c) => c.id))
   // Menü der gewählten Tabelle (Bearbeiten, Abgeleitete Tabelle, Löschen)
   const [menuOpen, setMenuOpen] = useState(false)
   const [addOpen, setAddOpen] = useState(false) // Menü des „+“ (Tabelle oder Karte)
@@ -821,7 +829,7 @@ export function ClientPane(props: {
 
   const backlinks = table
     ? tables.flatMap((t) =>
-        t.columns.filter((c) => c.type === 'relation' && c.target === table.id && RELATION.config(c).backlink).map((c) => ({ source: t, col: c })))
+        t.columns.filter((c) => c.type === 'relation' && c.target === table.id && RELATION.config(c).backlink && !unreadable.has(c.id)).map((c) => ({ source: t, col: c })))
     : []
 
   // Sortierung ist nur eine Ansicht (pro Tabelle, nur auf diesem Gerät); die gespeicherte Reihenfolge bleibt unverändert.
@@ -1110,7 +1118,7 @@ export function ClientPane(props: {
               const col = Array.from(cellEl.parentElement!.children).indexOf(cellEl)
               const next = visibleIds[visibleIds.indexOf(rowEl.dataset.row!) + 1]
               if (next) setFocusRow(next, col)
-              else if (writable) { setSearches((s) => ({ ...s, [table.id]: '' })); setFocusRow(addRow(doc, table.id), col) }
+              else if (canAdd) { setSearches((s) => ({ ...s, [table.id]: '' })); setFocusRow(addRow(doc, table.id), col) }
             }}
             onFocus={() => { editingInGrid.current = true }}
             onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) { editingInGrid.current = false; setSortTick((n) => n + 1) } }}>
@@ -1147,12 +1155,12 @@ export function ClientPane(props: {
                 {structure ? <div className="h"><button className="add-col" onClick={() => setDialog('column')} title={t('Spalte hinzufügen')} aria-label={t('Spalte hinzufügen')}>+</button></div> : <div className="h" />}
               </div>
               {virt.virtual && <div ref={virt.anchorRef} style={{ height: virt.topPad }} aria-hidden />}
-              <fieldset className="ro-fs" disabled={!writable}>
+              <fieldset className="ro-fs" disabled={!writable && !canAdd}>
               {visibleIds.slice(virt.start, virt.end).map((rid) => (
                 <div key={rid} className="row-outer" data-row={rid}>
                   <div className="row-inner">
-                    {shownColumns.map((c, i) =>
-                      isComputed(c) || c.type === 'autonumber' || c.type === 'stamp'
+                    {shownColumns.map((c, i) => {
+                      const cell = isComputed(c) || c.type === 'autonumber' || c.type === 'stamp'
                         ? (() => {
                             const cell = cellData.get(c.id)?.get(rid)
                             return (
@@ -1167,7 +1175,10 @@ export function ClientPane(props: {
                         ? <FileCell key={c.id} doc={doc} tableId={table.id} rowId={rid} col={c} index={fileIndex} />
                         : c.type === 'select'
                         ? <SelectCell key={c.id} doc={doc} tableId={table.id} rowId={rid} col={c} />
-                        : <Cell key={c.id} doc={doc} table={table.id} rowId={rid} col={c} lead={i === 0} />)}
+                        : <Cell key={c.id} doc={doc} table={table.id} rowId={rid} col={c} lead={i === 0} />
+                      // Ohne Schreibrecht an der Spalte (bei sonst schreibbarer Tabelle) ist nur diese Zelle gesperrt
+                      return writable || !canAdd || rights.colAccess(table.id, c.id) === 'write' ? cell : <fieldset key={c.id} className="ro-fs" disabled>{cell}</fieldset>
+                    })}
                     {backlinks.map(({ source, col }) => (
                       <BacklinkCell key={col.id} doc={doc} tables={tables} source={source} rowId={rid} col={col} index={index} />
                     ))}
@@ -1207,7 +1218,7 @@ export function ClientPane(props: {
       )}
       {!props.asOf && table && (
         <div className="addrow-bar">
-          {writable && <button className="add-row" onClick={() => { setSearches((s) => ({ ...s, [table.id]: '' })); setFocusRow(addRow(doc, table.id)) }}>{t('+ Zeile')}</button>}
+          {canAdd && <button className="add-row" onClick={() => { setSearches((s) => ({ ...s, [table.id]: '' })); setFocusRow(addRow(doc, table.id)) }}>{t('+ Zeile')}</button>}
           <span className="rowsearch">
             <input ref={searchRef} type="search" placeholder={t('Suchen …')} aria-label={t('Tabelle durchsuchen')} value={searches[table.id] ?? ''}
               onChange={(e) => setSearches((s) => ({ ...s, [table.id]: e.target.value }))}
@@ -1227,7 +1238,8 @@ export function ClientPane(props: {
 
       {syncOpen && props.sync && <SyncDialog control={{ ...props.sync, objects: tabs.map((x) => {
         const v = x.kind === 'view' ? views.find((y) => y.id === x.id) : undefined
-        return { id: x.id, name: x.name, kind: x.kind, blocked: v ? writeBlocker(v.def, tables.find((y) => y.id === v.def.source), tables) ?? undefined : undefined }
+        const columns = x.kind === 'table' ? tables.find((y) => y.id === x.id)?.columns.map((c) => ({ id: c.id, name: c.name, readOnly: isComputed(c) || c.type === 'autonumber' || c.type === 'stamp' })) : undefined
+        return { id: x.id, name: x.name, kind: x.kind, columns, blocked: v ? writeBlocker(v.def, tables.find((y) => y.id === v.def.source), tables) ?? undefined : undefined }
       }) }} onClose={() => setSyncOpen(false)} />}
 
       {editing && (() => {
