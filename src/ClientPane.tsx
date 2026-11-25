@@ -730,7 +730,10 @@ export function ClientPane(props: {
   const index = useLinkIndex(doc)
   const fileIndex = useFileIndex(doc)
   const [active, setActive] = useState<string | null>(null)
-  const tab = tabs.find((t) => t.id === active) ?? tabs[0]
+  // Abgeleitete Tabellen haben keinen eigenen Reiter, sondern stehen im Menü ihrer Quelltabelle. Ohne sichtbare Quelle (Rechte) behalten sie einen.
+  const sourceOf = (id: string) => views.find((v) => v.id === id)?.def.source
+  const ownTab = (id: string) => { const source = sourceOf(id); return !source || !tables.some((x) => x.id === source) }
+  const tab = tabs.find((t) => t.id === active) ?? tabs.find((t) => ownTab(t.id))
   // Zeilenzahl je Reiter: Tabellen kennt das Modell, abgeleitete Tabellen werden berechnet
   const shownTabs = useMemo(() => tabs.map((t) => {
     const v = t.kind === 'view' ? views.find((x) => x.id === t.id) : undefined
@@ -1060,30 +1063,51 @@ export function ClientPane(props: {
         </div>
       )}
       <nav className="tabs">
-        {shownTabs.map((tb) => {
+        {shownTabs.filter((x) => ownTab(x.id)).map((entry) => {
+          // Ist eine abgeleitete Tabelle gewählt, zeigt der Reiter ihrer Quelle sie an; Platz und Reihenfolge bleiben die der Quelle
+          const tb = (tab?.kind === 'view' && sourceOf(tab.id) === entry.id ? shownTabs.find((x) => x.id === tab.id) : undefined) ?? entry
           const current = tb.id === tab?.id
+          // Verwandte Reiter: die Quelltabelle und ihre abgeleiteten Tabellen zeigen dieselben Objekte; das Menü wechselt zwischen ihnen
+          const source = tb.kind === 'table' ? tb.id : sourceOf(tb.id)
+          const related = current && source ? shownTabs.filter((x) => x.id !== tb.id && (x.id === source || sourceOf(x.id) === source)).sort((a, b) => Number(b.id === source) - Number(a.id === source)) : []
+          const hasMenu = current && (structure || related.length > 0)
           return (
-            <span key={tb.id} className={`tabgroup ${hintClass('table', tb.id)}${current && menuOpen ? ' menu-open' : ''}`}>
-              <button className={current ? 'active' : ''} aria-haspopup={current ? 'menu' : undefined} aria-expanded={current ? menuOpen : undefined}
-                onClick={() => { if (current && structure) setMenuOpen((o) => !o); else { setActive(tb.id); setMenuOpen(false) } }}
-                title={structure ? (current ? t('Menü öffnen – Ziehen zum Umsortieren') : t('Ziehen zum Umsortieren')) : undefined}
-                {...reorderProps('table', tb.id, tb.name)}>
+            <span key={entry.id} className={`tabgroup ${hintClass('table', entry.id)}${current && menuOpen ? ' menu-open' : ''}`}>
+              <button className={current ? 'active' : ''} aria-haspopup={hasMenu ? 'menu' : undefined} aria-expanded={hasMenu ? menuOpen : undefined}
+                onClick={() => { if (hasMenu) setMenuOpen((o) => !o); else { setActive(tb.id); setMenuOpen(false) } }}
+                title={structure ? (current ? t('Menü öffnen – Ziehen zum Umsortieren') : t('Ziehen zum Umsortieren')) : hasMenu ? t('Menü öffnen') : undefined}
+                {...reorderProps('table', entry.id, tb.name)}>
                 <SheetIcon icon={tb.icon} kind={tb.kind} />
                 <span className="tab-name">{tb.name}</span>
-                {current && structure && <span className="tab-caret">▾</span>}</button>
-              {structure && current && menuOpen && (
+                {hasMenu && <span className="tab-caret">▾</span>}</button>
+              {hasMenu && menuOpen && (
                 <div className="tab-popup" role="menu">
-                  <button type="button" role="menuitem" autoFocus onClick={() => {
-                    setMenuOpen(false)
-                    if (tb.kind === 'table') setEditing({ kind: 'table', id: tb.id }); else if (tb.kind === 'map') setMapDialog({ mode: 'edit', id: tb.id }); else setViewDialog({ mode: 'edit', id: tb.id })
-                  }}>{t('Bearbeiten …')}</button>
-                  {tb.kind === 'table' && (
+                  {structure && (
+                    <button type="button" role="menuitem" autoFocus onClick={() => {
+                      setMenuOpen(false)
+                      if (tb.kind === 'table') setEditing({ kind: 'table', id: tb.id }); else if (tb.kind === 'map') setMapDialog({ mode: 'edit', id: tb.id }); else setViewDialog({ mode: 'edit', id: tb.id })
+                    }}>{t('Bearbeiten …')}</button>
+                  )}
+                  {related.length > 0 && (
+                    <div className="tab-related" role="group">
+                      {related.map((x, i) => (
+                        <button type="button" role="menuitem" key={x.id} autoFocus={!structure && i === 0} onClick={() => { setActive(x.id); setMenuOpen(false) }}>
+                          <SheetIcon icon={x.icon} kind={x.kind} />
+                          <span className="tab-name">{x.name}</span>
+                          <span className="tab-count">{x.count}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {structure && tb.kind === 'table' && (
                     <button type="button" role="menuitem" onClick={() => { setMenuOpen(false); setViewDialog({ mode: 'new', sourceId: tb.id }) }}>{t('Abgeleitete Tabelle …')}</button>
                   )}
-                  <button type="button" role="menuitem" className="danger-item" onClick={() => {
-                    setMenuOpen(false)
-                    if (tb.kind === 'table') setDeletingItem({ kind: 'table', id: tb.id }); else if (tb.kind === 'map') setDeletingMap(tb.id); else setDeletingView(tb.id)
-                  }}>{t('Löschen …')}</button>
+                  {structure && (
+                    <button type="button" role="menuitem" className="danger-item" onClick={() => {
+                      setMenuOpen(false)
+                      if (tb.kind === 'table') setDeletingItem({ kind: 'table', id: tb.id }); else if (tb.kind === 'map') setDeletingMap(tb.id); else setDeletingView(tb.id)
+                    }}>{t('Löschen …')}</button>
+                  )}
                 </div>
               )}
             </span>
@@ -1329,7 +1353,7 @@ export function ClientPane(props: {
         return (
           <ConfirmDialog detail={t('Abgeleitete Tabelle „{name}“. Die Quelltabelle und ihre Daten bleiben unverändert.', { name: v.name })}
             onCancel={() => setDeletingView(null)}
-            onConfirm={() => { deleteView(doc, v.id); setActive(null); setDeletingView(null) }} />
+            onConfirm={() => { deleteView(doc, v.id); setActive(v.def.source); setDeletingView(null) }} />
         )
       })()}
 

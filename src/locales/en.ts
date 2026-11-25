@@ -114,6 +114,7 @@ export const en: Record<string, string> = {
   "Zurück zur Dokumentenliste": "Back to the document list",
   "‹ Dokumente": "‹ Documents",
   "Menü öffnen – Ziehen zum Umsortieren": "Open menu – drag to reorder",
+  "Menü öffnen": "Open menu",
   "Ziehen zum Umsortieren": "Drag to reorder",
   "Bearbeiten …": "Edit …",
   "Abgeleitete Tabelle …": "Derived table …",

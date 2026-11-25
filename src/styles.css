@@ -272,6 +272,12 @@ textarea.cell { resize: none; line-height: 1.35; overflow: hidden; display: bloc
 .tab-popup button { border: none; background: none; text-align: left; padding: 8px 12px; border-radius: 7px; font-style: normal; color: var(--c-1f2a30); }
 .tab-popup button:hover, .tab-popup button:focus-visible { background: var(--c-eef4ff); outline: none; }
 .tab-popup .danger-item { color: var(--c-b4281c); }
+.tab-related { display: grid; border-block: 1px solid var(--c-d5dce0); margin: 4px 0; padding: 4px 0; max-height: 50vh; overflow-y: auto; }
+.tab-related:first-child { border-top: none; margin-top: 0; padding-top: 0; }
+.tab-related:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+.tab-related button { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+.tab-related .tab-name { flex: 1; max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
+.tab-related .tab-count { color: var(--c-6e6e73); font-size: 13px; padding-left: 8px; }
 .view-bar { display: flex; align-items: center; gap: 12px; font-size: 14px; color: var(--c-667781); }
 .tabs { z-index: 5; }
 
