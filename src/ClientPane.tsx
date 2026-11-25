@@ -18,17 +18,17 @@ import { useVirtualRows } from './virtualRows'
 import { useRowTransitions } from './rowTransitions'
 import { allowsMultiTarget, targetAvailable } from './relationRules'
 import { beginTileDrag, registerDropTarget, type DragPayload } from './tileDrag'
-import { computeView } from './viewEngine'
+import { activeFilters, computeView } from './viewEngine'
 import { FooterCell } from './Footer'
 import { GeoCell } from './GeoCell'
-import { writeBlocker } from './viewWrite'
+import { viewEditable, writeBlocker } from './viewWrite'
 import { RecordForm, commitRecord, firstTextColumn, formColumns, updateRecord, type ExistingRecord } from './RecordForm'
 import { ReprContext, TileContent, tileClasses, useReprs } from './ReprTile'
 import { initials, reprMap, type Repr } from './repr'
 import { columnCells, newCtx, type Cell as CellData } from './cells'
 import { FormulaSyntaxError, parseFormula, parseTemplate } from './formula'
 import { effectiveType } from './columnTypes'
-import { useRights } from './rights'
+import { useRights, viewOnly, RightsContext, type Rights } from './rights'
 import { hiddenByRights } from './rightsView'
 import { plainOf, ringOf } from './colCrypt'
 import { ViewDialog } from './ViewDialog'
@@ -322,7 +322,7 @@ function RelationCell(props: {
   // Ablageziel für gezogene Kacheln (Umschalt oder Alt/Option beim Loslassen = kopieren statt verschieben); die Funktionen
   // greifen auf den aktuellen Stand zu, darum wird bei jedem Zeichnen neu angemeldet.
   useEffect(() => cellRef.current ? registerDropTarget(cellRef.current, {
-    accepts: (p) => !!col.target && p.targetTable === col.target && (sameSlot(p) || targetAvailable(index, col, p.targetRow, ignoreFor(p), exists)),
+    accepts: (p) => !ro && !!col.target && p.targetTable === col.target && (sameSlot(p) || targetAvailable(index, col, p.targetRow, ignoreFor(p), exists)),
     hover: (x, y, _copy, p) => { setOver(false); const s = dropSpot(x, y, p); if (s && !s.keep) setIns((o) => (o && s.line && o.index === s.line.index && o.lift === s.line.lift ? o : s.line)) },
     leave: () => { setOver(false); setIns(null) },
     drop: (x, y, copy, p) => {
@@ -1029,6 +1029,51 @@ export function ClientPane(props: {
     ;(cell?.querySelector<HTMLElement>(focusable) ?? row.querySelector<HTMLElement>(focusable))?.focus({ preventScroll: true })
     setFocusRow(null)
   }, [focusRow, rowIds, visibleIds, virt.start, virt.end])
+  /** Eine Zelle, wie Tabellen und abgeleitete Tabellen sie zeigen; `computed` ist der Wert berechneter Spalten. */
+  const valueCell = (source: TableInfo, c: ColumnInfo, rid: string, i: number, computed?: { text: string; error?: string }) =>
+    ringOf(doc).locked(c.id)
+      ? <div key={c.id} className="c locked-cell" title={t('Vertraulich: Der Schlüssel fehlt noch. Ein Admin muss ihn senden.')}>🔒</div>
+      : isComputed(c) || c.type === 'autonumber' || c.type === 'stamp'
+      ? (
+          <div key={c.id} className={`c vcell${computed?.error ? ' err' : ''}`}>
+            <span title={computed?.error ?? computed?.text}>{computed?.text}</span>
+          </div>
+        )
+      : c.type === 'relation'
+      ? <RelationCell key={c.id} doc={doc} tables={tables} table={source} rowId={rid} col={c} index={index} />
+      : c.type === 'file'
+      ? <FileCell key={c.id} doc={doc} tableId={source.id} rowId={rid} col={c} index={fileIndex} />
+      : c.type === 'select'
+      ? <SelectCell key={c.id} doc={doc} tableId={source.id} rowId={rid} col={c} />
+      : <Cell key={c.id} doc={doc} table={source.id} rowId={rid} col={c} lead={i === 0} />
+  // Zellen einer abgeleiteten Tabelle: dieselbe Darstellung und, wo man schreiben darf, direkt bearbeitbar. Wo das nicht geht (berechnete Werte, Verknüpfung in eine
+  // für den Betrachter unsichtbare Tabelle), bleibt es beim Text.
+  const lookRights = useMemo(() => viewOnly(rights), [rights])
+  const viewSource = view ? all.tables.find((x) => x.id === view.def.source) : undefined
+  // Über die Sicht selbst schreibbar (Recht an der Sicht, viewWrite.ts)? Bedingungsspalten ändert man dann nur im Formular, das vor dem
+  // Speichern prüft, ob die Zeile den Bedingungen noch genügt; sonst würde ein Zwischenstand beim Tippen beim Empfang abgelehnt.
+  const viewWritable = !props.asOf && !!view && !!viewSource && rights.access(view.id) === 'write' && !writeBlocker(view.def, viewSource, all.tables, (c) => ringOf(doc).isProtected(c))
+  const filterCols = new Set(view && viewSource ? activeFilters(view.def, viewSource, all.tables).map((f) => f.col.id) : [])
+  /** 'own': Schreibrecht an Tabelle oder Spalte; 'via': nur über die Sicht; null: nur ansehen */
+  const viewCellWrite = (c: ColumnInfo): 'own' | 'via' | null => {
+    if (props.asOf || !viewSource || view?.def.group.mode !== 'none' || isComputed(c) || c.type === 'autonumber' || c.type === 'stamp') return null
+    if (rights.colAccess(viewSource.id, c.id) === 'write') return 'own'
+    return viewWritable && viewEditable(c) && !filterCols.has(c.id) ? 'via' : null
+  }
+  const viewHasEdits = viewWritable || !!viewSource?.columns.some((c) => !c.hidden && viewCellWrite(c))
+  const viewCell = (colId: string, rid: string, i: number): ReactNode => {
+    const c = viewSource?.columns.find((x) => x.id === colId)
+    if (!viewSource || !c || isComputed(c) || c.type === 'autonumber' || c.type === 'stamp') return null
+    if (c.type === 'relation' && !tables.some((x) => x.id === c.target)) return null
+    const cell = valueCell(viewSource, c, rid, i)
+    const write = viewCellWrite(c)
+    if (write) {
+      const granted: Rights = write === 'own' ? rights : { ...rights, colAccess: (tid, id) => (tid === viewSource.id && id === c.id ? 'write' : rights.colAccess(tid, id)) }
+      return <div key={c.id} className="vedit"><RightsContext.Provider value={granted}>{cell}</RightsContext.Provider></div>
+    }
+    // Links bleiben außerhalb der Sperre, damit man sie öffnen kann
+    return <RightsContext.Provider key={c.id} value={lookRights}>{c.type === 'link' ? cell : <fieldset className="ro-fs" disabled>{cell}</fieldset>}</RightsContext.Provider>
+  }
   const template = table
     ? [
         ...shownColumns.map((c, i) =>
@@ -1127,7 +1172,7 @@ export function ClientPane(props: {
 
       {!synced && <p className="hint">{t('Lade lokale Daten …')}</p>}
       {synced && !tab && <p className="hint">{rights.active && !rights.admin ? t('Noch keine Rechte: Ein Admin muss dir Zugriff auf Tabellen geben.') : t('Noch keine Tabelle. Lege eine an.')}</p>}
-      {view && <ViewGrid key={view.id} doc={doc} view={view} tables={tables} writable={!props.asOf && rights.access(view.id) === 'write'} />}
+      {view && <ViewGrid key={view.id} doc={doc} view={view} renderCell={viewCell} source={viewSource} allTables={all.tables} writable={!props.asOf && rights.access(view.id) === 'write'} />}
       {mapTab && <MapView key={mapTab.id} doc={doc} map={mapTab} tables={tables} onOpenRecord={(tableId, rowId) => setMapRecord({ tableId, rowId })} />}
 
       {table && (
@@ -1186,24 +1231,7 @@ export function ClientPane(props: {
                 <div key={rid} className="row-outer" data-row={rid}>
                   <div className="row-inner">
                     {shownColumns.map((c, i) => {
-                      const cell = ringOf(doc).locked(c.id)
-                        ? <div key={c.id} className="c locked-cell" title={t('Vertraulich: Der Schlüssel fehlt noch. Ein Admin muss ihn senden.')}>🔒</div>
-                        : isComputed(c) || c.type === 'autonumber' || c.type === 'stamp'
-                        ? (() => {
-                            const cell = cellData.get(c.id)?.get(rid)
-                            return (
-                              <div key={c.id} className={`c vcell${cell?.error ? ' err' : ''}`}>
-                                <span title={cell?.error ?? cell?.text}>{cell?.text}</span>
-                              </div>
-                            )
-                          })()
-                        : c.type === 'relation'
-                        ? <RelationCell key={c.id} doc={doc} tables={tables} table={table} rowId={rid} col={c} index={index} />
-                        : c.type === 'file'
-                        ? <FileCell key={c.id} doc={doc} tableId={table.id} rowId={rid} col={c} index={fileIndex} />
-                        : c.type === 'select'
-                        ? <SelectCell key={c.id} doc={doc} tableId={table.id} rowId={rid} col={c} />
-                        : <Cell key={c.id} doc={doc} table={table.id} rowId={rid} col={c} lead={i === 0} />
+                      const cell = valueCell(table, c, rid, i, cellData.get(c.id)?.get(rid))
                       // Ohne Schreibrecht an der Spalte (bei sonst schreibbarer Tabelle) ist nur diese Zelle gesperrt
                       return writable || !canAdd || rights.colAccess(table.id, c.id) === 'write' ? cell : <fieldset key={c.id} className="ro-fs" disabled>{cell}</fieldset>
                     })}
@@ -1259,7 +1287,9 @@ export function ClientPane(props: {
       )}
       {view && !props.asOf && (
         <div className="addrow-bar view-bar">
-          <span>{t('Abgeleitete Tabelle aus „{name}“ – nur Lesen.', { name: tables.find((x) => x.id === view.def.source)?.name ?? '?' })}</span>
+          <span>{viewHasEdits
+            ? t('Abgeleitete Tabelle aus „{name}“.', { name: viewSource?.name ?? '?' })
+            : t('Abgeleitete Tabelle aus „{name}“ – nur Lesen.', { name: viewSource?.name ?? '?' })}</span>
           <button type="button" onClick={() => setViewDialog({ mode: 'edit', id: view.id })}>{t('Bearbeiten …')}</button>
         </div>
       )}

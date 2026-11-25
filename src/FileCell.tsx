@@ -56,6 +56,7 @@ async function download(ref: FileRef): Promise<boolean> {
 function FileChip(props: { file: FileRef; slot: CellSlot; locked?: boolean; onOpen: () => void; onRemove: () => void }) {
   const { file } = props
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null) // Touch: langes Drücken statt Kreuz
+  const touchMenu = isMobileUI && !props.locked
   const [isDragging, setIsDragging] = useState(false)
   const isImage = file.mime.startsWith('image/')
   const { url, missing } = useBlobUrl(isImage ? [thumbKey(file.hash), file.hash] : [file.hash])
@@ -64,8 +65,8 @@ function FileChip(props: { file: FileRef; slot: CellSlot; locked?: boolean; onOp
   return (
     <div className={`filechip ${imageOnly ? 'image-only' : ''} ${missing ? 'missing' : ''} ${isDragging ? 'dragging' : ''}`} onClick={props.onOpen}
       draggable={!isMobileUI && !props.locked}
-      onPointerDown={isMobileUI ? (e) => beginLongPress(e.nativeEvent, (x, y) => setMenu({ x, y })) : undefined}
-      onContextMenu={isMobileUI ? (e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY }) } : undefined}
+      onPointerDown={touchMenu ? (e) => beginLongPress(e.nativeEvent, (x, y) => setMenu({ x, y })) : undefined}
+      onContextMenu={touchMenu ? (e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY }) } : undefined}
       onDragStart={(e) => {
         draggingFile = { slot: props.slot, file }
         e.dataTransfer.effectAllowed = 'copyMove'
@@ -79,7 +80,7 @@ function FileChip(props: { file: FileRef; slot: CellSlot; locked?: boolean; onOp
         : <div className="ext">{isImage ? 'BILD' : ext(file.name)}</div>}
       {!imageOnly && !isImage && <div className="file-name">{file.name}</div>}
       {menu && <ItemMenu x={menu.x} y={menu.y} label={t('Datei entfernen')} onRemove={props.onRemove} onClose={() => setMenu(null)} />}
-      {!isMobileUI && <button type="button" className="tile-x" title={t('Datei entfernen')}
+      {!isMobileUI && !props.locked && <button type="button" className="tile-x" title={t('Datei entfernen')}
         onClick={(e) => { e.stopPropagation(); props.onRemove() }}>✕</button>}
     </div>
   )
@@ -188,7 +189,7 @@ export function FileCell(props: {
               locked={!writable} onRemove={() => { if (writable) setRemoving(e.item) }} />
           </AnimItem>
         ))}
-        {!full && <button type="button" className="add-tile" title={t('Datei hinzufügen (oder hierher ziehen)')}
+        {!full && writable && <button type="button" className="add-tile" title={t('Datei hinzufügen (oder hierher ziehen)')}
           onClick={() => input.current?.click()}>+</button>}
         {busy > 0 && <span className="hint">{t('lädt …')}</span>}
         {error && <span className="hint err">{error}</span>}

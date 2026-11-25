@@ -866,3 +866,11 @@ button.invite-row:hover .plus-avatar { border-color: #0a84ff; color: #0a84ff; }
 .ro-fs:disabled button { cursor: default; }
 
 .locked-cell { display: flex; align-items: center; color: var(--c-667781); cursor: default; }
+
+/* Zellen einer abgeleiteten Tabelle: wie in der Tabelle, aber ohne Eingabehinweise; Klicks auf gesperrte Felder gelten der Zeile */
+.viewgrid .ro-fs:disabled :is(input, textarea, select, button) { pointer-events: none; }
+.viewgrid .ro-fs:disabled :is(input, textarea)::placeholder, .viewgrid input[readonly]::placeholder { color: transparent; -webkit-text-fill-color: transparent; }
+.viewgrid .ro-fs:disabled .select-empty { visibility: hidden; }
+.vedit { display: contents; }
+.viewgrid .vedit > .c { cursor: auto; }
+.viewgrid .ro-fs:disabled .cell-date .placeholder { visibility: hidden; }

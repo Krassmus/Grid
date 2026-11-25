@@ -4,6 +4,7 @@ import { addOption, deleteOption, setCell, updateOption, OPTION_COLORS, type Col
 import { ConfirmDialog, Modal } from './Modal'
 import { useCell } from './useTables'
 import { t } from './i18n'
+import { useRights } from './rights'
 
 /** Farben der Optionen: Hintergrund, Text, Punkt. Das Dokument speichert nur die Farb-ID. */
 const PALETTE: Record<string, { bg: string; fg: string; dot: string }> = {
@@ -35,6 +36,7 @@ function SelectPicker(props: {
   onManage: () => void
   onClose: () => void
 }) {
+  const structure = useRights().structure // Optionen gehören zur Struktur der Spalte
   const { doc, tableId, rowId, col } = props
   const options = col.options ?? []
   const [name, setName] = useState('')
@@ -78,22 +80,22 @@ function SelectPicker(props: {
               {o.id === props.value && <span className="check">✓</span>}
             </button>
           ))}
-          {options.length === 0 && <p className="hint">{t('Noch keine Optionen. Lege unten eine an.')}</p>}
+          {options.length === 0 && <p className="hint">{structure ? t('Noch keine Optionen. Lege unten eine an.') : t('Keine Optionen.')}</p>}
           {props.value && (
             <button type="button" className={`opt-row clear ${active === options.length ? 'active' : ''}`}
               onClick={() => choose(null)} onMouseMove={() => setActive(options.length)}>{t('Keine Auswahl')}</button>
           )}
         </div>
-        <form className="opt-new" onSubmit={(e) => { e.preventDefault(); create() }}>
+        {structure && <form className="opt-new" onSubmit={(e) => { e.preventDefault(); create() }}>
           <input autoFocus placeholder={t('Neue Option …')} value={name}
             onChange={(e) => { setName(e.target.value); setActive(null) }}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !name.trim() && active !== null) { e.preventDefault(); choose(entries[active] ?? null) }
             }} />
           <button type="submit" className="primary" disabled={!name.trim()}>{t('Anlegen')}</button>
-        </form>
+        </form>}
         <div className="actions split">
-          <button type="button" onClick={props.onManage}>{t('Optionen verwalten')}</button>
+          {structure ? <button type="button" onClick={props.onManage}>{t('Optionen verwalten')}</button> : <span />}
           <button type="button" onClick={props.onClose}>{t('Schließen')}</button>
         </div>
       </div>

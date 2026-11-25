@@ -59,5 +59,11 @@ export function withLocks(rights: Rights, locked: (column: string) => boolean): 
   return { ...rights, colAccess, canAdd: (table, columns) => rights.access(table) === 'write' || columns.some((c) => colAccess(table, c) === 'write') }
 }
 
+/** Wie `rights`, aber nur zum Ansehen (Zellen einer abgeleiteten Tabelle); was verborgen ist, bleibt verborgen. */
+export function viewOnly(rights: Rights): Rights {
+  const cap = (a: Access): Access => (a === 'write' ? 'read' : a)
+  return { ...rights, access: (id) => cap(rights.access(id)), colAccess: (table, column) => cap(rights.colAccess(table, column)), canAdd: () => false, structure: false }
+}
+
 export const RightsContext = createContext<Rights>(FULL_RIGHTS)
 export const useRights = () => useContext(RightsContext)

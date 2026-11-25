@@ -115,6 +115,7 @@ export const en: Record<string, string> = {
   "‹ Dokumente": "‹ Documents",
   "Menü öffnen – Ziehen zum Umsortieren": "Open menu – drag to reorder",
   "Menü öffnen": "Open menu",
+  "Abgeleitete Tabelle aus „{name}“.": "Derived table from “{name}”.",
   "Ziehen zum Umsortieren": "Drag to reorder",
   "Bearbeiten …": "Edit …",
   "Abgeleitete Tabelle …": "Derived table …",

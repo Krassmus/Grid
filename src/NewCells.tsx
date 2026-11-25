@@ -5,6 +5,7 @@ import { Avatar } from './Avatar'
 import { DURATION, LINK, PERSON } from './columnTypes'
 import { formatDuration, parseDuration } from './duration'
 import { openExternal } from './externalLink'
+import { useRights } from './rights'
 import { getIdentity } from './identity'
 import { linkHref } from './link'
 import { Modal } from './Modal'
@@ -19,9 +20,10 @@ export function LinkInput({ doc, table, rowId, col, value }: { doc: Y.Doc; table
   const kind = LINK.config(col).kind
   const text = typeof value === 'string' ? value : ''
   const href = linkHref(kind, text)
+  const ro = useRights().colAccess(table, col.id) !== 'write'
   return (
     <div className="c link-cell">
-      <input className="cell" type="text" enterKeyHint="next" value={text} placeholder={col.name} spellCheck={false} autoCapitalize="off" autoCorrect="off"
+      <input className="cell" type="text" enterKeyHint="next" readOnly={ro} value={text} placeholder={col.name} spellCheck={false} autoCapitalize="off" autoCorrect="off"
         inputMode={kind === 'email' ? 'email' : kind === 'phone' ? 'tel' : 'url'}
         onChange={(e) => setCell(doc, table, rowId, col.id, e.target.value)} />
       {href && (
