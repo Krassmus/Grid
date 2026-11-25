@@ -5,6 +5,7 @@ import { ConfirmDialog } from './Modal'
 import { ago, uniqueName } from './documents'
 import { AccountButton } from './ProfileDialog'
 import { isThemeChoice, readTheme, setTheme, type ThemeChoice } from './theme'
+import { readZoom, setZoom, zoomLabel, ZOOM_STEPS } from './zoom'
 import { t, language, useLanguageChoice, languageOptions, isLanguageChoice, setLanguage } from './i18n'
 
 export interface DocFile { name: string; path: string; modified: number; size: number }
@@ -29,6 +30,7 @@ export function DocumentList(props: {
   const [name, setName] = useState('')
   const [deleting, setDeleting] = useState<DocFile | null>(null)
   const [theme, setThemeState] = useState<ThemeChoice>(readTheme())
+  const [zoom, setZoomState] = useState(readZoom)
   const [problem, setProblem] = useState<string | null>(null)
 
   const load = useCallback(async () => {
@@ -95,10 +97,18 @@ export function DocumentList(props: {
               onClick={() => { if (isThemeChoice(v)) { setTheme(v); setThemeState(v) } }}>{label}</button>
           ))}
         </div>
-        <span>{t('Sprache')}</span>
-        <select value={lang} aria-label={t('Sprache')} onChange={(e) => { if (isLanguageChoice(e.target.value)) setLanguage(e.target.value) }}>
-          {languageOptions().map((l) => <option key={l.value} value={l.value}>{l.label}</option>)}
-        </select>
+        <label>
+          {t('Größe')}
+          <select value={zoom} aria-label={t('Größe der Oberfläche')} onChange={(e) => { const v = Number(e.target.value); setZoom(v); setZoomState(v) }}>
+            {ZOOM_STEPS.map((v) => <option key={v} value={v}>{zoomLabel(v)}</option>)}
+          </select>
+        </label>
+        <label>
+          {t('Sprache')}
+          <select value={lang} aria-label={t('Sprache')} onChange={(e) => { if (isLanguageChoice(e.target.value)) setLanguage(e.target.value) }}>
+            {languageOptions().map((l) => <option key={l.value} value={l.value}>{l.label}</option>)}
+          </select>
+        </label>
       </footer>
 
       {deleting && <ConfirmDialog detail={t('Dokument „{name}“ von diesem Gerät. Eine Kopie auf dem Server bleibt erhalten.', { name: deleting.name })}

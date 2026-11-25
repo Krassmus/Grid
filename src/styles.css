@@ -122,6 +122,8 @@ button.primary:disabled { opacity: .4; cursor: default; }
 
 /* ---------- Löschen bestätigen ---------- */
 .confirm { width: min(340px, 90vw); }
+/* Bei starker Vergrößerung ist das Fenster rechnerisch sehr niedrig: Der Weg zurück muss erreichbar bleiben. */
+.dialog.settings-dialog { box-sizing: border-box; max-height: calc(100vh - 16px); overflow-y: auto; overscroll-behavior: contain; }
 .confirm-detail { margin: 0; color: var(--c-6e6e73); font-size: 14px; overflow-wrap: anywhere; }
 button.danger { background: #d92d20; border-color: #d92d20; color: #fff; }
 
@@ -615,6 +617,9 @@ main.single { padding-top: env(safe-area-inset-top); padding-left: env(safe-area
 
 /* Dokumentenliste (Startbildschirm auf iPad/iPhone) */
 .doclist { max-width: 720px; margin: 0 auto; padding: calc(24px + env(safe-area-inset-top)) 20px calc(24px + env(safe-area-inset-bottom)); box-sizing: border-box; min-height: 100dvh; display: flex; flex-direction: column; gap: 16px; }
+/* Die App-Fläche ist genau fensterhoch und scrollt nicht selbst, also scrollt die Liste */
+main.single > .doclist { flex: 1 1 0; min-height: 0; width: 100%; overflow-y: auto; overscroll-behavior: contain; }
+.doclist > * { flex-shrink: 0; }
 .doclist header { display: flex; flex-direction: column; gap: 12px; }
 .doclist h1 { margin: 0; font-size: 30px; }
 .doclist-actions { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -629,7 +634,7 @@ main.single { padding-top: env(safe-area-inset-top); padding-left: env(safe-area
 .doclist-open small { color: var(--c-666677); font-size: 13px; }
 .doclist-del { color: #c0392b; }
 .doclist-empty { padding: 24px 4px; }
-.doclist footer { margin-top: auto; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 12px; border-top: 1px solid var(--c-e1e7ea); color: var(--c-666677); font-size: 14px; }
+.doclist footer { margin-top: auto; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding-top: 12px; border-top: 1px solid var(--c-e1e7ea); color: var(--c-666677); font-size: 14px; }
 .seg { display: inline-flex; border: 1px solid var(--c-d5dce0); border-radius: 10px; overflow: hidden; }
 .doclist .seg button { border: none; border-radius: 0; padding: 6px 14px; background: none; }
 .doclist .seg button.on { background: var(--c-e9edef); font-weight: 600; }
@@ -844,7 +849,9 @@ button.invite-row:hover .plus-avatar { border-color: #0a84ff; color: #0a84ff; }
 .asof-play, .asof-close { flex: none; width: 46px; height: 46px; padding: 0; display: flex; align-items: center; justify-content: center; border-radius: 8px; font-size: 18px; line-height: 1; }
 .asof-close { font-size: 22px; }
 .asof-axis { display: flex; justify-content: space-between; color: var(--c-666677); font-size: 11px; margin-top: 2px; }
-.doclist footer span:nth-of-type(2) { margin-left: auto; }
+.doclist footer label { display: flex; align-items: center; gap: 8px; }
+.doclist footer select { font: inherit; color: inherit; min-height: 36px; padding: 4px 8px; border: 1px solid var(--c-d5dce0); border-radius: 10px; background: var(--c-ffffff); }
+.doclist footer label:first-of-type { margin-left: auto; }
 .groups-dialog .group-card { border: 1px solid var(--c-e1e7ea); border-radius: 14px; background: var(--c-f9faf8); padding: 0 14px; }
 .groups-dialog .group-card summary { cursor: pointer; padding: 12px 0; list-style: none; display: flex; gap: 10px; align-items: baseline; }
 .groups-dialog .group-card summary::-webkit-details-marker { display: none; }

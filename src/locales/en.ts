@@ -7,6 +7,8 @@ export const en: Record<string, string> = {
   "Speichern": "Save",
   "Sprache": "Language",
   "Erscheinungsbild": "Appearance",
+  "Größe der Oberfläche": "Interface size",
+  "Größe": "Size",
   "Systemstandard": "System default",
   "Hell": "Light",
   "Dunkel": "Dark",

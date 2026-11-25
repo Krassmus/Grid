@@ -9,6 +9,7 @@
     "core:default",
     "core:window:allow-set-title",
     "core:window:allow-destroy",
+    "core:webview:allow-set-webview-zoom",
     "dialog:default",
     "iap:default",
     {
