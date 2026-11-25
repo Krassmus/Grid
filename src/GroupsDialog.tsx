@@ -92,7 +92,7 @@ export function GroupsDialog(props: { control: MembersControl; onClose: () => vo
                     return (
                       <Fragment key={o.id}>
                         <tr>
-                          <td><strong>{o.name}</strong> <small>{kindLabel(o.kind)}</small>{o.kind === 'view' && o.blocked && <small className="hint" style={{ display: 'block' }}>{o.blocked}</small>}</td>
+                          <td><strong>{o.name}</strong> <small>{kindLabel(o.kind)}</small>{o.kind === 'view' && o.blocked && <small className="hint" style={{ display: 'block' }}>{o.blocked}</small>}{o.kind === 'view' && !o.blocked && o.note && <small className="hint" style={{ display: 'block' }}>{o.note}</small>}</td>
                           <td>
                             <select value={mode} disabled={busy} aria-label={t('Zugriff auf {name}', { name: o.name })} onChange={(e) => choose(id, o, e.target.value)}>
                               <option value="none">{t('Kein Zugriff')}</option>
@@ -104,7 +104,7 @@ export function GroupsDialog(props: { control: MembersControl; onClose: () => vo
                         </tr>
                         {mode === 'columns' && (o.columns ?? []).map((c) => (
                           <tr key={c.id} className="col-right">
-                            <td><small>{c.name}</small></td>
+                            <td><small>{c.name}</small>{c.encrypted && <small title={t('verschlüsselt')}> 🔒</small>}</td>
                             <td>
                               <select value={levelOf(id, c.id)} disabled={busy} aria-label={t('Zugriff auf Spalte {name}', { name: c.name })}
                                 onChange={(e) => void act([{ type: 'grant', group: id, object: c.id, level: e.target.value as Level }])}>

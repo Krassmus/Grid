@@ -27,7 +27,9 @@ import { isMobileUI } from './platform'
 import { uniqueName } from './documents'
 import { forgetRecent, noteRecent, readRecent, writeRecent } from './recentFiles'
 import { t, useLanguage } from './i18n'
-import { RightsContext, rightsFor } from './rights'
+import { RightsContext, rightsFor, withLocks } from './rights'
+import { ringOf } from './colCrypt'
+import { useRingVersion } from './useTables'
 import { accountIdNow } from './identity'
 
 /** Normalfall: ein Dokument, ein Client. Mit ?sim in der URL: zwei simulierte Clients zum Testen von Merges. */
@@ -68,7 +70,9 @@ function Single() {
   const [members, setMembers] = useState<MembersInfo | null>(null)
   const profiles = useProfiles(session?.doc ?? NO_DOC)
   // Rechte dieses Kontos (Gruppen im Admin-Protokoll, docs/RIGHTS.md); ohne Protokoll oder ohne Gruppen gilt alles
-  const rights = useMemo(() => rightsFor(session?.adminState ?? null, accountIdNow()), [session, members, members?.state]) // eslint-disable-line react-hooks/exhaustive-deps
+  const baseRights = useMemo(() => rightsFor(session?.adminState ?? null, accountIdNow()), [session, members, members?.state]) // eslint-disable-line react-hooks/exhaustive-deps
+  const ringV = useRingVersion(session?.doc ?? NO_DOC)
+  const rights = useMemo(() => (session ? withLocks(baseRights, (c) => ringOf(session.doc).locked(c)) : baseRights), [baseRights, session, ringV]) // eslint-disable-line react-hooks/exhaustive-deps
   const adminOnlyLogsRef = useRef(false)
   adminOnlyLogsRef.current = rights.active && !rights.admin // Änderungsprotokoll und Zeitreise nennen Tabellen und Werte: bei aktiver Rechteverwaltung nur für Admins
   useEffect(() => (session ? installAudit(session.doc) : undefined), [session?.doc]) // eslint-disable-line react-hooks/exhaustive-deps

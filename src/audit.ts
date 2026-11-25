@@ -11,6 +11,7 @@ import { accountIdNow } from './identity'
 import { linksOf, personName, personIds, tablesOf } from './model'
 import { plainText } from './richText'
 import { t } from './i18n'
+import { COLCRYPT, ringOf } from './colCrypt'
 
 /** Text ohne Formatierung; nur Werte mit Markierungen brauchen die (browserabhängige) Umwandlung. */
 const plain = (v: string) => (typeof document !== 'undefined' && v.includes('<') ? plainText(v) : v)
@@ -152,6 +153,7 @@ const installed = new WeakSet<Y.Doc>()
 export function installAudit(doc: Y.Doc): () => void {
   if (installed.has(doc)) return () => {}
   installed.add(doc)
+  const ring = ringOf(doc)
   const tables = tablesOf(doc)
   const tableNames = new Map<string, string>()
   const colNames = new Map<string, string>() // „tabelle.spalte“
@@ -166,6 +168,7 @@ export function installAudit(doc: Y.Doc): () => void {
 
   const colType = (tb: string, col: string): string | undefined => tables.get(tb)?.get('cols')?.get(col)?.get('type')
   const show = (tb: string, col: string, v: unknown): string => {
+    if (ring.isProtected(col)) return '' // vertrauliche Spalten: keine Werte ins Protokoll (alle Mitglieder könnten es lesen)
     if (v === null || v === undefined || v === false || v === '') return ''
     const cell = tables.get(tb)?.get('cols')?.get(col)
     const type = cell?.get('type')
@@ -191,6 +194,7 @@ export function installAudit(doc: Y.Doc): () => void {
     const order: string[] = tab.get('colOrder')?.toArray() ?? []
     const text = (cid: string): string => {
       const c = cols?.get(cid)
+      if (ring.isProtected(cid)) return ''
       const v = valueOf(row, cid)
       if (v === undefined || v === null) return ''
       if (c?.get('type') === 'select') return c.get('options')?.get(String(v))?.name ?? ''
@@ -211,7 +215,7 @@ export function installAudit(doc: Y.Doc): () => void {
   const optText = (o: unknown) => (o && typeof o === 'object' ? String((o as { name?: unknown }).name ?? '') : '')
 
   const collect = (events: Y.YEvent<any>[], tr: Y.Transaction) => {
-    if (!tr.local || tr.origin === AUDIT) return
+    if (!tr.local || tr.origin === AUDIT || tr.origin === COLCRYPT) return
     const now = Date.now(), a = accountIdNow()
     const out: AuditEntry[] = [], hidden: Op[] = []
     const newRows = new Set<string>(), newCols = new Set<string>(), newTabs = new Set<string>(), delCols = new Set<string>()
@@ -302,7 +306,7 @@ export function installAudit(doc: Y.Doc): () => void {
 
   // Relationen: Schlüssel „tabelle|zeile|spalte|ziel“, Wert = Position in der Zelle
   const collectLinks = (event: Y.YMapEvent<any>, tr: Y.Transaction) => {
-    if (!tr.local || tr.origin === AUDIT) return
+    if (!tr.local || tr.origin === AUDIT || tr.origin === COLCRYPT) return
     const now = Date.now(), a = accountIdNow()
     const split = (key: string) => { const [tb, rid, cid, target] = key.split('|'); return { tb, rid, cid, target } }
     const targetLabel = (tb: string, cid: string, target: string) => {

@@ -7,9 +7,11 @@ import { fingerprint, getIdentity } from './identity'
 import { makeInvite } from './invite'
 import { DocKeys } from './docKeys'
 import { iapAvailable, syncPurchases } from './iap'
-import { publishProfile } from './model'
+import { publishProfile, tablesOf } from './model'
 import { getProfile, onProfileChange } from './profile'
-import { replay, type AdminEntry, type AdminState, type Role } from './adminLog'
+import { applyEntry, buildGroupEntry, replay, type AdminEntry, type AdminState, type Role } from './adminLog'
+import { colKeysOf, ringOf } from './colCrypt'
+import { reconcileColumns } from './colKeys'
 import { judge, RightsTimeline } from './updateGuard'
 import { accountIdNow } from './identity'
 import { t } from './i18n'
@@ -67,7 +69,13 @@ export class FileSession {
     publish()
     this.publishProfile = publish
     const offProfile = onProfileChange(publish)
-    const detachSync = () => { offKey(); offProfile(); this.publishProfile = null; this.attached = false; this.conn?.close(); this.conn = null }
+    // Schlüssel öffnen und (als Admin) abgleichen, wenn Schlüssel im Dokument ankommen oder Spalten dazukommen
+    const colSoon = () => this.colKeysSoon()
+    const onTables = (events: Y.YEvent<any>[]) => { if (events.some((e) => e.path.length <= 2)) this.colKeysSoon() }
+    colKeysOf(this.doc).observe(colSoon)
+    tablesOf(this.doc).observeDeep(onTables)
+    this.colKeysSoon()
+    const detachSync = () => { offKey(); offProfile(); colKeysOf(this.doc).unobserve(colSoon); tablesOf(this.doc).unobserveDeep(onTables); clearTimeout(this.colTimer); this.publishProfile = null; this.attached = false; this.conn?.close(); this.conn = null }
     if (!this.path) return detachSync
     const onUpdate = (update: Uint8Array) => { this.pending.push(update); this.schedule() }
     this.tables = new Materializer(this.doc)
@@ -79,7 +87,43 @@ export class FileSession {
     }
   }
 
-  private setSyncState(s: SyncState | null) { this.syncState = s; this.onSyncState?.(s) }
+  private setSyncState(s: SyncState | null) {
+    const wasOnline = this.syncState?.status === 'online'
+    this.syncState = s; this.onSyncState?.(s)
+    if (s?.status === 'online' && !wasOnline) this.colKeysSoon()
+  }
+
+  // ----- Vertrauliche Spalten (docs/RIGHTS.md): Schlüssel öffnen, als Admin Schlüssel verteilen und Zellen verschlüsseln -----
+  private colTimer: ReturnType<typeof setTimeout> | undefined
+  private colBusy: Promise<void> = Promise.resolve()
+  private colKeysSoon() {
+    clearTimeout(this.colTimer)
+    this.colTimer = setTimeout(() => { this.colBusy = this.colBusy.then(() => this.colKeysNow()).catch(() => {}) }, 500)
+  }
+  private async colKeysNow(state: AdminState | null = this.adminState) {
+    if (!state || !this.meta.sync) return
+    const me = await getIdentity()
+    await ringOf(this.doc).openBoxes(this.meta.docId, me, state)
+    if (this.syncState?.status === 'online') await reconcileColumns(this.doc, this.meta.docId, me, state)
+  }
+  /** Der Stand des Admin-Protokolls, wie er nach `changes` wäre (für den Abgleich vor dem Eintragen). */
+  private async stateAfter(changes: GroupChange[]): Promise<AdminState | null> {
+    let s = this.adminState
+    if (!s) return null
+    const me = await getIdentity()
+    try {
+      for (const c of changes) {
+        let e
+        if (c.type === 'join-group' || c.type === 'leave-group') {
+          const m = s.members.get(c.account)
+          if (!m) continue
+          e = buildGroupEntry(me, s, this.meta.docId, { ...c, pub: m.pub })
+        } else e = buildGroupEntry(me, s, this.meta.docId, c as Exclude<GroupChange, { type: 'join-group' | 'leave-group' }>)
+        s = applyEntry(s, this.meta.docId, e)
+      }
+    } catch { return null }
+    return s
+  }
 
   private openConn() {
     const sync = this.meta.sync
@@ -120,7 +164,7 @@ export class FileSession {
       judge: (live: Y.Doc, seq: number, plain: Uint8Array) => judge(this.timelineNow(), this.meta.docId, live, seq, plain),
       mode: () => {
         const st = this.timelineNow()?.latest
-        return { active: !!st && st.groups.size > 0, admin: st?.members.get(accountIdNow())?.role === 'admin' }
+        return { active: !!st && st.groups.size > 0, admin: st?.members.get(accountIdNow())?.role === 'admin', sign: !!st?.members.get(accountIdNow()) }
       },
       onRejected: (seq: number, reason: string) => { this.rejected++; this.lastRejection = reason; this.rejections = [...this.rejections.slice(-49), { seq, reason }]; this.onRejected?.() },
     }
@@ -152,6 +196,7 @@ export class FileSession {
           return
         }
         if (this.keys) await this.keys.provision(info) // als Admin: Schlüssel an neue Mitglieder verteilen
+        this.colKeysSoon()
       } catch { /* (noch) kein Mitglied oder offline: die Verbindung meldet den Grund */ }
     })
     return this.membersQueue
@@ -178,7 +223,11 @@ export class FileSession {
   encryptDocument = () => this.change((s, d) => markEncrypted(s, d))
   changeRole = (account: string, role: Role) => this.change((s, d) => setRole(s, d, account, role))
   /** Gruppen und Rechte ändern (als Admin) */
-  changeGroups = (changes: GroupChange[]) => this.change((s, d) => changeGroups(s, d, changes))
+  changeGroups = async (changes: GroupChange[]) => {
+    // Erst verschlüsseln und Schlüssel wechseln, wie es nach den Änderungen nötig wäre: so steht nie Klartext in einer Spalte, die jemand nicht mehr lesen darf
+    try { const next = await this.stateAfter(changes); if (next) await this.colBusy.then(() => this.colKeysNow(next)) } catch { /* der Abgleich läuft danach noch einmal */ }
+    await this.change((s, d) => changeGroups(s, d, changes))
+  }
   /** Stand des Admin-Protokolls für die Rechte: vom Server, sonst aus der Datei (damit sie auch offline gelten) */
   get adminState(): AdminState | null {
     if (this.members?.state) return this.members.state

@@ -50,11 +50,12 @@ async function client(label: string) {
   const { newMeta } = await import('./gridFile')
   const members = await import('./members')
   const invite = await import('./invite')
+  const cc = await import('./colCrypt')
   const me = await identity.getIdentity()
   let doc = new Y.Doc()
   let session: any
   const c = {
-    label, me, model, Y, members,
+    label, me, model, Y, members, cc,
     get doc() { return doc },
     get session() { return session },
     async open(docId?: string) {
@@ -66,7 +67,12 @@ async function client(label: string) {
       await until(label + ' online', () => session.syncState?.status === 'online', 20000)
     },
     async knock(docId: string) { await members.requestJoin(server, docId) },
-    cell(table: string, row: string, col: string) { return model.tablesOf(doc).get(table)?.get('rows')?.get(row)?.get(col) },
+    /** gespeicherter Wert (bei vertraulichen Spalten der Chiffretext) */
+    raw(table: string, row: string, col: string) { return model.tablesOf(doc).get(table)?.get('rows')?.get(row)?.get(col) },
+    /** Wert, wie ihn dieses Konto liest (entschlüsselt, `null` ohne Schlüssel) */
+    cell(table: string, row: string, col: string) { const v = model.tablesOf(doc).get(table)?.get('rows')?.get(row)?.get(col); return v === undefined ? undefined : cc.plainOf(doc, col, v) },
+    /** schreibt am Schutz vorbei (wie ein veränderter Client) */
+    rawSet(table: string, row: string, col: string, value: unknown) { model.tablesOf(doc).get(table).get('rows').get(row).set(col, value) },
     tables: () => model.tablesOf(doc).toJSON(),
   }
   return c
@@ -99,7 +105,7 @@ describe.skipIf(!have)('Rechte mit echtem Server und echten Clients', () => {
     await until('Tabellen bei Ben und Cora', () => Object.keys(B.tables()).length === 2 && Object.keys(C.tables()).length === 2)
 
     // Vor den Gruppen darf jedes Mitglied alles: Ben schreibt in Tabelle 2
-    m.setCell(B.doc, t2, row2, col2, 'ben-vorher')
+    B.model.setCell(B.doc, t2, row2, col2, 'ben-vorher')
     await until('Ben vorher bei Anna', () => A.cell(t2, row2, col2) === 'ben-vorher')
 
     // Anna legt eine Gruppe an: Ben darf in Tabelle 1 schreiben, sonst nichts
@@ -111,21 +117,35 @@ describe.skipIf(!have)('Rechte mit echtem Server und echten Clients', () => {
     ])
     await until('Gruppen bei allen', () => [B, C].every((x) => x.session.members?.state?.groups.size === 1))
 
+    // Spalten, die nicht jeder lesen darf, sind verschlüsselt: Ben bekommt den Schlüssel für Tabelle 1, Cora keinen, für Tabelle 2 nur Anna
+    await until('Spalten verschlüsselt bei allen', () => [A, B, C].every((x) => /^gce1:/.test(String(x.raw(t1, row1, col1))) && /^gce1:/.test(String(x.raw(t2, row2, col2))))).catch((e) => { throw new Error(e.message + ' ' + JSON.stringify([A, B, C].map((x) => [x.label, String(x.raw(t1, row1, col1)).slice(0, 8), String(x.raw(t2, row2, col2)).slice(0, 8), x.session.syncState?.status, x.session.rejections]))) })
+    await until('Ben hat den Schlüssel', () => { const r = B.cc.ringOf(B.doc); return r.isProtected(col1) && !r.locked(col1) })
+    expect(A.cc.ringOf(A.doc).isProtected(col2)).toBe(true)
+    expect(B.cc.ringOf(B.doc).locked(col2)).toBe(true)
+    expect(C.cc.ringOf(C.doc).locked(col1)).toBe(true)
+    expect(typeof A.raw(t1, row1, col1)).toBe('string')
+    expect(A.raw(t1, row1, col1)).toMatch(/^gce1:/)
+    expect(A.cell(t2, row2, col2)).toBe('ben-vorher') // früherer Klartext ist jetzt verschlüsselt, Anna liest ihn
+    expect(C.cell(t1, row1, col1)).toBeNull()
+    expect(B.cell(t2, row2, col2)).toBeNull()
+
     // Erlaubt: Ben schreibt in Tabelle 1
-    m.setCell(B.doc, t1, row1, col1, 'ben-erlaubt')
-    await until('Ben erlaubt bei Anna und Cora', () => A.cell(t1, row1, col1) === 'ben-erlaubt' && C.cell(t1, row1, col1) === 'ben-erlaubt')
+    B.model.setCell(B.doc, t1, row1, col1, 'ben-erlaubt')
+    await until('Ben erlaubt bei Anna und Cora', () => A.cell(t1, row1, col1) === 'ben-erlaubt' && C.raw(t1, row1, col1) === A.raw(t1, row1, col1))
+    expect(C.cell(t1, row1, col1)).toBeNull() // Cora hat nur Chiffretext
 
     // Nicht erlaubt: Ben schreibt in Tabelle 2, Cora (ohne Gruppe) in Tabelle 1, Ben ändert die Struktur
-    m.setCell(B.doc, t2, row2, col2, 'ben-verboten')
-    m.setCell(C.doc, t1, row1, col1, 'cora-verboten')
-    m.addColumn(B.doc, t1, 'BenSpalte', 'text')
+    B.rawSet(t2, row2, col2, 'ben-verboten')
+    C.rawSet(t1, row1, col1, 'cora-verboten')
+    B.model.addColumn(B.doc, t1, 'BenSpalte', 'text')
     await until('Ablehnungen bei Anna', () => A.session.rejected >= 3)
     await quiet(300)
     expect(A.cell(t2, row2, col2)).toBe('ben-vorher')
     expect(A.cell(t1, row1, col1)).toBe('ben-erlaubt')
     expect(m.readTables(A.doc).find((t: any) => t.id === t1).columns.map((c: any) => c.name)).not.toContain('BenSpalte')
-    expect(C.cell(t2, row2, col2)).toBe('ben-vorher') // auch Cora übernimmt Bens unerlaubte Änderung nicht
-    expect(B.cell(t1, row1, col1)).toBe('ben-erlaubt') // und Ben nicht die von Cora
+    expect(C.raw(t2, row2, col2)).toBe(A.raw(t2, row2, col2)) // auch Cora übernimmt Bens unerlaubte Änderung nicht
+    expect(B.raw(t1, row1, col1)).toBe(A.raw(t1, row1, col1)) // und Ben nicht die von Cora
+    expect(B.cell(t1, row1, col1)).toBe('ben-erlaubt')
     expect(A.session.lastRejection).toBeTruthy()
 
     // Admin darf alles, auch Struktur: Anna fügt eine Spalte hinzu
@@ -134,9 +154,13 @@ describe.skipIf(!have)('Rechte mit echtem Server und echten Clients', () => {
 
     // Entzug: danach sind Bens Änderungen an Tabelle 1 verboten
     const before = A.session.rejected
+    const kidBefore = A.cc.ringOf(A.doc).current(col1)
     await A.session.changeGroups([{ type: 'grant', group: G, object: t1, level: 'none' }])
     await until('Entzug bei Ben', () => B.session.members?.state?.grants.get(G)?.size === 0)
-    m.setCell(B.doc, t1, row1, col1, 'ben-nach-entzug')
+    // Der Schlüssel der Spalte wechselt: Ben kennt den neuen nicht und liest nichts mehr, Anna schon
+    await until('neuer Schlüssel', () => { const k = A.cc.ringOf(A.doc).current(col1); return !!k && k !== kidBefore })
+    await until('Ben gesperrt', () => B.cc.ringOf(B.doc).locked(col1) && B.cell(t1, row1, col1) === null)
+    B.rawSet(t1, row1, col1, B.cc.ringOf(B.doc).encrypt(col1, 'ben-nach-entzug', kidBefore))
     await until('Ablehnung nach Entzug', () => A.session.rejected > before)
     await quiet(300)
     expect(A.cell(t1, row1, col1)).toBe('ben-erlaubt')
@@ -148,11 +172,11 @@ describe.skipIf(!have)('Rechte mit echtem Server und echten Clients', () => {
     for (let i = 0; i < 100 && !req; i++) { await A.session.refreshMembers(); req = A.session.members?.requests.find((r: any) => r.account === D.me.id); if (!req) await quiet(50) }
     await A.session.accept(req)
     await D.open(docId)
-    await until('Dora hat den Stand', () => Object.keys(D.tables()).length === 2 && D.cell(t1, row1, col1) !== undefined, 20000).catch((e) => { throw new Error(e.message + ' ' + JSON.stringify({ state: D.session.syncState, rejected: D.session.rejected, why: D.session.rejections, at: D.session.members?.entries.map((e: any) => e.type + '@' + e.at), tables: Object.keys(D.tables()) })) })
+    await until('Dora hat den Stand', () => Object.keys(D.tables()).length === 2 && D.raw(t1, row1, col1) !== undefined, 20000).catch((e) => { throw new Error(e.message + ' ' + JSON.stringify({ state: D.session.syncState, rejected: D.session.rejected, why: D.session.rejections, at: D.session.members?.entries.map((e: any) => e.type + '@' + e.at), tables: Object.keys(D.tables()) })) })
     await quiet(500)
-    expect(D.cell(t1, row1, col1)).toBe('ben-erlaubt')
-    expect(D.cell(t2, row2, col2)).toBe('ben-vorher')
-    expect(D.tables()).toEqual(A.tables()) // dieselben Daten wie beim Admin
+    expect(D.raw(t1, row1, col1)).toBe(A.raw(t1, row1, col1)) // Dora hat dieselben (verschlüsselten) Daten, kann sie aber nicht lesen
+    expect(D.cell(t1, row1, col1)).toBeNull()
+    expect(D.tables()).toEqual(A.tables())
   }, 120000)
 
   it('Schreiben über eine abgeleitete Tabelle: nur Zeilen, die der Sicht genügen', async () => {
@@ -185,18 +209,18 @@ describe.skipIf(!have)('Rechte mit echtem Server und echten Clients', () => {
     await until('Gruppe bei Ben', () => B.session.members?.state?.groups.size === 1)
 
     // Erlaubt: neue Zeile vom Typ Y, Änderung einer X-Zeile (auch Typ X→Y)
-    const ok1 = m.createRecord(B.doc, t, { [name]: 'ben-y', [typ]: Y })
-    m.setCell(B.doc, t, rx, name, 'x1-geaendert')
-    m.setCell(B.doc, t, rx, typ, Y)
+    const ok1 = B.model.createRecord(B.doc, t, { [name]: 'ben-y', [typ]: Y })
+    B.model.setCell(B.doc, t, rx, name, 'x1-geaendert')
+    B.model.setCell(B.doc, t, rx, typ, Y)
     await until('erlaubt bei Anna', () => A.cell(t, ok1, name) === 'ben-y' && A.cell(t, rx, name) === 'x1-geaendert' && A.cell(t, rx, typ) === Y).catch((e) => { throw new Error(e.message + ' ' + JSON.stringify({ rej: A.session.rejections, vals: [A.cell(t, ok1, name), A.cell(t, rx, name), A.cell(t, rx, typ)] })) })
 
     // Nicht erlaubt: Zeile vom Typ Z anlegen, Z-Zeile ändern, X-Zeile aus der Sicht herausnehmen, leere Zeile anlegen, Z-Zeile löschen
     const bad = A.session.rejected
-    const ok2 = m.createRecord(B.doc, t, { [name]: 'ben-z', [typ]: Z })
-    m.setCell(B.doc, t, rz, name, 'z1-geaendert')
-    m.setCell(B.doc, t, rx, typ, Z)
-    const empty = m.addRow(B.doc, t)
-    m.deleteRow(B.doc, t, rz)
+    const ok2 = B.model.createRecord(B.doc, t, { [name]: 'ben-z', [typ]: Z })
+    B.model.setCell(B.doc, t, rz, name, 'z1-geaendert')
+    B.model.setCell(B.doc, t, rx, typ, Z)
+    const empty = B.model.addRow(B.doc, t)
+    B.model.deleteRow(B.doc, t, rz)
     await until('Ablehnungen bei Anna', () => A.session.rejected >= bad + 5)
     await quiet(300)
     expect(A.cell(t, ok2, name)).toBeUndefined()
@@ -206,7 +230,7 @@ describe.skipIf(!have)('Rechte mit echtem Server und echten Clients', () => {
     expect(m.tablesOf(A.doc).get(t).get('rows').has(rz)).toBe(true)
 
     // Erlaubt: eigene Zeile löschen
-    m.deleteRow(B.doc, t, ok1)
+    B.model.deleteRow(B.doc, t, ok1)
     await until('Löschen bei Anna', () => !m.tablesOf(A.doc).get(t).get('rows').has(ok1))
 
     // Ein später Beigetretener kommt zum selben Stand

@@ -171,7 +171,8 @@ export interface RightsHooks {
   /** Bewertet den entschlüsselten Klartext des Eintrags `seq`. */
   judge: (live: Y.Doc, seq: number, plain: Uint8Array) => Verdict
   /** Gibt es Gruppen (dann wird signiert) und ist dieses Konto Admin (nur dann darf es zusammenführen)? */
-  mode: () => { active: boolean; admin: boolean }
+  /** `sign`: Das Konto ist Mitglied laut Protokoll: Änderungen tragen die Unterschrift (auch vor den Gruppen, denn eine Gruppe kann im Strom vor der Änderung stehen, bevor dieses Gerät sie kennt) */
+  mode: () => { active: boolean; admin: boolean; sign?: boolean }
   /** Eine Änderung wurde abgelehnt. */
   onRejected: (seq: number, reason: string) => void
 }
@@ -441,7 +442,8 @@ export class SyncConnection {
     const key = keys.key(epoch)
     const ws = this.ws
     if (!key || !ws || ws.readyState !== WebSocket.OPEN) return
-    const signed = this.cfg.rights?.mode().active ? seal(await getIdentity(), this.cfg.docId, update) : update // mit Gruppen trägt jede Änderung die Unterschrift ihres Autors
+    const mode = this.cfg.rights?.mode()
+    const signed = mode?.active || mode?.sign ? seal(await getIdentity(), this.cfg.docId, update) : update // mit Gruppen trägt jede Änderung die Unterschrift ihres Autors
     ws.send(frame(ENC_PUT, await encryptEntry(this.cfg.docId, epoch, key, signed)))
   }
 
@@ -456,7 +458,7 @@ export class SyncConnection {
     const mode = this.cfg.rights?.mode()
     if (mode?.active && !mode.admin) return // mit Gruppen führen nur Admins zusammen: der Gesamtzustand bündelt Änderungen aller
     const state = Y.encodeStateAsUpdate(this.shadow)
-    const entry = await encryptEntry(this.cfg.docId, epoch, key, mode?.active ? seal(await getIdentity(), this.cfg.docId, state, 'snap') : state)
+    const entry = await encryptEntry(this.cfg.docId, epoch, key, mode?.active || mode?.sign ? seal(await getIdentity(), this.cfg.docId, state, 'snap') : state)
     const body = new Uint8Array(8 + entry.length)
     new DataView(body.buffer).setBigUint64(0, BigInt(upto))
     body.set(entry, 8)

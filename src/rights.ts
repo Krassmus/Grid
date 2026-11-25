@@ -50,5 +50,14 @@ export function rightsFor(state: AdminState | null, account: string): Rights {
   return { active: true, admin: false, access, colAccess, visible, canAdd, structure: false }
 }
 
+/** Wie `rights`, aber Spalten, deren Schlüssel auf diesem Gerät fehlt (`locked`), lassen sich nicht schreiben (vertrauliche Spalten). */
+export function withLocks(rights: Rights, locked: (column: string) => boolean): Rights {
+  const colAccess = (table: string, column: string): Access => {
+    const a = rights.colAccess(table, column)
+    return a === 'write' && locked(column) ? 'read' : a
+  }
+  return { ...rights, colAccess, canAdd: (table, columns) => rights.access(table) === 'write' || columns.some((c) => colAccess(table, c) === 'write') }
+}
+
 export const RightsContext = createContext<Rights>(FULL_RIGHTS)
 export const useRights = () => useContext(RightsContext)

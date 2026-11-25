@@ -7,7 +7,7 @@ import {
   addColumn, addLink, addMap, addView, deleteMap, updateMap, buildFileIndex, buildLinkIndex, tablesOf, type CellValue, deleteView, updateView, addRow, addTable, deleteColumn, deleteRow, deleteTable, moveColumn, moveLink, moveTable, removeLink, renameColumn, isComputed, rowExists, setCell, setColumnWidth, summarize,
   type AggFn, type ColType, type ColumnInfo, type LinkIndex, type LinkSlot, type TableInfo,
 } from './model'
-import { useCell, useFileIndex, useLinkIndex, useRowVersion, useTabs } from './useTables'
+import { useCell, useFileIndex, useLinkIndex, useRingVersion, useRowVersion, useTabs } from './useTables'
 import { FileCell } from './FileCell'
 import { SelectCell } from './SelectCell'
 import { ColumnDialog } from './ColumnDialog'
@@ -30,6 +30,7 @@ import { FormulaSyntaxError, parseFormula, parseTemplate } from './formula'
 import { effectiveType } from './columnTypes'
 import { useRights } from './rights'
 import { hiddenByRights } from './rightsView'
+import { plainOf, ringOf } from './colCrypt'
 import { ViewDialog } from './ViewDialog'
 import { ViewGrid } from './ViewGrid'
 import { MapView } from './MapView'
@@ -178,7 +179,7 @@ function EditRecordDialog(props: { doc: Y.Doc; tables: TableInfo[]; table: Table
   const [snap] = useState(() => {
     const row: Y.Map<any> | undefined = tablesOf(doc).get(table.id)?.get('rows').get(rowId)
     const values: Record<string, CellValue> = {}
-    for (const c of formColumns(table)) if (c.type !== 'relation' && c.type !== 'file') values[c.id] = (row?.get(c.id) as CellValue | undefined) ?? null
+    for (const c of formColumns(table)) if (c.type !== 'relation' && c.type !== 'file') values[c.id] = (plainOf(doc, c.id, row?.get(c.id)) as CellValue | undefined) ?? null
     const links = buildLinkIndex(doc).forward, files = buildFileIndex(doc)
     const existing: ExistingRecord = { files: {}, relations: {} }
     for (const c of table.columns) {
@@ -716,6 +717,7 @@ export function ClientPane(props: {
   useEffect(() => () => { if (currentTracking()?.target.doc === props.doc) stopTracking() }, [props.doc])
   const { doc } = props
   const all = useTabs(doc)
+  const ringV = useRingVersion(doc) // neu rechnen, wenn Schlüssel vertraulicher Spalten eintreffen
   const rights = useRights()
   // Ohne Leserecht sind Tabellen, abgeleitete Tabellen und Karten für diesen Betrachter nicht vorhanden (docs/RIGHTS.md)
   const { tables, views, maps, tabs } = useMemo(() => {
@@ -867,7 +869,7 @@ export function ClientPane(props: {
   const rowIds = useMemo(
     () => (table && sort ? sortedRowIds(doc, table.id, sort.colId, sort.dir) : table?.rowIds ?? []),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [doc, table?.id, sort?.colId, sort?.dir, sortTick, table && !sort ? table.rowIds : null],
+    [doc, table?.id, sort?.colId, sort?.dir, sortTick, ringV, table && !sort ? table.rowIds : null],
   )
 
   // Berechnete Spalten (Rollup) und Spalten mit Summenzeile: je Spalte einmal für alle Zeilen ausgewertet
@@ -888,7 +890,7 @@ export function ClientPane(props: {
     for (const t of tables) if (wanted.has(t.id)) r.set(t.id, reprMap(doc, tables, t, ctx))
     return { cellData: m, reprs: r }
     // `index` (Verknüpfungen), `fileIndex` (Bilder) und `tables` (Werte, Struktur) decken alle Änderungen ab, die das Ergebnis beeinflussen
-  }, [doc, tables, table?.id, index, fileIndex, mapRecord?.tableId])
+  }, [doc, tables, table?.id, index, fileIndex, mapRecord?.tableId, ringV])
   const reprOf = useCallback((id: string) => reprs.get(id), [reprs])
 
   const [liveWidth, setLiveWidth] = useState<{ id: string; w: number } | null>(null)
@@ -997,7 +999,7 @@ export function ClientPane(props: {
     lastSearch.current = { key, query, hits: ok }
     return ok
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [doc, table?.id, query, sortTick, table?.rowIds.length, index, fileIndex])
+  }, [doc, table?.id, query, sortTick, table?.rowIds.length, index, fileIndex, ringV])
   const visibleIds = useMemo(() => (matching ? rowIds.filter((id) => matching.has(id)) : rowIds), [rowIds, matching])
   // Große Tabellen: nur die Zeilen in und um den sichtbaren Bereich zeichnen
   const virt = useVirtualRows(visibleIds)
@@ -1160,7 +1162,9 @@ export function ClientPane(props: {
                 <div key={rid} className="row-outer" data-row={rid}>
                   <div className="row-inner">
                     {shownColumns.map((c, i) => {
-                      const cell = isComputed(c) || c.type === 'autonumber' || c.type === 'stamp'
+                      const cell = ringOf(doc).locked(c.id)
+                        ? <div key={c.id} className="c locked-cell" title={t('Vertraulich: Der Schlüssel fehlt noch. Ein Admin muss ihn senden.')}>🔒</div>
+                        : isComputed(c) || c.type === 'autonumber' || c.type === 'stamp'
                         ? (() => {
                             const cell = cellData.get(c.id)?.get(rid)
                             return (
@@ -1238,8 +1242,11 @@ export function ClientPane(props: {
 
       {syncOpen && props.sync && <SyncDialog control={{ ...props.sync, objects: tabs.map((x) => {
         const v = x.kind === 'view' ? views.find((y) => y.id === x.id) : undefined
-        const columns = x.kind === 'table' ? tables.find((y) => y.id === x.id)?.columns.map((c) => ({ id: c.id, name: c.name, readOnly: isComputed(c) || c.type === 'autonumber' || c.type === 'stamp' })) : undefined
-        return { id: x.id, name: x.name, kind: x.kind, columns, blocked: v ? writeBlocker(v.def, tables.find((y) => y.id === v.def.source), tables) ?? undefined : undefined }
+        const columns = x.kind === 'table' ? tables.find((y) => y.id === x.id)?.columns.map((c) => ({ id: c.id, name: c.name, readOnly: isComputed(c) || c.type === 'autonumber' || c.type === 'stamp', encrypted: ringOf(doc).isProtected(c.id) })) : undefined
+        const blockedWhy = v ? writeBlocker(v.def, tables.find((y) => y.id === v.def.source), tables, (c) => ringOf(doc).isProtected(c)) : null
+        const src = v ? tables.find((y) => y.id === v.def.source) : undefined
+        const filterNames = v && !blockedWhy && src ? [...new Set(v.def.filters.map((f) => src.columns.find((c) => c.id === f.col)?.name).filter(Boolean))] : []
+        return { id: x.id, name: x.name, kind: x.kind, columns, note: filterNames.length ? t('Bedingungsspalten bleiben unverschlüsselt: {names}', { names: filterNames.join(', ') }) : undefined, blocked: v ? writeBlocker(v.def, tables.find((y) => y.id === v.def.source), tables, (c) => ringOf(doc).isProtected(c)) ?? undefined : undefined }
       }) }} onClose={() => setSyncOpen(false)} />}
 
       {editing && (() => {

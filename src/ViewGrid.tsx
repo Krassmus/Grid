@@ -8,6 +8,7 @@ import { RecordForm, commitRecord, formColumns, updateRecord } from './RecordFor
 import { ConfirmDialog } from './Modal'
 import { deleteRow } from './model'
 import { t } from './i18n'
+import { plainOf, ringOf } from './colCrypt'
 
 const widthOf = (type: string, w?: number) =>
   w ? `${w}px` : type === 'relation' || type === 'file' ? '240px' : type === 'number' || type === 'duration' ? '120px' : type === 'stamp' ? '200px' : type === 'person' || type === 'link' ? '190px' : type === 'date' ? '170px' : type === 'checkbox' ? '110px' : type === 'select' ? '160px' : '180px'
@@ -29,7 +30,7 @@ export function ViewGrid({ doc, view, tables = [], writable = false }: { doc: Y.
   const [form, setForm] = useState<{ row: string | null } | null>(null) // null = geschlossen, row null = neue Zeile
   const [deleting, setDeleting] = useState<string | null>(null)
   const source = tables.find((x) => x.id === view.def.source)
-  const canWrite = writable && !!source && !writeBlocker(view.def, source, tables)
+  const canWrite = writable && !!source && !writeBlocker(view.def, source, tables, (c) => ringOf(doc).isProtected(c))
   const active = sort && result.columns.some((c) => c.id === sort.colId) ? sort : null
   const rows = useMemo(() => {
     if (!active) return result.rows
@@ -90,7 +91,7 @@ function ViewRecordDialog(props: { doc: Y.Doc; view: ViewInfo; source: TableInfo
     const row: Y.Map<any> | undefined = rowId ? tablesOf(doc).get(source.id)?.get('rows').get(rowId) : undefined
     if (!rowId) return presetValues(def, source, tables) as Record<string, CellValue>
     const values: Record<string, CellValue> = {}
-    for (const c of formColumns(source)) if (isValueColumn(c)) values[c.id] = (row?.get(c.id) as CellValue | undefined) ?? null
+    for (const c of formColumns(source)) if (isValueColumn(c)) values[c.id] = (plainOf(doc, c.id, row?.get(c.id)) as CellValue | undefined) ?? null
     return values
   })
   const validate = (values: Record<string, CellValue>) => {

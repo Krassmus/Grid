@@ -13,6 +13,7 @@ import { formatDuration } from './duration'
 import { FormulaSyntaxError, parseFormula, parseTemplate, type Node } from './formula'
 import { allowedAggs, type FooterFn } from './aggregate'
 import { t } from './i18n'
+import { plainOf } from './colCrypt'
 
 export type Key = number | string | null // null = leer (steht beim Sortieren immer am Ende)
 export interface Cell { raw: unknown; text: string; key: Key; /** Nur bei fehlerhaften Formeln: Erklärung (text enthält den Fehlercode). */ error?: string }
@@ -160,7 +161,7 @@ function plainCells(doc: Y.Doc, tables: TableInfo[], table: TableInfo, col: Colu
     rank = new Map([...table.rowIds].sort((a, b) => stamp(a) - stamp(b) || (a < b ? -1 : a > b ? 1 : 0)).map((id, i) => [id, i + 1]))
   }
   for (const rid of only ?? table.rowIds) {
-    const raw = rows?.get(rid)?.get(col.id)
+    const raw = plainOf(doc, col.id, rows?.get(rid)?.get(col.id))
     let text = ''
     let key: Key = null
     switch (col.type) {

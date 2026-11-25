@@ -858,3 +858,5 @@ button.invite-row:hover .plus-avatar { border-color: #0a84ff; color: #0a84ff; }
 .ro-fs .row-outer:last-child .row-inner { border-radius: 0; }
 .ro-fs:disabled input, .ro-fs:disabled textarea, .ro-fs:disabled select { color: inherit; -webkit-text-fill-color: currentColor; opacity: 1; cursor: default; }
 .ro-fs:disabled button { cursor: default; }
+
+.locked-cell { display: flex; align-items: center; color: var(--c-667781); cursor: default; }

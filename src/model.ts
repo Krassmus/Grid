@@ -1,6 +1,7 @@
 import * as Y from 'yjs'
 import { accountIdNow, getAccountName } from './identity'
 import { t } from './i18n'
+import { plainOf, sealCell } from './colCrypt'
 
 /**
  * Datenmodell im Yjs-Dokument:
@@ -177,7 +178,7 @@ export function setCell(doc: Y.Doc, tableId: string, rowId: string, colId: strin
   const row: Y.Map<any> | undefined = t?.get('rows').get(rowId)
   if (!t || !row) return
   doc.transact(() => {
-    row.set(colId, value)
+    row.set(colId, sealCell(doc, colId, value))
     if (t.get('cols').get(colId)?.get('type') !== 'stamp') touchStamps(t, row, false)
   })
 }
@@ -209,7 +210,7 @@ function touchStamps(t: Y.Map<any>, row: Y.Map<any>, creating: boolean) {
 }
 
 export function getCell(doc: Y.Doc, tableId: string, rowId: string, colId: string): CellValue {
-  return tablesOf(doc).get(tableId)?.get('rows').get(rowId)?.get(colId) ?? null
+  return plainOf(doc, colId, tablesOf(doc).get(tableId)?.get('rows').get(rowId)?.get(colId)) ?? null
 }
 
 /** Snapshot für die UI. Doppelte Zeilen-IDs (durch Merge) werden entfernt, verwaiste ignoriert. */
@@ -492,7 +493,7 @@ export function summarize(doc: Y.Doc, table: TableInfo, rowId: string): RowSumma
   const vals = table.columns
     .filter((c) => c.type !== 'relation' && c.type !== 'file' && c.type !== 'checkbox' && c.type !== 'geo' && c.type !== 'autonumber' && c.type !== 'stamp' && c.type !== 'person' && c.type !== 'duration' && !isComputed(c))
     .map((c) => {
-      const v = row?.get(c.id)
+      const v = plainOf(doc, c.id, row?.get(c.id))
       if (c.type === 'select') return c.options?.find((o) => o.id === v)?.name ?? ''
       return v === undefined || v === null ? '' : String(v)
     })

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import * as Y from 'yjs'
+import { plainOf, ringOf } from './colCrypt'
 import { profilesOf, type MemberProfile, buildFileIndex, buildLinkIndex, mapsOf, readMaps, readTables, readTabs, readViews, tableOrderOf, tablesOf, viewsOf, type FileRef, type LinkIndex, type MapInfo, type TabInfo, type TableInfo, type ViewInfo } from './model'
 
 /** Liest die Tabellenstruktur reaktiv; Zellwerte werden in der Zelle selbst beobachtet. */
@@ -26,7 +27,15 @@ export function useCell(doc: Y.Doc, tableId: string, rowId: string, colId: strin
     update()
     return () => r.unobserve(update)
   }, [doc, tableId, rowId, colId])
-  return value
+  useRingVersion(doc) // neu lesen, wenn ein Schlüssel eintrifft
+  return plainOf(doc, colId, value)
+}
+
+/** Zählt hoch, wenn sich Schlüssel vertraulicher Spalten ändern (neue Schlüssel, neu geschützte Spalten). */
+export function useRingVersion(doc: Y.Doc): number {
+  const [v, setV] = useState(() => ringOf(doc).version)
+  useEffect(() => ringOf(doc).subscribe(() => setV((n) => n + 1)), [doc])
+  return v
 }
 
 export function useLinkIndex(doc: Y.Doc): LinkIndex {

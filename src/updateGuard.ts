@@ -8,7 +8,7 @@ import { applyEntry, emptyState, type AdminEntry, type AdminState } from './admi
 import { rightsFor } from './rights'
 import { unseal, verifySeal } from './signedUpdate'
 import { scopeOf } from './updateScope'
-import { judgeViaViews } from './viewJudge'
+import { ciphertextReason, judgeViaViews } from './viewJudge'
 import { t } from './i18n'
 
 /** Zustände des Admin-Protokolls nach jedem Eintrag, zugeordnet zu den Stromnummern, ab denen sie wirken. */
@@ -59,6 +59,8 @@ export function judge(timeline: RightsTimeline | null, doc: string, live: Y.Doc,
   try { scope = scopeOf(live, sealed.update) } catch { return { ok: false, reason: t('Änderung nicht lesbar') } }
   if (scope.structure || scope.unknown) return { ok: false, reason: scope.unknown ? t('Änderung betrifft unbekannte Stellen') : t('Nur Admins ändern die Struktur') }
   for (const id of scope.maps) if (rights.access(id) !== 'write') return { ok: false, reason: t('Kein Schreibrecht an der Karte') }
+  const clear = ciphertextReason(live, sealed.update, scope)
+  if (clear) return { ok: false, reason: clear }
   // Ohne Schreibrecht an der Tabelle bleibt der Weg über eine schreibbare abgeleitete Tabelle (zuletzt prüfen: das Probe-Abbild merkt sich Angenommenes)
   const viaViews = [...scope.tables].filter((id) => rights.access(id) !== 'write')
   if (viaViews.length) {

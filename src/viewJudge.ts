@@ -9,6 +9,7 @@ import { readTables, readViews, tablesOf, type TableInfo } from './model'
 import type { Rights } from './rights'
 import type { Scope } from './updateScope'
 import { isValueColumn, rowMatches, writeBlocker } from './viewWrite'
+import { ringOf } from './colCrypt'
 import { t } from './i18n'
 
 const scratch = new WeakMap<Y.Doc, Y.Doc>()
@@ -30,6 +31,30 @@ const rowsOf = (doc: Y.Doc, tid: string): Y.Map<Y.Map<any>> | undefined => table
 const orderOf = (doc: Y.Doc, tid: string): string[] => tablesOf(doc).get(tid)?.get('rowOrder')?.toArray() ?? []
 
 /**
+ * Vertrauliche Spalten: Was ein Nicht-Admin dort schreibt, muss mit einem Schlüssel der Spalte verschlüsselt sein (oder leer),
+ * sonst stünde Klartext im Dokument, den jedes Mitglied lesen könnte. `null`, wenn alles in Ordnung ist.
+ */
+export function ciphertextReason(live: Y.Doc, update: Uint8Array, scope: Scope): string | null {
+  const ring = ringOf(live)
+  const cells: [string, string, string][] = []
+  for (const [tid, byRow] of scope.cells) for (const [rid, cols] of byRow) for (const col of cols) if (ring.isProtected(col)) cells.push([tid, rid, col])
+  if (!cells.length) return null
+  let why: string | null = null
+  try {
+    const after = probeDoc(live)
+    Y.applyUpdate(after, update)
+    for (const [tid, rid, col] of cells) {
+      const v = rowsOf(after, tid)?.get(rid)?.get(col)
+      if (v === undefined || v === null) continue
+      const kid = ring.kidOf(v)
+      if (!kid || !ring.metas(col).some((m) => m.kid === kid)) { why = t('Eine vertrauliche Spalte darf nur verschlüsselte Werte enthalten'); break }
+    }
+  } catch { why = t('Änderung nicht lesbar') }
+  if (why) scratch.delete(live)
+  return why
+}
+
+/**
  * `null`, wenn die Änderungen an den Tabellen `ids` erlaubt sind, obwohl dem Autor das Schreiben an der ganzen Tabelle fehlt: entweder über Schreibrechte
  * an den berührten Spalten (docs/RIGHTS.md, „Rechte je Spalte“) oder über eine schreibbare abgeleitete Tabelle; sonst der Grund.
  */
@@ -48,7 +73,7 @@ export function judgeViaViews(live: Y.Doc, update: Uint8Array, scope: Scope, ids
       const writesColumns = table.columns.some((c) => rights.colAccess(id, c.id) === 'write')
       const byColumns = writesColumns ? columnReason(live, after, scope, table, rights) : noWrite
       if (!byColumns) continue
-      const mine = views.filter((v) => v.def.source === id && rights.access(v.id) === 'write' && !writeBlocker(v.def, table, tables))
+      const mine = views.filter((v) => v.def.source === id && rights.access(v.id) === 'write' && !writeBlocker(v.def, table, tables, (c) => ringOf(live).isProtected(c)))
       const byView = mine.length === 0 || scope.extras.has(id) ? noWrite : judgeTable(live, after(), table, tables, mine, scope)
       if (!byView) continue
       why = writesColumns ? byColumns : byView

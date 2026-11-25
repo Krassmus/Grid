@@ -23,7 +23,7 @@ export interface MembersControl {
   changeGroups: (changes: GroupChange[]) => Promise<void>
   invite: () => Promise<string>
   /** Tabellen, abgeleitete Tabellen und Karten des Dokuments (für die Rechte) */
-  objects?: { id: string; name: string; kind: 'table' | 'view' | 'map'; /** Spalten einer Tabelle (für Rechte je Spalte); `readOnly`: berechnet, kann man nicht schreiben */ columns?: { id: string; name: string; readOnly: boolean }[]; /** Abgeleitete Tabelle: Grund, warum Schreiben nicht möglich ist (fehlt, wenn es geht) */ blocked?: string }[]
+  objects?: { id: string; name: string; kind: 'table' | 'view' | 'map'; /** Spalten einer Tabelle (für Rechte je Spalte); `readOnly`: berechnet, kann man nicht schreiben */ columns?: { id: string; name: string; readOnly: boolean; /** Die Spalte ist vertraulich: ihre Werte sind verschlüsselt */ encrypted?: boolean }[]; /** Hinweis zur Sicht (z. B. welche Spalten unverschlüsselt bleiben) */ note?: string; /** Abgeleitete Tabelle: Grund, warum Schreiben nicht möglich ist (fehlt, wenn es geht) */ blocked?: string }[]
 }
 
 const message = (e: unknown) => String((e as Error).message ?? e)

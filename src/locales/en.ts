@@ -926,5 +926,11 @@ export const en: Record<string, string> = {
   "Zugriff auf Spalte {name}": "Access to column {name}",
   "Änderung betrifft eine unbekannte Spalte": "The change affects an unknown column",
   "Kein Schreibrecht an der Spalte „{name}“": "No write access to column “{name}”",
-  "Zeilen löschen erfordert Schreibrecht an der ganzen Tabelle": "Deleting rows requires write access to the whole table"
+  "Zeilen löschen erfordert Schreibrecht an der ganzen Tabelle": "Deleting rows requires write access to the whole table",
+  "Vertraulich: Der Schlüssel fehlt noch. Ein Admin muss ihn senden.": "Confidential: the key is still missing. An admin has to send it.",
+  "Der Schlüssel dieser Spalte fehlt: Ein Admin muss ihn senden.": "The key for this column is missing: an admin has to send it.",
+  "Eine vertrauliche Spalte darf nur verschlüsselte Werte enthalten": "A confidential column may only contain encrypted values",
+  "Die Spalte „{name}“ der Bedingung ist vertraulich (verschlüsselt): Ihr Wert lässt sich beim Empfang nicht von jedem prüfen.": "The column “{name}” in the condition is confidential (encrypted): not everyone can check its value on receipt.",
+  "Bedingungsspalten bleiben unverschlüsselt: {names}": "Condition columns stay unencrypted: {names}",
+  "verschlüsselt": "encrypted"
 }

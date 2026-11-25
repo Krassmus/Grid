@@ -6,6 +6,7 @@
 import * as Y from 'yjs'
 import { auditOf, forwardOp, type AuditEntry, type Op } from './audit'
 import { linksOf, tableOrderOf, tablesOf } from './model'
+import { ringOf } from './colCrypt'
 
 const ASOF = Symbol('asof')
 
@@ -145,6 +146,7 @@ export class TimeMachine {
   private fresh() {
     this.doc = new Y.Doc()
     Y.applyUpdate(this.doc, Y.encodeStateAsUpdate(this.live))
+    ringOf(this.doc).inherit(ringOf(this.live)) // Admins sehen auch vertrauliche Spalten früherer Stände, wenn sie den Schlüssel haben
     this.pos = this.entries.length
     this.version++
     if (this.onEdit) this.doc.on('afterTransaction', (tr: Y.Transaction) => { if (tr.local && tr.origin !== ASOF && tr.changed.size > 0) this.onEdit!() })

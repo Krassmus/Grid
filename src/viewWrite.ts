@@ -16,12 +16,14 @@ export const viewEditable = (c: ColumnInfo) => isValueColumn(c) && !c.hidden
 
 /**
  * `null`, wenn die Sicht Schreibrecht erlaubt; sonst der Grund. Verlangt: keine Gruppierung, und alle wirksamen Bedingungen beziehen sich auf
- * Spalten der Quelltabelle, deren Wert in der Zeile steht (Text, Zahl, Datum, Auswahl, Kontrollkästchen), nicht auf Relationen oder Berechnetes.
+ * Spalten der Quelltabelle, deren Wert in der Zeile steht (Text, Zahl, Datum, Auswahl, Kontrollkästchen), nicht auf Relationen oder Berechnetes,
+ * und nicht auf vertrauliche (verschlüsselte) Spalten.
  */
-export function writeBlocker(def: ViewDef, table: TableInfo | undefined, tables: TableInfo[]): string | null {
+export function writeBlocker(def: ViewDef, table: TableInfo | undefined, tables: TableInfo[], isProtected?: (colId: string) => boolean): string | null {
   if (!table) return t('Die Quelltabelle fehlt.')
   if (def.group.mode !== 'none') return t('Gruppierte abgeleitete Tabellen sind nicht schreibbar.')
   for (const f of activeFilters(def, table, tables)) {
+    if (isProtected?.(f.col.id)) return t('Die Spalte „{name}“ der Bedingung ist vertraulich (verschlüsselt): Ihr Wert lässt sich beim Empfang nicht von jedem prüfen.', { name: f.col.name })
     if (!SIMPLE_TYPES.includes(f.col.type)) return t('Die Bedingung auf „{name}“ bezieht sich auf eine Spalte, deren Wert nicht in der Zeile selbst steht.', { name: f.col.name })
   }
   return null
