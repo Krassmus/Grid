@@ -240,9 +240,18 @@ export function simpleCell(col: ColumnInfo, raw: unknown): Cell {
 
 // ---------- Formeln ----------
 
-class FErr { constructor(readonly code: string, readonly msg: string) {} }
-type Val = number | string | boolean | null | FErr
-const nameKey = (s: string) => s.trim().toLowerCase()
+export class FErr { constructor(readonly code: string, readonly msg: string) {} }
+export type Val = number | string | boolean | null | FErr
+export type Getter = (rid: string) => Val
+export type ListGetter = (rid: string) => Val[]
+/** Woher die Felder einer Formel kommen: bei Formelspalten aus der eigenen Zeile, im Bericht aus ganzen Tabellen (report.ts). */
+export interface FormulaEnv {
+  /** Ein einzelner Wert */
+  ref: (parts: string[]) => Getter
+  /** Mehrere Werte (innerhalb von SUMME usw.); `null`: das Feld liefert nur einen */
+  list: (parts: string[]) => ListGetter | null
+}
+export const nameKey = (s: string) => s.trim().toLowerCase()
 
 const textOf = (v: Val): string =>
   v === null ? '' : v instanceof FErr ? v.code : typeof v === 'number' ? String(Number(v.toPrecision(12))) : typeof v === 'boolean' ? (v ? t('Wahr') : t('Falsch')) : v
@@ -257,7 +266,7 @@ function numOf(v: Val): number | FErr {
 }
 
 /** Wert einer Zelle für Formeln: Zahlen als Zahl, Kästchen als Wahrheitswert, Datum als ISO-Text, sonst Text; leer = null. */
-function valueOf(col: ColumnInfo, c: Cell | undefined): Val {
+export function valueOf(col: ColumnInfo, c: Cell | undefined): Val {
   if (!c) return null
   if (c.error) return new FErr(c.text, c.error)
   switch (col.type) {
@@ -310,42 +319,12 @@ function compareVals(a: Val, b: Val, op: string): Val {
   return op === '=' ? c === 0 : op === '<>' ? c !== 0 : op === '<' ? c < 0 : op === '<=' ? c <= 0 : op === '>' ? c > 0 : c >= 0
 }
 
-function formulaCells(doc: Y.Doc, tables: TableInfo[], table: TableInfo, col: ColumnInfo, ctx: CellCtx, stack: string[]): Map<string, Cell> {
-  const out = new Map<string, Cell>()
-  const template = col.type === 'template'
-  const cfg = template ? { expr: TEMPLATE.config(col).tpl, decimals: -1, unit: '' } : FORMULA.config(col)
-  const fillAll = (c: Cell) => { for (const rid of table.rowIds) out.set(rid, c); return out }
-  if (!cfg.expr.trim()) return fillAll(EMPTY)
-
-  type Getter = (rid: string) => Val
-  type ListGetter = (rid: string) => Val[]
-  const cellsOf = (t: TableInfo, c: ColumnInfo) => columnCells(doc, tables, t, c, ctx, stack)
-
-  /** Löst Spalte oder Pfad auf: Pfad = Relationen der Reihe nach, am Ende die Spalte der letzten Tabelle. */
-  function resolve(parts: string[]): { steps: ColumnInfo[]; table: TableInfo; col: ColumnInfo } {
-    let cur = table
-    const steps: ColumnInfo[] = []
-    for (const part of parts.slice(0, -1)) {
-      const rel = cur.columns.find((c) => nameKey(c.name) === nameKey(part) && c.type === 'relation')
-      const next = tables.find((t) => t.id === rel?.target)
-      if (!rel || !next) throw new FErr('#NAME?', t(steps.length ? '„{part}“ ist keine Relationsspalte' : '„{part}“ ist keine Relationsspalte dieser Tabelle', { part }))
-      steps.push(rel); cur = next
-    }
-    const last = parts[parts.length - 1]
-    const c = cur.columns.find((x) => nameKey(x.name) === nameKey(last))
-    if (!c) throw new FErr('#NAME?', cur === table ? t('Spalte „{last}“ gibt es nicht', { last }) : t('Spalte „{last}“ gibt es nicht in „{table}“', { last, table: cur.name }))
-    return { steps, table: cur, col: c }
-  }
-
+/** Übersetzt einen Formelbaum in eine Funktion; die Felder liefert `env`. Wirft `FErr` bei unbekannten Namen und Funktionen. */
+export function compileFormula(root: Node, env: FormulaEnv): Getter {
   function scalar(n: Node): Getter {
     switch (n.t) {
       case 'num': case 'str': case 'bool': return () => n.v
-      case 'ref': {
-        if (n.parts.length > 1) throw new FErr('#WERT!', t('Werte verknüpfter Zeilen nur innerhalb von SUMME, MITTELWERT, MIN, MAX, ANZAHL oder TEXTVERBINDEN verwenden'))
-        const r = resolve(n.parts)
-        const cells = cellsOf(r.table, r.col)
-        return (rid) => valueOf(r.col, cells.get(rid))
-      }
+      case 'ref': return env.ref(n.parts)
       case 'un': {
         const a = scalar(n.a)
         return (rid) => { const v = numOf(a(rid)); return v instanceof FErr ? v : n.op === '-' ? -v : v }
@@ -368,31 +347,13 @@ function formulaCells(doc: Y.Doc, tables: TableInfo[], table: TableInfo, col: Co
     }
   }
 
-  /** Argumente von Aggregatfunktionen: Pfade (und Relationsspalten) liefern mehrere Werte, alles andere einen. */
+  /** Argumente von Aggregatfunktionen: Felder mit mehreren Werten liefern alle, alles andere einen. */
   function list(n: Node): ListGetter {
-    if (n.t === 'ref' && (n.parts.length > 1 || tableColIsRelation(n.parts[0]))) {
-      const r = resolve(n.parts)
-      const rels = n.parts.length > 1 ? r.steps : [resolve(n.parts).col]
-      const finalTable = n.parts.length > 1 ? r.table : tables.find((t) => t.id === rels[rels.length - 1].target)
-      const cells = n.parts.length > 1 ? cellsOf(r.table, r.col) : null
-      const links = linkIndex(doc, ctx)
-      return (rid) => {
-        let ids = [rid]
-        for (const rel of rels) {
-          const next = new Set<string>()
-          for (const id of ids) for (const x of links.get(`${id}|${rel.id}`) ?? []) next.add(x)
-          ids = [...next]
-        }
-        const lastTable = finalTable
-        if (lastTable) ids = inRowOrder(ids, lastTable)
-        // Relationsspalte allein: die verknüpften Zeilen selbst (Titel), sonst die Werte der gewählten Spalte
-        return ids.map((id) => (cells ? valueOf(r.col, cells.get(id)) : finalTable ? reprMap(doc, tables, finalTable, ctx).get(id)?.title ?? null : null))
-      }
-    }
+    const many = n.t === 'ref' ? env.list(n.parts) : null
+    if (many) return many
     const g = scalar(n)
     return (rid) => [g(rid)]
   }
-  const tableColIsRelation = (name: string) => table.columns.some((c) => nameKey(c.name) === nameKey(name) && c.type === 'relation')
 
   function call(n: Extract<Node, { t: 'call' }>): Getter {
     if (!n.fn) throw new FErr('#NAME?', t('Unbekannte Funktion „{name}“', { name: n.name }))
@@ -514,8 +475,66 @@ function formulaCells(doc: Y.Doc, tables: TableInfo[], table: TableInfo, col: Co
     throw new FErr('#NAME?', t('Unbekannte Funktion „{name}“', { name: n.name }))
   }
 
+  return scalar(root)
+}
+
+function formulaCells(doc: Y.Doc, tables: TableInfo[], table: TableInfo, col: ColumnInfo, ctx: CellCtx, stack: string[]): Map<string, Cell> {
+  const out = new Map<string, Cell>()
+  const template = col.type === 'template'
+  const cfg = template ? { expr: TEMPLATE.config(col).tpl, decimals: -1, unit: '' } : FORMULA.config(col)
+  const fillAll = (c: Cell) => { for (const rid of table.rowIds) out.set(rid, c); return out }
+  if (!cfg.expr.trim()) return fillAll(EMPTY)
+
+  const cellsOf = (t: TableInfo, c: ColumnInfo) => columnCells(doc, tables, t, c, ctx, stack)
+  /** Löst Spalte oder Pfad auf: Pfad = Relationen der Reihe nach, am Ende die Spalte der letzten Tabelle. */
+  function resolve(parts: string[]): { steps: ColumnInfo[]; table: TableInfo; col: ColumnInfo } {
+    let cur = table
+    const steps: ColumnInfo[] = []
+    for (const part of parts.slice(0, -1)) {
+      const rel = cur.columns.find((c) => nameKey(c.name) === nameKey(part) && c.type === 'relation')
+      const next = tables.find((t) => t.id === rel?.target)
+      if (!rel || !next) throw new FErr('#NAME?', t(steps.length ? '„{part}“ ist keine Relationsspalte' : '„{part}“ ist keine Relationsspalte dieser Tabelle', { part }))
+      steps.push(rel); cur = next
+    }
+    const last = parts[parts.length - 1]
+    const c = cur.columns.find((x) => nameKey(x.name) === nameKey(last))
+    if (!c) throw new FErr('#NAME?', cur === table ? t('Spalte „{last}“ gibt es nicht', { last }) : t('Spalte „{last}“ gibt es nicht in „{table}“', { last, table: cur.name }))
+    return { steps, table: cur, col: c }
+  }
+
+  const tableColIsRelation = (name: string) => table.columns.some((c) => nameKey(c.name) === nameKey(name) && c.type === 'relation')
+
+  const env: FormulaEnv = {
+    ref: (parts) => {
+      if (parts.length > 1) throw new FErr('#WERT!', t('Werte verknüpfter Zeilen nur innerhalb von SUMME, MITTELWERT, MIN, MAX, ANZAHL oder TEXTVERBINDEN verwenden'))
+      const r = resolve(parts)
+      const cells = cellsOf(r.table, r.col)
+      return (rid) => valueOf(r.col, cells.get(rid))
+    },
+    list: (parts) => {
+      if (parts.length === 1 && !tableColIsRelation(parts[0])) return null
+      const r = resolve(parts)
+      const rels = parts.length > 1 ? r.steps : [resolve(parts).col]
+      const finalTable = parts.length > 1 ? r.table : tables.find((t) => t.id === rels[rels.length - 1].target)
+      const cells = parts.length > 1 ? cellsOf(r.table, r.col) : null
+      const links = linkIndex(doc, ctx)
+      return (rid) => {
+        let ids = [rid]
+        for (const rel of rels) {
+          const next = new Set<string>()
+          for (const id of ids) for (const x of links.get(`${id}|${rel.id}`) ?? []) next.add(x)
+          ids = [...next]
+        }
+        const lastTable = finalTable
+        if (lastTable) ids = inRowOrder(ids, lastTable)
+        // Relationsspalte allein: die verknüpften Zeilen selbst (Titel), sonst die Werte der gewählten Spalte
+        return ids.map((id) => (cells ? valueOf(r.col, cells.get(id)) : finalTable ? reprMap(doc, tables, finalTable, ctx).get(id)?.title ?? null : null))
+      }
+    },
+  }
+
   let get: Getter
-  try { get = scalar(template ? parseTemplate(cfg.expr) : parseFormula(cfg.expr)) } catch (e) {
+  try { get = compileFormula(template ? parseTemplate(cfg.expr) : parseFormula(cfg.expr), env) } catch (e) {
     if (e instanceof FormulaSyntaxError) return fillAll({ raw: null, text: '#SYNTAX', key: null, error: e.message })
     if (e instanceof FErr) return fillAll({ raw: null, text: e.code, key: null, error: e.msg })
     throw e

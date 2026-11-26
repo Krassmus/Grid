@@ -51,6 +51,8 @@ export interface TableInfo {
   icon?: string
   /** Standardsortierung (nur Ansicht; die gespeicherte Reihenfolge bleibt); fehlt = gespeicherte Reihenfolge. */
   sort?: { colId: string; dir: 'asc' | 'desc' }
+  /** Standardsortierung „Manuell“: Die Zeilen werden von Hand geordnet; `rowIds` steht dann schon in dieser Reihenfolge. */
+  manual?: true
 }
 
 // ---------- Abgeleitete Tabellen (Views) ----------
@@ -76,6 +78,7 @@ export const uid = () => crypto.randomUUID().slice(0, 8)
 export const tablesOf = (doc: Y.Doc) => doc.getMap<Y.Map<any>>('tables')
 export const viewsOf = (doc: Y.Doc) => doc.getMap<Y.Map<any>>('views')
 export const mapsOf = (doc: Y.Doc) => doc.getMap<Y.Map<any>>('maps')
+export const reportsOf = (doc: Y.Doc) => doc.getMap<Y.Map<any>>('reports')
 export const tableOrderOf = (doc: Y.Doc) => doc.getArray<string>('tableOrder')
 
 /**
@@ -238,12 +241,14 @@ export function readTables(doc: Y.Doc): TableInfo[] {
         c.forEach((v, k) => { if (k.startsWith(CFG)) config[k.slice(CFG.length)] = v })
         return { id: cid, name: c.get('name'), config, type: c.get('type') as ColType, target: c.get('target') as string | undefined, options, width: c.get('width') as number | undefined, footer: c.get('footer') as string | undefined, hidden: c.get('hidden') === true ? true : undefined }
       })
-    const rowIds = [...new Set<string>(t.get('rowOrder').toArray())].filter((rid) => rows.has(rid))
+    const manual = t.get('sortMode') === 'manual'
+    const stored = [...new Set<string>(t.get('rowOrder').toArray())].filter((rid) => rows.has(rid))
+    const rowIds = manual ? byPosition(stored, rows) : stored
     const repr: Record<string, unknown> = {}
     t.forEach((v, k) => { if (k.startsWith(REPR)) repr[k.slice(REPR.length)] = v })
     const sortCol = t.get('sortCol') as string | undefined
     const sort = sortCol && columns.some((c) => c.id === sortCol) ? { colId: sortCol, dir: t.get('sortDir') === 'desc' ? 'desc' as const : 'asc' as const } : undefined
-    out.push({ id, name: t.get('name'), columns, rowIds, repr, icon: (t.get('icon') as string | undefined) || undefined, sort })
+    out.push({ id, name: t.get('name'), columns, rowIds, manual: manual ? true : undefined, repr, icon: (t.get('icon') as string | undefined) || undefined, sort })
   })
   // Reihenfolge laut tableOrder (dedupliziert); unbekannte Tabellen (Altdaten, parallel angelegt) danach nach ID.
   const rank = new Map<string, number>()
@@ -338,8 +343,104 @@ export function deleteMapShape(doc: Y.Doc, mapId: string, shapeId: string) {
   ;(mapsOf(doc).get(mapId)?.get('shapes') as Y.Map<MapShape> | undefined)?.delete(shapeId)
 }
 
+// ---------- Berichte ----------
+
+export type BlockKind = 'heading' | 'text' | 'table'
+/** Ein Abschnitt eines Berichts. Jeder ist ein eigener Schlüssel: gleichzeitiges Bearbeiten verschiedener Abschnitte geht nicht verloren. */
+export interface ReportBlock {
+  id: string
+  kind: BlockKind
+  /** Reihenfolge im Bericht */
+  pos: number
+  /** Überschrift (reiner Text) oder Text (einfaches HTML), jeweils mit Platzhaltern `{{ }}` */
+  text?: string
+  /** Überschrift: 1 = groß, 2 = Zwischenüberschrift */
+  level?: 1 | 2
+  /** Tabelle: Kennung einer Tabelle oder abgeleiteten Tabelle */
+  source?: string
+  /** Tabelle: Summenzeile unter den Zahlenspalten */
+  totals?: boolean
+  /** Tabelle: Spalten, die im Bericht fehlen sollen */
+  hide?: string[]
+}
+export interface ReportInfo { id: string; name: string; blocks: ReportBlock[]; icon?: string }
+
+export function readReports(doc: Y.Doc): ReportInfo[] {
+  const out: ReportInfo[] = []
+  reportsOf(doc).forEach((m, id) => {
+    const blocks: ReportBlock[] = []
+    ;(m.get('blocks') as Y.Map<Omit<ReportBlock, 'id'>> | undefined)?.forEach((b, bid) => {
+      if (b && (b.kind === 'heading' || b.kind === 'text' || b.kind === 'table') && Number.isFinite(b.pos)) blocks.push({ ...b, id: bid })
+    })
+    blocks.sort((a, b) => a.pos - b.pos || a.id.localeCompare(b.id))
+    out.push({ id, name: (m.get('name') as string) ?? '', blocks, icon: (m.get('icon') as string | undefined) || undefined })
+  })
+  return out
+}
+
+export function addReport(doc: Y.Doc, name: string, icon = ''): string {
+  const id = uid()
+  doc.transact(() => {
+    const m = new Y.Map<any>()
+    m.set('name', name)
+    if (icon) m.set('icon', icon)
+    m.set('blocks', new Y.Map([[uid(), { kind: 'heading', pos: 1, level: 1, text: name }]]))
+    reportsOf(doc).set(id, m)
+    tableOrderOf(doc).push([id])
+  })
+  return id
+}
+
+export function updateReport(doc: Y.Doc, id: string, patch: { name?: string; icon?: string }) {
+  const m = reportsOf(doc).get(id)
+  if (!m) return
+  doc.transact(() => {
+    if (patch.name !== undefined) m.set('name', patch.name)
+    if (patch.icon !== undefined) setOrDelete(m, 'icon', patch.icon)
+  })
+}
+
+export function deleteReport(doc: Y.Doc, id: string) {
+  doc.transact(() => {
+    reportsOf(doc).delete(id)
+    const order = tableOrderOf(doc)
+    const arr = order.toArray()
+    for (let i = arr.length - 1; i >= 0; i--) if (arr[i] === id) order.delete(i, 1)
+  })
+}
+
+const blocksOf = (doc: Y.Doc, reportId: string) => reportsOf(doc).get(reportId)?.get('blocks') as Y.Map<Omit<ReportBlock, 'id'>> | undefined
+
+/** Hängt einen Abschnitt ans Ende. */
+export function addBlock(doc: Y.Doc, reportId: string, block: Omit<ReportBlock, 'id' | 'pos'>): string {
+  const id = uid()
+  const blocks = blocksOf(doc, reportId)
+  if (blocks) blocks.set(id, { ...block, pos: Math.max(0, ...[...blocks.values()].map((b) => b.pos || 0)) + 1 })
+  return id
+}
+
+export function updateBlock(doc: Y.Doc, reportId: string, blockId: string, patch: Partial<Omit<ReportBlock, 'id' | 'kind'>>) {
+  const blocks = blocksOf(doc, reportId), cur = blocks?.get(blockId)
+  if (blocks && cur) blocks.set(blockId, { ...cur, ...patch })
+}
+
+export function removeBlock(doc: Y.Doc, reportId: string, blockId: string) {
+  blocksOf(doc, reportId)?.delete(blockId)
+}
+
+/** Tauscht einen Abschnitt mit seinem Nachbarn darüber (-1) oder darunter (+1). */
+export function moveBlock(doc: Y.Doc, reportId: string, blockId: string, step: -1 | 1) {
+  const list = readReports(doc).find((r) => r.id === reportId)?.blocks ?? []
+  const i = list.findIndex((b) => b.id === blockId), a = list[i], b = list[i + step]
+  if (!a || !b) return
+  const order = [...list]
+  order[i] = b; order[i + step] = a
+  // neu durchnummerieren: auch bei gleichen Positionen (gleichzeitig angelegt) eindeutig
+  doc.transact(() => order.forEach((x, n) => { if (x.pos !== n + 1) updateBlock(doc, reportId, x.id, { pos: n + 1 }) }))
+}
+
 /** Eintrag der Kopfzeile; `count` = Zeilenzahl (bei Tabellen hier, bei abgeleiteten Tabellen setzt es die Oberfläche). */
-export interface TabInfo { kind: 'table' | 'view' | 'map'; id: string; name: string; icon: string; count?: number }
+export interface TabInfo { kind: 'table' | 'view' | 'map' | 'report'; id: string; name: string; icon: string; count?: number }
 
 /** Tabellen und abgeleitete Tabellen in der Reihenfolge der Kopfzeile. */
 export function readTabs(doc: Y.Doc): TabInfo[] {
@@ -347,6 +448,7 @@ export function readTabs(doc: Y.Doc): TabInfo[] {
     ...readTables(doc).map((t) => ({ kind: 'table' as const, id: t.id, name: t.name, icon: t.icon ?? '', count: t.rowIds.length })),
     ...readViews(doc).map((v) => ({ kind: 'view' as const, id: v.id, name: v.name, icon: v.icon ?? '' })),
     ...readMaps(doc).map((m) => ({ kind: 'map' as const, id: m.id, name: m.name, icon: m.icon ?? '' })),
+    ...readReports(doc).map((r) => ({ kind: 'report' as const, id: r.id, name: r.name, icon: r.icon ?? '' })),
   ]
   const rank = new Map<string, number>()
   for (const id of tableOrderOf(doc).toArray()) if (!rank.has(id)) rank.set(id, rank.size)
@@ -578,8 +680,73 @@ export function setTableSort(doc: Y.Doc, tableId: string, colId: string, dir: 'a
   const t = tablesOf(doc).get(tableId)
   if (!t) return
   doc.transact(() => {
+    t.delete('sortMode')
     setOrDelete(t, 'sortCol', colId)
     if (colId && dir === 'desc') t.set('sortDir', 'desc'); else t.delete('sortDir')
+  })
+}
+
+// ---------- Manuelle Reihenfolge ----------
+
+/**
+ * Bei „Manuell“ steht in jeder umsortierten Zeile unter diesem Schlüssel eine Zahl (kein Spaltenname: Spalten-IDs sind hexadezimal).
+ * Je Zeile ein eigener Wert statt Verschieben in `rowOrder`: So verträgt sich gleichzeitiges Umsortieren, und keine Zeile wird doppelt.
+ * Zeilen ohne Wert (neu angelegte) stehen unten, in der Reihenfolge des Anlegens.
+ */
+export const POSITION = '#pos'
+
+const positionOf = (row: Y.Map<any> | undefined): number | null => {
+  const v = row?.get(POSITION)
+  return typeof v === 'number' && Number.isFinite(v) ? v : null
+}
+
+function byPosition(stored: string[], rows: Y.Map<Y.Map<any>>): string[] {
+  return stored
+    .map((id, i) => ({ id, i, pos: positionOf(rows.get(id)) }))
+    .sort((a, b) => {
+      if (a.pos === null || b.pos === null) return a.pos === b.pos ? a.i - b.i : a.pos === null ? 1 : -1
+      return a.pos - b.pos || (a.id < b.id ? -1 : 1)
+    })
+    .map((x) => x.id)
+}
+
+/**
+ * Schaltet „Manuell“ ein. Gab es noch nie eine eigene Reihenfolge, beginnt sie mit `shown` (so wie die Tabelle gerade sortiert ist);
+ * eine frühere wird sonst wiederhergestellt.
+ */
+export function setTableManualSort(doc: Y.Doc, tableId: string, shown?: string[]) {
+  const t = tablesOf(doc).get(tableId)
+  if (!t) return
+  const rows: Y.Map<Y.Map<any>> = t.get('rows')
+  doc.transact(() => {
+    if (shown && ![...rows.values()].some((r) => positionOf(r) !== null)) shown.forEach((id, i) => rows.get(id)?.set(POSITION, i + 1))
+    t.set('sortMode', 'manual')
+    t.delete('sortCol')
+    t.delete('sortDir')
+  })
+}
+
+/** Stellt eine Zeile vor die Zeile `beforeId` (`null`: ans Ende). Ändert sonst möglichst keine anderen Zeilen. */
+export function moveRow(doc: Y.Doc, tableId: string, rowId: string, beforeId: string | null) {
+  const info = readTables(doc).find((x) => x.id === tableId)
+  const rows: Y.Map<Y.Map<any>> | undefined = tablesOf(doc).get(tableId)?.get('rows')
+  if (!info?.manual || !rows || rowId === beforeId) return
+  const from = info.rowIds.indexOf(rowId)
+  if (from < 0 || (info.rowIds[from + 1] ?? null) === beforeId) return // steht schon dort
+  const order = info.rowIds.filter((id) => id !== rowId)
+  const at = beforeId === null ? order.length : order.indexOf(beforeId)
+  if (at < 0) return
+  order.splice(at, 0, rowId)
+  doc.transact(() => {
+    // Zeilen ohne Wert (sie stehen unten) bekommen jetzt einen, in ihrer jetzigen Reihenfolge
+    let last = Math.max(0, ...info.rowIds.map((id) => positionOf(rows.get(id)) ?? 0))
+    for (const id of info.rowIds) if (positionOf(rows.get(id)) === null) rows.get(id)!.set(POSITION, ++last)
+    const prev = at > 0 ? positionOf(rows.get(order[at - 1])) : null
+    const next = at + 1 < order.length ? positionOf(rows.get(order[at + 1])) : null
+    const value = prev === null ? (next ?? 2) - 1 : next === null ? prev + 1 : (prev + next) / 2
+    if ((prev === null || value > prev) && (next === null || value < next)) rows.get(rowId)!.set(POSITION, value)
+    // kein Platz mehr zwischen den Nachbarn (sehr oft an derselben Stelle eingefügt oder gleiche Werte): neu durchnummerieren
+    else order.forEach((id, i) => rows.get(id)!.set(POSITION, i + 1))
   })
 }
 

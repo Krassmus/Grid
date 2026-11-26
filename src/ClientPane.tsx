@@ -1,11 +1,11 @@
 import { DurationInput, LinkInput, PersonCell } from './NewCells'
 import { currentTracking, stopTracking, useTracking } from './tracking'
-import { useCallback, useLayoutEffect, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
+import { useCallback, useLayoutEffect, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import * as Y from 'yjs'
 import { IndexeddbPersistence } from 'y-indexeddb'
 import {
   addColumn, addLink, addMap, addView, deleteMap, updateMap, buildFileIndex, buildLinkIndex, tablesOf, type CellValue, deleteView, updateView, addRow, addTable, deleteColumn, deleteRow, deleteTable, moveColumn, moveLink, moveTable, removeLink, renameColumn, isComputed, rowExists, setCell, setColumnWidth, summarize,
-  type AggFn, type ColType, type ColumnInfo, type LinkIndex, type LinkSlot, type TableInfo,
+  type AggFn, type ColType, type ColumnInfo, type LinkIndex, type LinkSlot, type TableInfo, addReport, deleteReport, updateReport, moveRow,
 } from './model'
 import { useCell, useFileIndex, useLinkIndex, useRingVersion, useRowVersion, useTabs } from './useTables'
 import { FileCell } from './FileCell'
@@ -35,8 +35,11 @@ import { ViewDialog } from './ViewDialog'
 import { ViewGrid } from './ViewGrid'
 import { MapView } from './MapView'
 import { MapDialog } from './MapDialog'
+import { ReportDialog, ReportView } from './ReportView'
+import { printPage } from './print'
 import { aggLabel, allowedAggs, defaultAgg } from './aggregate'
 import { sortedRowIds, sortRelevant, type SortDir } from './sorting'
+import { beginRowDrag } from './rowDrag'
 import { CHECKBOX, DATE, FILE, ROLLUP, NUMBER, RELATION, TEXT } from './columnTypes'
 import { RichPreview, RichTextDialog } from './richText'
 import { SyncDialog, syncLabel, type SyncControl } from './SyncDialog'
@@ -720,11 +723,11 @@ export function ClientPane(props: {
   const ringV = useRingVersion(doc) // neu rechnen, wenn Schlüssel vertraulicher Spalten eintreffen
   const rights = useRights()
   // Ohne Leserecht sind Tabellen, abgeleitete Tabellen und Karten für diesen Betrachter nicht vorhanden (docs/RIGHTS.md)
-  const { tables, views, maps, tabs } = useMemo(() => {
+  const { tables, views, maps, reports, tabs } = useMemo(() => {
     if (!rights.active || rights.admin) return all
     const cols = new Map(all.tables.map((x) => [x.id, x.columns.map((c) => c.id)]))
     const see = (id: string) => rights.visible(id, cols.get(id) ?? [])
-    return { tables: all.tables.filter((x) => see(x.id)), views: all.views.filter((x) => see(x.id)), maps: all.maps.filter((x) => see(x.id)), tabs: all.tabs.filter((x) => see(x.id)) }
+    return { tables: all.tables.filter((x) => see(x.id)), views: all.views.filter((x) => see(x.id)), maps: all.maps.filter((x) => see(x.id)), reports: all.reports.filter((x) => see(x.id)), tabs: all.tabs.filter((x) => see(x.id)) }
   }, [all, rights])
   const structure = rights.structure
   const index = useLinkIndex(doc)
@@ -742,6 +745,12 @@ export function ClientPane(props: {
   const table = tab?.kind === 'table' ? tables.find((t) => t.id === tab.id) : undefined
   const view = tab?.kind === 'view' ? views.find((v) => v.id === tab.id) : undefined
   const mapTab = tab?.kind === 'map' ? maps.find((m) => m.id === tab.id) : undefined
+  const report = tab?.kind === 'report' ? reports.find((r) => r.id === tab.id) : undefined
+  const [reportDialog, setReportDialog] = useState<{ mode: 'new' } | { mode: 'edit'; id: string } | null>(null)
+  const [deletingReport, setDeletingReport] = useState<string | null>(null)
+  const [editingReport, setEditingReport] = useState<string | null>(null) // Bericht, dessen Inhalt gerade bearbeitet wird
+  const reportEditing = !!report && editingReport === report.id && structure && !props.asOf
+  const [printError, setPrintError] = useState<string | null>(null)
   const writable = !props.asOf && !!table && rights.access(table.id) === 'write'
   // Spalten, die ein Betrachter ohne Leserecht an der Spalte nicht sehen darf (aller sichtbaren Tabellen, für Rollups)
   const unreadable = useMemo(() => new Set(tables.flatMap((x) => x.columns.filter((c) => rights.colAccess(x.id, c.id) === 'none').map((c) => c.id))), [tables, rights])
@@ -1074,8 +1083,35 @@ export function ClientPane(props: {
     // Links bleiben außerhalb der Sperre, damit man sie öffnen kann
     return <RightsContext.Provider key={c.id} value={lookRights}>{c.type === 'link' ? cell : <fieldset className="ro-fs" disabled>{cell}</fieldset>}</RightsContext.Provider>
   }
+  // Standardsortierung „Manuell“: Wer die ganze Tabelle schreiben darf, ordnet die Zeilen am Anfasser. Solange über eine
+  // Spaltenüberschrift sortiert oder gesucht wird, ist die eigene Reihenfolge nicht zu sehen, dann ruht der Anfasser.
+  const handles = !!table?.manual && writable
+  const handleOff = sort ? t('Zum Verschieben die Sortierung nach einer Spalte aufheben') : matching ? t('Zum Verschieben die Suche leeren') : null
+  const latestOrder = useRef<string[]>([])
+  latestOrder.current = visibleIds
+  const dragRow = (e: ReactPointerEvent<HTMLElement>, rid: string) => {
+    if (!table || handleOff) return
+    const tableId = table.id
+    beginRowDrag(e.nativeEvent, e.currentTarget, rid, { root: () => sectionRef.current, ids: () => latestOrder.current, onDrop: (before) => moveRow(doc, tableId, rid, before) })
+  }
+  // Tastatur: Pfeil hoch und runter am Anfasser verschieben die Zeile; er behält den Fokus
+  const [refocus, setRefocus] = useState<string | null>(null)
+  useEffect(() => {
+    if (!refocus) return
+    sectionRef.current?.querySelector<HTMLElement>(`[data-row="${refocus}"] .row-handle`)?.focus()
+    setRefocus(null)
+  }, [refocus, visibleIds])
+  const nudgeRow = (e: ReactKeyboardEvent<HTMLElement>, rid: string) => {
+    if (!table || handleOff || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return
+    e.preventDefault()
+    const i = visibleIds.indexOf(rid)
+    if (e.key === 'ArrowUp' ? i <= 0 : i >= visibleIds.length - 1) return
+    moveRow(doc, table.id, rid, e.key === 'ArrowUp' ? visibleIds[i - 1] : visibleIds[i + 2] ?? null)
+    setRefocus(rid)
+  }
   const template = table
     ? [
+        ...(handles ? ['34px'] : []),
         ...shownColumns.map((c, i) =>
           liveWidth?.id === c.id ? `${liveWidth.w}px` : c.width ? `${c.width}px` : i === 0 ? '200px' : c.type === 'relation' || c.type === 'file' ? '240px' : c.type === 'number' || c.type === 'autonumber' ? '120px' : c.type === 'duration' ? '110px' : c.type === 'stamp' ? '200px' : c.type === 'person' || c.type === 'link' ? '190px' : c.type === 'date' ? '170px' : c.type === 'checkbox' ? '110px' : isComputed(c) ? '150px' : c.type === 'geo' ? (c.config?.format === 'map' ? '240px' : '210px') : c.type === 'select' ? '160px' : '180px'),
         ...backlinks.map(() => '220px'),
@@ -1130,7 +1166,7 @@ export function ClientPane(props: {
                   {structure && (
                     <button type="button" role="menuitem" autoFocus onClick={() => {
                       setMenuOpen(false)
-                      if (tb.kind === 'table') setEditing({ kind: 'table', id: tb.id }); else if (tb.kind === 'map') setMapDialog({ mode: 'edit', id: tb.id }); else setViewDialog({ mode: 'edit', id: tb.id })
+                      if (tb.kind === 'table') setEditing({ kind: 'table', id: tb.id }); else if (tb.kind === 'map') setMapDialog({ mode: 'edit', id: tb.id }); else if (tb.kind === 'report') setReportDialog({ mode: 'edit', id: tb.id }); else setViewDialog({ mode: 'edit', id: tb.id })
                     }}>{t('Bearbeiten …')}</button>
                   )}
                   {related.length > 0 && (
@@ -1150,7 +1186,7 @@ export function ClientPane(props: {
                   {structure && (
                     <button type="button" role="menuitem" className="danger-item" onClick={() => {
                       setMenuOpen(false)
-                      if (tb.kind === 'table') setDeletingItem({ kind: 'table', id: tb.id }); else if (tb.kind === 'map') setDeletingMap(tb.id); else setDeletingView(tb.id)
+                      if (tb.kind === 'table') setDeletingItem({ kind: 'table', id: tb.id }); else if (tb.kind === 'map') setDeletingMap(tb.id); else if (tb.kind === 'report') setDeletingReport(tb.id); else setDeletingView(tb.id)
                     }}>{t('Löschen …')}</button>
                   )}
                 </div>
@@ -1159,12 +1195,13 @@ export function ClientPane(props: {
           )
         })}
         {structure && <span className={`tabgroup add-tab${addOpen ? ' menu-open' : ''}`}>
-          <button aria-haspopup="menu" aria-expanded={addOpen} title={t('Tabelle oder Karte hinzufügen')} aria-label={t('Hinzufügen')}
+          <button aria-haspopup="menu" aria-expanded={addOpen} title={t('Tabelle, Karte oder Bericht hinzufügen')} aria-label={t('Hinzufügen')}
             onClick={() => { setAddOpen((o) => !o); setMenuOpen(false) }}>+</button>
           {addOpen && (
             <div className="add-popup" role="menu">
               <button type="button" role="menuitem" autoFocus onClick={() => { setAddOpen(false); setDialog('table') }}>{t('Neue Tabelle …')}</button>
               <button type="button" role="menuitem" onClick={() => { setAddOpen(false); setMapDialog({ mode: 'new' }) }}>{t('Neue Karte …')}</button>
+              <button type="button" role="menuitem" onClick={() => { setAddOpen(false); setReportDialog({ mode: 'new' }) }}>{t('Neuer Bericht …')}</button>
             </div>
           )}
         </span>}
@@ -1173,6 +1210,7 @@ export function ClientPane(props: {
       {!synced && <p className="hint">{t('Lade lokale Daten …')}</p>}
       {synced && !tab && <p className="hint">{rights.active && !rights.admin ? t('Noch keine Rechte: Ein Admin muss dir Zugriff auf Tabellen geben.') : t('Noch keine Tabelle. Lege eine an.')}</p>}
       {view && <ViewGrid key={view.id} doc={doc} view={view} renderCell={viewCell} source={viewSource} allTables={all.tables} writable={!props.asOf && rights.access(view.id) === 'write'} />}
+      {report && <ReportView key={report.id} doc={doc} report={report} tables={all.tables} views={all.views} rights={rights} editing={reportEditing} />}
       {mapTab && <MapView key={mapTab.id} doc={doc} map={mapTab} tables={tables} onOpenRecord={(tableId, rowId) => setMapRecord({ tableId, rowId })} />}
 
       {table && (
@@ -1195,6 +1233,7 @@ export function ClientPane(props: {
             onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) { editingInGrid.current = false; setSortTick((n) => n + 1) } }}>
             <div className="grid" style={{ ['--cols' as any]: template }}>
               <div className="grid-head">
+                {handles && <div className="h row-handle-head" />}
                 {shownColumns.map((c) => (
                   <div key={c.id} className={`h reorderable ${hintClass('column', c.id)}${isMobileUI && selectedCol === c.id ? ' col-selected' : ''}`} {...reorderProps('column', c.id, c.name)}>
                     <button type="button" className="h-name" title={structure ? t('Spalte konfigurieren') : undefined}
@@ -1230,6 +1269,15 @@ export function ClientPane(props: {
               {visibleIds.slice(virt.start, virt.end).map((rid) => (
                 <div key={rid} className="row-outer" data-row={rid}>
                   <div className="row-inner">
+                    {handles && (
+                      <div className="c row-handle-cell">
+                        <span className="row-handle" role="button" tabIndex={handleOff ? -1 : 0} aria-disabled={!!handleOff} aria-label={t('Zeile verschieben')}
+                          title={handleOff ?? t('Zeile verschieben: ziehen oder mit den Pfeiltasten')}
+                          onPointerDown={(e) => dragRow(e, rid)} onKeyDown={(e) => nudgeRow(e, rid)}>
+                          <svg viewBox="0 0 10 16" width="10" height="16" fill="currentColor" aria-hidden="true"><circle cx="2" cy="3" r="1.5" /><circle cx="8" cy="3" r="1.5" /><circle cx="2" cy="8" r="1.5" /><circle cx="8" cy="8" r="1.5" /><circle cx="2" cy="13" r="1.5" /><circle cx="8" cy="13" r="1.5" /></svg>
+                        </span>
+                      </div>
+                    )}
                     {shownColumns.map((c, i) => {
                       const cell = valueCell(table, c, rid, i, cellData.get(c.id)?.get(rid))
                       // Ohne Schreibrecht an der Spalte (bei sonst schreibbarer Tabelle) ist nur diese Zelle gesperrt
@@ -1246,6 +1294,7 @@ export function ClientPane(props: {
               {virt.virtual && <div style={{ height: virt.bottomPad }} aria-hidden />}
               <div className="grid-foot">
                 <div className="row-inner">
+                  {handles && <div className="c row-handle-cell" />}
                   {shownColumns.map((c) => (
                     <FooterCell key={c.id} locked={!structure} doc={doc} tableId={table.id} col={c} tables={tables} cells={cellData.get(c.id)} />
                   ))}
@@ -1282,6 +1331,14 @@ export function ClientPane(props: {
             {matching && <small>{t('{shown} von {total}', { shown: visibleIds.length, total: table.rowIds.length })}</small>}
           </span>
           <TrackingChip doc={doc} />
+          {props.sync && <SyncButton control={props.sync} onClick={() => setSyncOpen(true)} />}
+        </div>
+      )}
+      {report && !props.asOf && (
+        <div className="addrow-bar report-bar">
+          {structure && <button type="button" onClick={() => setEditingReport(reportEditing ? null : report.id)}>{reportEditing ? t('Fertig') : t('Bericht bearbeiten')}</button>}
+          {!reportEditing && <button type="button" onClick={() => { setPrintError(null); printPage().catch((e) => setPrintError(String(e))) }}>{t('Drucken …')}</button>}
+          {printError && <span className="sync-error" role="alert">{t('Drucken fehlgeschlagen: {e}', { e: printError })}</span>}
           {props.sync && <SyncButton control={props.sync} onClick={() => setSyncOpen(true)} />}
         </div>
       )}
@@ -1372,6 +1429,27 @@ export function ClientPane(props: {
           <ConfirmDialog detail={t('Karte „{name}“ mit {objects}. Die Tabellen und ihre Daten bleiben unverändert.', { name: m.name, objects: tn(m.shapes.length, '{n} eigenem Objekt', '{n} eigenen Objekten') })}
             onCancel={() => setDeletingMap(null)}
             onConfirm={() => { deleteMap(doc, m.id); setActive(null); setDeletingMap(null) }} />
+        )
+      })()}
+      {reportDialog && (() => {
+        const editing = reportDialog.mode === 'edit' ? reports.find((r) => r.id === reportDialog.id) : undefined
+        if (reportDialog.mode === 'edit' && !editing) return null
+        return (
+          <ReportDialog initial={editing && { name: editing.name, icon: editing.icon }} onClose={() => setReportDialog(null)}
+            onSubmit={(name, icon) => {
+              if (editing) updateReport(doc, editing.id, { name, icon })
+              else { const id = addReport(doc, name, icon); setActive(id); setEditingReport(id) }
+              setReportDialog(null)
+            }} />
+        )
+      })()}
+      {deletingReport && (() => {
+        const r = reports.find((x) => x.id === deletingReport)
+        if (!r) return null
+        return (
+          <ConfirmDialog detail={t('Bericht „{name}“. Die Tabellen und ihre Daten bleiben unverändert.', { name: r.name })}
+            onCancel={() => setDeletingReport(null)}
+            onConfirm={() => { deleteReport(doc, r.id); setActive(null); setDeletingReport(null) }} />
         )
       })()}
       {mapRecord && tables.find((t) => t.id === mapRecord.tableId) && (

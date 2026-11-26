@@ -1428,8 +1428,11 @@ dependencies = [
 name = "grid"
 version = "0.1.0"
 dependencies = [
+ "block2",
  "keyring",
  "log",
+ "objc2",
+ "objc2-foundation",
  "rusqlite",
  "serde",
  "serde_json",

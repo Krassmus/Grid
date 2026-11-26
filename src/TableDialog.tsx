@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import * as Y from 'yjs'
-import { renameTable, setColumnHidden, setTableIcon, setTableRepr, setTableSort, type TableInfo } from './model'
+import { renameTable, setColumnHidden, setTableManualSort, setTableIcon, setTableRepr, setTableSort, type TableInfo } from './model'
+import { sortedRowIds } from './sorting'
 import { IconPicker } from './icons'
 import { Modal } from './Modal'
 import { newCtx } from './cells'
@@ -21,6 +22,9 @@ const AVATAR_LABELS: [AvatarMode, string][] = [
  * Einstellungen einer Tabelle: Name, Darstellung eines Datensatzes in anderen Tabellen (Titel, Untertitel, Avatar)
  * und ausgeblendete Spalten. Einstellungen gelten sofort, der Name wird beim Schließen übernommen.
  */
+/** Wert der Auswahl „Manuell“ (keine Spalten-ID) */
+const MANUAL = '#manual'
+
 export function TableDialog(props: {
   doc: Y.Doc
   table: TableInfo
@@ -60,16 +64,22 @@ export function TableDialog(props: {
 
         <section className="vd-section">
           <h4>{t('Standardsortierung')}</h4>
-          <p className="hint">{t('So ist die Tabelle sortiert, wenn niemand selbst über die Pfeile in der Spaltenüberschrift sortiert hat. Die gespeicherte Reihenfolge der Zeilen ändert sich dadurch nicht.')}</p>
+          <p className="hint">{table.manual ? t('Wer die Tabelle bearbeiten darf, ordnet die Zeilen am Anfasser links. Die Reihenfolge gilt für alle; neue Zeilen kommen unten dazu.') : t('So ist die Tabelle sortiert, wenn niemand selbst über die Pfeile in der Spaltenüberschrift sortiert hat. Die gespeicherte Reihenfolge der Zeilen ändert sich dadurch nicht.')}</p>
           <div className="geo-inputs">
-            <select aria-label={t('Sortieren nach')} value={table.sort?.colId ?? ''} onChange={(e) => setTableSort(doc, table.id, e.target.value, table.sort?.dir ?? 'asc')}>
+            <select aria-label={t('Sortieren nach')} value={table.manual ? MANUAL : table.sort?.colId ?? ''}
+              onChange={(e) => {
+                // „Manuell“ beginnt so, wie die Tabelle gerade sortiert ist (eine frühere eigene Reihenfolge kehrt zurück)
+                if (e.target.value === MANUAL) setTableManualSort(doc, table.id, table.sort ? sortedRowIds(doc, table.id, table.sort.colId, table.sort.dir) : table.rowIds)
+                else setTableSort(doc, table.id, e.target.value, table.sort?.dir ?? 'asc')
+              }}>
               <option value="">{t('Keine (gespeicherte Reihenfolge)')}</option>
+              <option value={MANUAL}>{t('Manuell')}</option>
               {table.columns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
-            <select aria-label={t('Richtung')} value={table.sort?.dir ?? 'asc'} disabled={!table.sort} onChange={(e) => setTableSort(doc, table.id, table.sort!.colId, e.target.value as 'asc' | 'desc')}>
+            {!table.manual && <select aria-label={t('Richtung')} value={table.sort?.dir ?? 'asc'} disabled={!table.sort} onChange={(e) => setTableSort(doc, table.id, table.sort!.colId, e.target.value as 'asc' | 'desc')}>
               <option value="asc">{t('Aufsteigend')}</option>
               <option value="desc">{t('Absteigend')}</option>
-            </select>
+            </select>}
           </div>
         </section>
 

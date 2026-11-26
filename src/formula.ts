@@ -192,18 +192,17 @@ export function inferType(n: Node, typeOfRef: (parts: string[]) => ColType | und
   }
 }
 
-/**
- * Text mit Platzhaltern: Text mit eingestreuten Feldern `{{Feld}}` oder Formeln, z. B. `Gruppe {{Name}} hat {{ {{Führer}} + {{Helfer}} }} Personen`.
- * Wird zu einer Formel, die alle Teile mit & verbindet; in `{{ }}` gilt die ganze Formelsprache (Felder darin wieder als `{{Feld}}`).
- */
-export function parseTemplate(src: string): Node {
-  let tree: Node = { t: 'str', v: '' } // erzwingt Text als Ergebnis
-  const add = (n: Node) => { tree = { t: 'bin', op: '&', a: tree, b: n } }
-  let lit = ''
+/** Ein Stück eines Texts mit Platzhaltern: fester Text oder der Inhalt eines `{{ }}`; `pos` ist die Stelle im Text. */
+export type TemplatePart = { text: string; pos: number } | { expr: string; pos: number }
+
+/** Zerlegt Text in feste Stücke und Platzhalter. Wirft bei offenen oder leeren Platzhaltern. */
+export function splitTemplate(src: string): TemplatePart[] {
+  const out: TemplatePart[] = []
+  let lit = '', start = 0
   let i = 0
   while (i < src.length) {
-    if (!src.startsWith('{{', i)) { lit += src[i++]; continue }
-    if (lit) { add({ t: 'str', v: lit }); lit = '' }
+    if (!src.startsWith('{{', i)) { if (!lit) start = i; lit += src[i++]; continue }
+    if (lit) { out.push({ text: lit, pos: start }); lit = '' }
     // Ende suchen: "}}" in Anführungszeichen zählt nicht, eingeschachtelte {{Feld}} werden mitgezählt
     let j = i + 2, inStr = false, depth = 1
     for (; j < src.length; j++) {
@@ -214,12 +213,26 @@ export function parseTemplate(src: string): Node {
     if (j >= src.length) throw new FormulaSyntaxError(tr('Der Platzhalter ist nicht mit }} abgeschlossen'), i)
     const inner = src.slice(i + 2, j)
     if (!inner.trim()) throw new FormulaSyntaxError(tr('Leerer Platzhalter {{ }}'), i)
-    try { add(parseFormula(inner)) } catch (e) {
-      if (e instanceof FormulaSyntaxError) throw new FormulaSyntaxError(`${tr('Platzhalter')} {{${inner.trim()}}}: ${e.message}`, i)
-      throw e
-    }
+    out.push({ expr: inner, pos: i })
     i = j + 2
   }
-  if (lit) add({ t: 'str', v: lit })
+  if (lit) out.push({ text: lit, pos: start })
+  return out
+}
+
+/**
+ * Text mit Platzhaltern: Text mit eingestreuten Feldern `{{Feld}}` oder Formeln, z. B. `Gruppe {{Name}} hat {{ {{Führer}} + {{Helfer}} }} Personen`.
+ * Wird zu einer Formel, die alle Teile mit & verbindet; in `{{ }}` gilt die ganze Formelsprache (Felder darin wieder als `{{Feld}}`).
+ */
+export function parseTemplate(src: string): Node {
+  let tree: Node = { t: 'str', v: '' } // erzwingt Text als Ergebnis
+  const add = (n: Node) => { tree = { t: 'bin', op: '&', a: tree, b: n } }
+  for (const p of splitTemplate(src)) {
+    if ('text' in p) { add({ t: 'str', v: p.text }); continue }
+    try { add(parseFormula(p.expr)) } catch (e) {
+      if (e instanceof FormulaSyntaxError) throw new FormulaSyntaxError(`${tr('Platzhalter')} {{${p.expr.trim()}}}: ${e.message}`, p.pos)
+      throw e
+    }
+  }
   return tree
 }

@@ -75,6 +75,10 @@ Gilt nur für **verschlüsselte** Dokumente (alle neuen Cloud-Dokumente). In unv
 - Unverschlüsselte Dokumente (Firmenserver mit `--allow-plaintext`) könnten später zusätzlich vom Server geprüft werden; das ist nicht Teil dieses Entwurfs.
 - Rechte wirken nur, wenn alle Clients die neue Grid-Version nutzen. Ältere Clients kennen das Protokoll nicht und werden von neuen Clients zurückgewiesen, sobald ein Dokument Gruppen hat.
 
+## Berichte
+
+Berichte (docs/REPORTS.md) gehören zur Struktur: Nur Admins legen sie an und ändern sie. Gruppen bekommen an einem Bericht höchstens Leserecht; es gibt keinen Zugriff auf Daten. Ein Wert oder eine Tabelle erscheint nur, wenn der Betrachter alles lesen darf, was darin eingeht.
+
 ## Schreiben über Sichten
 
 Eine Gruppe kann an einer abgeleiteten Tabelle *Schreiben* bekommen, ohne an der Quelltabelle etwas zu dürfen. Dann darf sie genau die Zeilen der Quelltabelle ändern, anlegen und löschen, die den Bedingungen der Sicht genügen.

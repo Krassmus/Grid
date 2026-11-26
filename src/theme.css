@@ -9,6 +9,9 @@
   --map-filter: none; /* Bildkacheln der Minikarte: im dunklen Erscheinungsbild umgefärbt */
   /* Hintergrund hinter Bildern mit Transparenz (Zeichen, Symbole): Die Bilder sind meist für hellen Grund gezeichnet, darum bleibt er auch im Dunkeln hell */
   --img-bg: #fafbfc;
+  /* Das Blatt eines Berichts: wie Papier, in jedem Erscheinungsbild gleich (darum nur hier, ohne dunkles Gegenstück) */
+  --paper-bg: #fff; --paper-fg: #111; --paper-muted: #5f6b72; --paper-rule: #d9dee1; --paper-rule-strong: #333; --paper-edge: #dde3e6;
+  --paper-control: #c9d1d6; --paper-err-fg: #a4241a; --paper-err-bg: #fdecea; --paper-code-bg: #eef1f3;
   --c-0a58ca: #0a58ca;
   --c-0a84ff: #0a84ff;
   --c-1456c8: #1456c8;

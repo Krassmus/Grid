@@ -107,6 +107,17 @@ export function activeFilters(def: ViewDef, table: TableInfo, tables: TableInfo[
   })
 }
 
+/** Die Zeilen der Quelltabelle, die den Bedingungen genügen (auch bei gruppierten Sichten die einzelnen Zeilen). */
+export function matchingIds(def: ViewDef, table: TableInfo, tables: TableInfo[], cellsOf: (col: ColumnInfo) => Map<string, Cell>): string[] {
+  const active = activeFilters(def, table, tables)
+  if (active.length === 0) return table.rowIds
+  const cells = active.map((f) => cellsOf(f.col))
+  return table.rowIds.filter((rid) => {
+    const hit = (f: (typeof active)[number], i: number) => matches(cells[i].get(rid)!, f.type, f.op, f.value)
+    return def.match === 'any' ? active.some(hit) : active.every(hit)
+  })
+}
+
 export function computeView(doc: Y.Doc, def: ViewDef): ViewResult {
   const tables = readTables(doc)
   const table = tables.find((t) => t.id === def.source)
@@ -115,13 +126,7 @@ export function computeView(doc: Y.Doc, def: ViewDef): ViewResult {
   const ctx = newCtx()
   for (const c of table.columns) cells.set(c.id, columnCells(doc, tables, table, c, ctx))
 
-  const active = activeFilters(def, table, tables)
-  const test = (rid: string) => {
-    if (active.length === 0) return true
-    const hit = (f: (typeof active)[number]) => matches(cells.get(f.col.id)!.get(rid)!, f.type, f.op, f.value)
-    return def.match === 'any' ? active.some(hit) : active.every(hit)
-  }
-  const ids = table.rowIds.filter(test)
+  const ids = matchingIds(def, table, tables, (c) => cells.get(c.id)!)
   const base = { missing: false, sourceName: table.name, matched: ids.length }
   const cellOf = (c: ColumnInfo, rid: string): ViewCell => { const x = cells.get(c.id)!.get(rid)!; return { text: x.text, key: x.key } }
 
