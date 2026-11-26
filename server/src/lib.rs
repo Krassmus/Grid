@@ -658,6 +658,13 @@ fn frame(kind: u8, body: &[u8]) -> Message {
     Message::Binary(v.into())
 }
 
+/// Lebenszeichen: Der Client fragt regelmäßig nach, ob die Verbindung noch lebt (eine unterbrochene Strecke merkt sonst niemand).
+fn is_ping(msg: &Message) -> bool {
+    matches!(msg, Message::Text(t) if serde_json::from_str::<serde_json::Value>(t).is_ok_and(|v| v["t"] == "ping"))
+}
+
+const PONG: &str = "{\"t\":\"pong\"}";
+
 /// `code`: „expired“ (neu anmelden hilft), „forbidden“ (kein Zugriff) oder „error“.
 async fn deny(socket: &mut WebSocket, code: &str, reason: &str) {
     let _ = socket.send(Message::Text(serde_json::json!({ "t": "denied", "code": code, "reason": reason }).to_string().into())).await;
@@ -695,7 +702,8 @@ async fn session(state: Shared, id: String, mut socket: WebSocket) {
         Err(e) => return deny(&mut socket, "error", &format!("Dokument nicht lesbar: {e}")).await,
     };
     if state.store.touch_doc(&id, hello.name.as_deref()).is_err() { return deny(&mut socket, "error", "Speicherfehler").await; }
-    if socket.send(Message::Text("{\"t\":\"ok\"}".into())).await.is_err() { return; }
+    // „ping“: Dieser Server beantwortet Lebenszeichen (ältere tun das nicht, dann fragt der Client auch nicht)
+    if socket.send(Message::Text("{\"t\":\"ok\",\"ping\":true}".into())).await.is_err() { return; }
     let readonly = |w: &Writable| Message::Text(serde_json::json!({ "t": "readonly", "code": w.code, "reason": w.reason }).to_string().into());
     {
         let w = state.writable(&id);
@@ -719,6 +727,7 @@ async fn session(state: Shared, id: String, mut socket: WebSocket) {
         tokio::select! {
             incoming = socket.recv() => {
                 let Some(Ok(msg)) = incoming else { break };
+                if is_ping(&msg) { if socket.send(Message::Text(PONG.into())).await.is_err() { break } continue }
                 let Message::Binary(data) = msg else {
                     if matches!(msg, Message::Close(_)) { break }
                     continue
@@ -824,6 +833,7 @@ async fn session_enc(state: Shared, id: String, account: String, mut socket: Web
         tokio::select! {
             incoming = socket.recv() => {
                 let Some(Ok(msg)) = incoming else { break };
+                if is_ping(&msg) { if socket.send(Message::Text(PONG.into())).await.is_err() { break } continue }
                 let Message::Binary(data) = msg else {
                     if matches!(msg, Message::Close(_)) { break }
                     continue

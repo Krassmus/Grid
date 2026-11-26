@@ -614,6 +614,30 @@ async fn open_enc(addr: &str, tok: &str, since: i64) -> (Ws, Vec<(i64, Vec<u8>)>
     }
 }
 
+/// Fragt nach einem Lebenszeichen und wartet auf die Antwort.
+async fn ping(ws: &mut Ws) {
+    ws.send(Message::Text("{\"t\":\"ping\"}".into())).await.unwrap();
+    loop {
+        match tokio::time::timeout(std::time::Duration::from_secs(3), ws.next()).await.expect("keine Antwort auf ping") {
+            Some(Ok(Message::Text(t))) if t.contains("\"pong\"") => return,
+            Some(Ok(_)) => {}
+            other => panic!("unerwartet: {other:?}"),
+        }
+    }
+}
+
+#[tokio::test]
+async fn server_answers_pings() {
+    let dir = tmp("ping");
+    let addr = serve(&dir, true).await;
+    let acc = acct(1);
+    let tok = token(&addr, &acc).await;
+    make_doc(&addr, &tok, &acc).await;
+    let mut ws = join(&addr, &tok, &Doc::new()).await.unwrap();
+    ping(&mut ws).await;
+    ping(&mut ws).await;
+}
+
 async fn next_entry(ws: &mut Ws) -> (i64, Vec<u8>) {
     loop {
         match tokio::time::timeout(std::time::Duration::from_secs(3), ws.next()).await.expect("Zeitüberschreitung") {
@@ -661,6 +685,7 @@ async fn encrypted_documents_store_opaque_entries_and_keys() {
     assert!(none.is_empty());
     assert_eq!((synced["last"].as_i64(), synced["count"].as_i64()), (Some(0), Some(0)));
     let (mut wb, _, _) = open_enc(&addr, &tb, 0).await;
+    ping(&mut wa).await; // Lebenszeichen auch bei verschlüsselten Dokumenten
     wa.send(frame(4, &enc_entry(7))).await.unwrap();
     assert_eq!(next_entry(&mut wa).await, (1, enc_entry(7)));
     assert_eq!(next_entry(&mut wb).await, (1, enc_entry(7)));

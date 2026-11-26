@@ -15,6 +15,7 @@ import type { DocKeys } from './docKeys'
 import { fetchMembers } from './members'
 import { seal } from './signedUpdate'
 import type { Verdict } from './updateGuard'
+import { Heartbeat, watchWake, type WakeReason } from './heartbeat'
 import { t } from './i18n'
 
 export type SyncStatus = 'connecting' | 'online' | 'offline' | 'pending' | 'denied'
@@ -38,6 +39,15 @@ const ENC_ENTRY = 5
 const ENC_SNAPSHOT = 6
 const SHADOW = Symbol('shadow')
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+
+// Fristen: Ohne sie kann eine Anfrage auf einer abgerissenen Strecke lange hängen und alles Weitere aufhalten
+const REQUEST_WAIT = 30_000
+const BLOB_WAIT = 10 * 60_000
+/** Bis der Server die Anmeldung bestätigt */
+const CONNECT_WAIT = 30_000
+/** Beim ersten Nachladen: längste Pause zwischen zwei Nachrichten (eine einzelne kann groß sein) */
+const LOAD_WAIT = 5 * 60_000
+const limit = (ms: number) => (typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(ms) : undefined)
 
 export const toWsUrl = (server: string, docId: string) =>
   `${server.replace(/\/+$/, '').replace(/^http/i, 'ws')}/ws/${encodeURIComponent(docId)}`
@@ -100,7 +110,7 @@ function checkServer(base: string, nonce: string, server?: { pub: string; sig: s
 
 export interface ServerInfo { name: string | null; pub: string; billing: boolean; version: string }
 export async function fetchServerInfo(server: string): Promise<ServerInfo> {
-  const r = await fetch(`${normalizeServer(server)}/server`)
+  const r = await fetch(`${normalizeServer(server)}/server`, { signal: limit(REQUEST_WAIT) })
   if (!r.ok) throw new Error(t('Server antwortet mit {status}', { status: r.status }))
   return r.json()
 }
@@ -115,13 +125,13 @@ export async function sessionToken(server: string, force = false): Promise<strin
   if (have && !force && have.exp - 60 > Date.now() / 1000) return have.token
   let res: Response
   let challenge: { nonce: string; server?: { pub: string; sig: string } }
-  try { challenge = await (await fetch(`${base}/challenge`)).json() } catch { throw new AuthError('unreachable', t('Server nicht erreichbar')) }
+  try { challenge = await (await fetch(`${base}/challenge`, { signal: limit(REQUEST_WAIT) })).json() } catch { throw new AuthError('unreachable', t('Server nicht erreichbar')) }
   checkServer(base, challenge.nonce, challenge.server)
   try {
     const { nonce } = challenge
     const me = await getIdentity()
     res = await fetch(`${base}/login`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: limit(REQUEST_WAIT),
       body: JSON.stringify({ id: me.id, pub: me.publicKey, nonce, sig: signMessage(me, `grid-login-v1\n${me.id}\n${nonce}`) }),
     })
   } catch { throw new AuthError('unreachable', t('Server nicht erreichbar')) }
@@ -135,6 +145,7 @@ export async function sessionToken(server: string, force = false): Promise<strin
 export async function authedFetch(server: string, path: string, init: RequestInit = {}): Promise<Response> {
   const go = async (force: boolean) => fetch(`${normalizeServer(server)}${path}`, {
     ...init, headers: { ...init.headers, Authorization: `Bearer ${await sessionToken(server, force)}` },
+    signal: init.signal ?? limit(path.startsWith('/blob/') ? BLOB_WAIT : REQUEST_WAIT),
   })
   const r = await go(false)
   return r.status === 401 ? go(true) : r
@@ -206,6 +217,21 @@ export class SyncConnection {
   private gen = 0
   private keysReady: Promise<void> = Promise.resolve()
   private pendingCompact = 0
+  /** Beantwortet der Server Lebenszeichen? (ältere nicht) */
+  private pings = false
+  private beat = new Heartbeat({
+    ping: () => { if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify({ t: 'ping' })) },
+    dead: () => this.drop(),
+    buffered: () => this.ws?.bufferedAmount ?? 0,
+  })
+  private watchdog: ReturnType<typeof setTimeout> | undefined
+  /** Wartet gerade auf den nächsten Verbindungsversuch */
+  private waiting = false
+  private offWake: () => void
+  /** Einträge, an denen die Verarbeitung gescheitert ist (Nummer → Versuche) */
+  private failed = new Map<number, number>()
+  /** Ein Eintrag wurde ausgelassen: dann darf dieses Gerät den Stand nicht zusammenführen, er wäre unvollständig */
+  private incomplete = false
 
   constructor(
     private doc: Y.Doc,
@@ -219,6 +245,7 @@ export class SyncConnection {
     doc.on('update', this.onLocal)
     filesOf(doc).observe(this.onFilesChanged)
     this.offIdentity = onIdentityChanged(() => this.restart())
+    this.offWake = watchWake((reason, away) => this.wake(reason, away))
     void this.open()
   }
 
@@ -232,6 +259,8 @@ export class SyncConnection {
   /** Anderes Konto in Gebrauch: neu verbinden. */
   private restart() {
     clearTimeout(this.retry)
+    this.waiting = false
+    this.rest()
     const ws = this.ws
     this.ws = null
     this.online = false
@@ -241,6 +270,8 @@ export class SyncConnection {
     this.expired = 0
     this.shadow = new Y.Doc() // anderes Konto, andere Schlüssel: von vorn nachladen
     this.since = 0
+    this.failed.clear()
+    this.incomplete = false
     void this.open()
   }
 
@@ -255,8 +286,55 @@ export class SyncConnection {
     this.blobTimer = setTimeout(() => void this.syncBlobs(), 300)
   }
 
+  // ---------- Lebt die Verbindung noch? ----------
+
+  /** Keine Lebenszeichen und keine Frist mehr (die Verbindung ist zu Ende). */
+  private rest() {
+    this.beat.stop()
+    clearTimeout(this.watchdog)
+  }
+
+  /** Aufgeben, wenn innerhalb der Frist nichts passiert. */
+  private watch(ms: number) {
+    clearTimeout(this.watchdog)
+    this.watchdog = setTimeout(() => this.drop(), ms)
+  }
+
+  /** Der erste Abgleich ist angekommen: ab jetzt zählt das Lebenszeichen. */
+  private loaded() {
+    clearTimeout(this.watchdog)
+    if (this.pings) this.beat.start()
+  }
+
+  /** Die Verbindung aufgeben, ohne auf ihr Ende zu warten (auf einer toten Strecke käme es lange nicht), und neu verbinden. */
+  private drop() {
+    const ws = this.ws
+    if (!ws) return
+    this.lost()
+    ws.close()
+  }
+
+  /** Gerät aufgewacht, App wieder da oder neues Netz: nicht darauf vertrauen, dass die alte Verbindung noch trägt. */
+  private wake(reason: WakeReason, away: number) {
+    if (this.stopped) return
+    if (this.waiting) { // nicht erst die Wartezeit absitzen
+      clearTimeout(this.retry)
+      this.attempt = 0
+      void this.open()
+    } else if (!this.ws) {
+      return // gerade im Aufbau
+    } else if (this.beat.running) {
+      this.beat.probe()
+    } else if (!this.online) {
+      if (reason !== 'visible' || away >= 20_000) this.drop() // beim Aufbau hängen geblieben
+    } else if (reason === 'online' || away >= 120_000) {
+      this.drop() // älterer Server ohne Lebenszeichen: nur ein neuer Aufbau schafft Gewissheit
+    }
+  }
+
   private async open() {
     if (this.stopped) return
+    this.waiting = false
     this.onState({ status: 'connecting' })
     let token: string
     try {
@@ -281,20 +359,29 @@ export class SyncConnection {
     try { ws = new WebSocket(toWsUrl(this.cfg.server, this.cfg.docId)) } catch { return this.lost() }
     ws.binaryType = 'arraybuffer'
     this.ws = ws
+    this.pings = false
+    this.watch(CONNECT_WAIT)
     const gen = ++this.gen
+    let initial = true // erster Abgleich noch nicht angekommen
     ws.onopen = () => ws.send(JSON.stringify({ t: 'hello', token, name: this.cfg.name, since: this.cfg.keys ? this.since : undefined }))
     ws.onmessage = (e) => {
+      if (this.ws !== ws) return
+      if (this.beat.running) this.beat.heard()
+      else if (initial) this.watch(LOAD_WAIT)
       if (typeof e.data === 'string') {
         const m = JSON.parse(e.data)
+        if (m.t === 'ok') this.pings = !!m.ping
         if (m.t === 'ok' && this.cfg.keys) {
           // verschlüsselt: erst nach dem Nachladen (Nachricht „synced“) gilt die Verbindung als online
           this.attempt = 0; this.expired = 0; this.claims = 0; this.readonly = null
           this.keysReady = this.ensureKeys(ws, gen)
         } else if (m.t === 'synced' && this.cfg.keys) {
-          this.chain = this.chain.then(() => this.finishSync(ws, gen))
+          initial = false // alles ist da (auch wenn noch ein Schlüssel zum Lesen fehlt)
+          this.loaded()
+          this.enqueue(ws, gen, () => this.finishSync(ws, gen))
         } else if (m.t === 'compact' && this.cfg.keys) {
           this.pendingCompact = Math.max(this.pendingCompact, m.upto)
-          this.chain = this.chain.then(() => this.compactIfDue(ws, gen))
+          this.enqueue(ws, gen, () => this.compactIfDue(ws, gen))
         } else if (m.t === 'ok') {
           this.online = true
           this.attempt = 0
@@ -317,6 +404,7 @@ export class SyncConnection {
           if (this.cfg.keys) void this.cfg.keys.load().catch(() => {})
           this.onNotice()
         } else if (m.t === 'denied') {
+          this.rest()
           this.ws = null
           ws.close()
           if (m.code === 'expired' && this.expired++ < 2) { this.relogin = true; void this.open(); return } // Sitzung abgelaufen: neu anmelden
@@ -344,12 +432,15 @@ export class SyncConnection {
         if (data[0] === ENC_ENTRY && data.length > 9) {
           const seq = Number(new DataView(data.buffer, data.byteOffset + 1, 8).getBigUint64(0))
           const entry = data.slice(9)
-          this.chain = this.chain.then(() => this.applyEntry(ws, gen, seq, entry))
+          this.enqueue(ws, gen, () => this.tryEntry(ws, gen, seq, entry))
         }
         return
       }
       if (data[0] === STEP1) ws.send(frame(UPDATE, Y.encodeStateAsUpdate(this.doc, body)))
-      else if (data[0] === UPDATE && body.length > 2) Y.applyUpdate(this.doc, body, REMOTE)
+      else if (data[0] === UPDATE) {
+        if (initial) { initial = false; this.loaded() } // die Antwort auf unseren Stand: der erste Abgleich ist da
+        if (body.length > 2) Y.applyUpdate(this.doc, body, REMOTE)
+      }
     }
     ws.onclose = () => { if (this.ws === ws) this.lost() }
     ws.onerror = () => { /* onclose folgt */ }
@@ -378,6 +469,28 @@ export class SyncConnection {
       if (k || !this.alive(ws, gen)) return k
       this.onState({ status: 'pending', kind: 'keys', reason: t('Schlüssel (Epoche {epoch}) fehlt: ein Admin muss ihn senden.', { epoch }) })
       await sleep(5000)
+    }
+  }
+
+  /** Empfangenes der Reihe nach verarbeiten. Ein Fehler darf die Kette nicht für immer anhalten: dann neu verbinden. */
+  private enqueue(ws: WebSocket, gen: number, step: () => Promise<void>) {
+    this.chain = this.chain.then(step).catch((e) => {
+      console.error('Grid-Sync:', e)
+      if (this.alive(ws, gen)) this.drop()
+    })
+  }
+
+  /** Scheitert ein Eintrag, wird er nach dem Neuverbinden noch einmal geholt; scheitert er wieder, wird er ausgelassen. */
+  private async tryEntry(ws: WebSocket, gen: number, seq: number, entry: Uint8Array) {
+    try {
+      await this.applyEntry(ws, gen, seq, entry)
+    } catch (e) {
+      const tries = (this.failed.get(seq) ?? 0) + 1
+      this.failed.set(seq, tries)
+      if (tries < 2) throw e
+      console.error('Grid-Sync: Eintrag ausgelassen', seq, e)
+      this.incomplete = true
+      this.since = Math.max(this.since, seq)
     }
   }
 
@@ -449,8 +562,12 @@ export class SyncConnection {
 
   /** Meldet der Server viele Einträge, lädt ein Client den Gesamtzustand hoch (der Server kann ihn nicht selbst bilden). */
   private async compactIfDue(ws: WebSocket, gen: number) {
+    try { await this.compact(ws, gen) } catch (e) { console.error('Grid-Sync: Zusammenführen gescheitert', e) } // ist nicht nötig für den Abgleich
+  }
+
+  private async compact(ws: WebSocket, gen: number) {
     const upto = this.pendingCompact
-    if (!upto || this.since < upto || !this.alive(ws, gen)) return
+    if (!upto || this.since < upto || this.incomplete || !this.alive(ws, gen)) return
     this.pendingCompact = 0
     const keys = this.cfg.keys!
     const epoch = keys.top, key = keys.key(epoch)
@@ -466,11 +583,14 @@ export class SyncConnection {
   }
 
   private lost() {
+    this.rest()
     this.online = false
     this.ws = null
     if (this.stopped) return
     this.onState({ status: 'offline' })
     const wait = Math.min(30_000, 1000 * 2 ** this.attempt++)
+    clearTimeout(this.retry)
+    this.waiting = true
     this.retry = setTimeout(() => void this.open(), wait)
   }
 
@@ -515,6 +635,8 @@ export class SyncConnection {
 
   close() {
     this.offIdentity()
+    this.offWake()
+    this.rest()
     this.stopped = true
     this.online = false
     clearTimeout(this.retry)

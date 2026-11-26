@@ -23,6 +23,10 @@ WebSocket `wss://<server>/ws/<docId>`, binäre Nachrichten, erstes Byte = Typ (a
 Vor der ersten binären Nachricht schickt der Client eine Text-Nachricht `{"t":"hello","token":"<Sitzungsschlüssel>","name":"Dateiname"}`; der Server antwortet `{"t":"ok"}` oder `{"t":"denied","code":"expired|forbidden|error","reason":"…"}` und schließt. Bei `expired` meldet sich der Client neu an und versucht es noch einmal.
 Danach schickt jede Seite Typ 0, die andere antwortet mit Typ 1 (Differenz). Jede lokale Änderung geht als Typ 1 an den Server, der sie speichert und an die anderen Clients des Dokuments verteilt.
 
+**Lebenszeichen.** Eine Strecke kann abreißen, ohne dass eine Seite davon erfährt (Ruhezustand, Wechsel zwischen WLAN und Mobilfunk, App im Hintergrund); die Verbindung sieht dann offen aus, aber nichts kommt an. Ein Server, der Lebenszeichen beantwortet, meldet das bei der Anmeldung: `{"t":"ok","ping":true}`. Der Client schickt nach 25 Sekunden Stille `{"t":"ping"}`, der Server antwortet `{"t":"pong"}`; kommt binnen 15 Sekunden nichts an (und läuft kein Upload mehr), gibt der Client die Verbindung auf und verbindet neu. Nach dem Ruhezustand, bei der Rückkehr in die App und bei neuem Netz fragt er sofort nach (Frist 5 Sekunden). Gefragt wird erst, wenn der erste Abgleich angekommen ist; bis dahin gilt eine Frist von 30 Sekunden für die Anmeldung und 5 Minuten zwischen zwei Nachrichten. Bei älteren Servern ohne `ping` baut der Client bei neuem Netz oder nach längerer Abwesenheit (2 Minuten) neu auf. Anfragen über HTTP haben eine Frist von 30 Sekunden, Dateien von 10 Minuten. Code: `src/heartbeat.ts`, `src/syncClient.ts`.
+
+Scheitert in einem verschlüsselten Dokument die Verarbeitung eines Eintrags unerwartet, verbindet der Client neu und holt ihn noch einmal; scheitert er wieder, lässt er ihn aus und führt in dieser Sitzung nicht mehr zusammen (der Gesamtzustand wäre unvollständig).
+
 Der Server hält je Dokument ein Update-Protokoll (SQLite, wie `ydoc_log` in der Datei) und fasst es ab 200 Einträgen zu einem Gesamtzustand zusammen.
 
 **Dateien/Bilder** (Assets) liegen inhaltsadressiert (SHA-256) neben dem Protokoll:
