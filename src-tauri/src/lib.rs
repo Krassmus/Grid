@@ -1,4 +1,5 @@
 mod grid_file;
+mod ios_view;
 mod print;
 
 use std::{path::PathBuf, sync::Mutex};
@@ -284,7 +285,7 @@ pub fn run() {
     .plugin(tauri_plugin_iap::init())
     .manage(PendingOpen::default())
     .manage(MenuState { recent: Mutex::new(Vec::new()), theme: Mutex::new("system".to_string()), lang: Mutex::new("en".to_string()) })
-    .invoke_handler(tauri::generate_handler![grid_save, grid_open, take_pending_open, set_recent_menu, set_theme, set_language, identity_load, identity_store, app_platform, docs_dir, list_documents, delete_document, print::print_page])
+    .invoke_handler(tauri::generate_handler![grid_save, grid_open, take_pending_open, set_recent_menu, set_theme, set_language, identity_load, identity_store, app_platform, docs_dir, list_documents, delete_document, print::print_page, ios_view::lock_scroll_axes])
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(

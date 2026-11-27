@@ -1,5 +1,6 @@
 import { getCurrentWebview } from '@tauri-apps/api/webview'
 import { isTauri } from './gridFile'
+import { isIOS } from './platform'
 
 /**
  * Größe der Oberfläche. In der App skaliert der Seitenzoom der Webansicht alles wie ⌘+ im Browser: Das Layout rechnet mit
@@ -20,8 +21,18 @@ export function readZoom(): number {
   } catch { return 1 }
 }
 
+/**
+ * iPad und iPhone: Tauri hat dort keinen Befehl dafür, und der Seitenzoom von WebKit vergrößert nur die Kästen, nicht die
+ * Schrift. Der Maßstab des Viewports dagegen lässt die Seite mit einem entsprechend schmaleren Bildschirm rechnen. Ohne feste
+ * Breite passt das auch nach dem Drehen.
+ */
+export const viewportFor = (factor: number) => factor === 1
+  ? 'width=device-width, initial-scale=1, viewport-fit=cover'
+  : `initial-scale=${factor}, minimum-scale=${factor}, maximum-scale=${factor}, user-scalable=no, viewport-fit=cover`
+
 export function applyZoom(factor: number) {
-  if (isTauri) void getCurrentWebview().setZoom(factor).catch((e) => console.error('zoom', e))
+  if (isIOS) document.querySelector('meta[name="viewport"]')?.setAttribute('content', viewportFor(factor))
+  else if (isTauri) void getCurrentWebview().setZoom(factor).catch((e) => console.error('zoom', e))
   // Nur zum Entwickeln im Browser: CSS-Zoom kommt dem nahe, rechnet aber Fensterhöhen (vh) nicht mit um.
   else if (typeof document !== 'undefined') document.documentElement.style.zoom = factor === 1 ? '' : String(factor)
 }
