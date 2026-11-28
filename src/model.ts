@@ -79,6 +79,7 @@ export const tablesOf = (doc: Y.Doc) => doc.getMap<Y.Map<any>>('tables')
 export const viewsOf = (doc: Y.Doc) => doc.getMap<Y.Map<any>>('views')
 export const mapsOf = (doc: Y.Doc) => doc.getMap<Y.Map<any>>('maps')
 export const reportsOf = (doc: Y.Doc) => doc.getMap<Y.Map<any>>('reports')
+export const calendarsOf = (doc: Y.Doc) => doc.getMap<Y.Map<any>>('calendars')
 export const tableOrderOf = (doc: Y.Doc) => doc.getArray<string>('tableOrder')
 
 /**
@@ -439,8 +440,137 @@ export function moveBlock(doc: Y.Doc, reportId: string, blockId: string, step: -
   doc.transact(() => order.forEach((x, n) => { if (x.pos !== n + 1) updateBlock(doc, reportId, x.id, { pos: n + 1 }) }))
 }
 
+// ---------- Kalender (docs/KALENDER.md) ----------
+
+/** Eine Quelle eines Kalenders: Jede Zeile der Tabelle ist ein Eintrag auf der Zeitleiste. */
+export interface CalendarLayer {
+  table: string
+  /** Datumsspalte */
+  start: string
+  /** Datumsspalte; fehlt = ein Eintrag dauert so lange wie sein Beginn */
+  end?: string
+  /** Relationsspalte: die Zeilen ihrer Zieltabelle sind die Zeilen der Zeitleiste */
+  lane: string
+  /** Spalte auf dem Balken; fehlt = Titel des Eintrags */
+  label?: string
+  /** Auswahlspalte für die Farbe */
+  color?: string
+  /** Einträge, die nicht belegen: Auswahlspalte mit diesen Optionen oder Checkbox-Spalte, angehakt (`values: ['1']`) */
+  free?: { col: string; values: string[] }
+}
+export interface CalendarDef {
+  /** Vorerst genau eine Quelle */
+  layers: CalendarLayer[]
+  /** Auswahlspalte der Zieltabelle, nach der die Zeilen gruppiert werden */
+  groupBy?: string
+  /** Auswahl- und Checkbox-Spalten der Zieltabelle, nach denen sich die Zeilen filtern lassen */
+  filters: string[]
+  /** Eine Quelltabelle, die keinen eigenen Reiter hat, sondern im Menü dieses Kalenders steht */
+  ownTable?: string
+}
+export interface CalendarInfo { id: string; name: string; def: CalendarDef; icon?: string }
+
+const str = (x: unknown): string | undefined => (typeof x === 'string' && x ? x : undefined)
+
+function readDef(raw: any): CalendarDef {
+  const layers: CalendarLayer[] = (Array.isArray(raw?.layers) ? raw.layers : []).flatMap((l: any) => {
+    if (!l || !str(l.table) || !str(l.start) || !str(l.lane)) return []
+    const free = str(l.free?.col) && Array.isArray(l.free.values) ? { col: l.free.col, values: l.free.values.filter((v: unknown) => typeof v === 'string') } : undefined
+    return [{ table: l.table, start: l.start, lane: l.lane, end: str(l.end), label: str(l.label), color: str(l.color), free }]
+  })
+  const own = str(raw?.ownTable)
+  return { layers, groupBy: str(raw?.groupBy), filters: Array.isArray(raw?.filters) ? raw.filters.filter((x: unknown) => !!str(x)) : [], ownTable: layers.some((l) => l.table === own) ? own : undefined }
+}
+
+export function readCalendars(doc: Y.Doc): CalendarInfo[] {
+  const out: CalendarInfo[] = []
+  calendarsOf(doc).forEach((m, id) => out.push({ id, name: (m.get('name') as string) ?? '', def: readDef(m.get('def')), icon: (m.get('icon') as string | undefined) || undefined }))
+  return out
+}
+
+export function addCalendar(doc: Y.Doc, name: string, def: CalendarDef, icon = ''): string {
+  const id = uid()
+  doc.transact(() => {
+    const m = new Y.Map<any>()
+    m.set('name', name)
+    m.set('def', JSON.parse(JSON.stringify(def))) // ohne `undefined`-Felder
+    if (icon) m.set('icon', icon)
+    calendarsOf(doc).set(id, m)
+    tableOrderOf(doc).push([id])
+  })
+  return id
+}
+
+/** Wer bucht: niemand (nur „belegt“), ein Name als Text oder eine Zeile einer anderen Tabelle */
+export type BookingWho = { kind: 'none' } | { kind: 'text' } | { kind: 'table'; table: string }
+
+/**
+ * Legt die Tabelle für die Buchungen und den Kalender dazu in einem Schritt an. Die Tabelle bekommt die Relation zu dem, was
+ * gebucht wird, je nach `who` eine Relation oder ein Textfeld für die Person, dazu Beginn und Ende. Sie steht im Menü des
+ * Kalenders statt in einem eigenen Reiter.
+ */
+export function addBookingCalendar(doc: Y.Doc, name: string, icon: string, opts: {
+  tableName: string
+  /** Was gebucht wird: jede Zeile dieser Tabelle wird eine Zeile der Zeitleiste */
+  objects: string
+  who: BookingWho
+  /** Mit Uhrzeit statt ganzer Tage */
+  time: boolean
+  groupBy?: string
+  filters?: string[]
+}): string {
+  let calendar = ''
+  doc.transact(() => {
+    const tableName = (id: string) => tablesOf(doc).get(id)!.get('name') as string
+    const table = addTable(doc, opts.tableName, { firstRow: false })
+    const first = (tablesOf(doc).get(table)!.get('colOrder') as Y.Array<string>).get(0)
+    const relation = (target: string, single: boolean) => addColumn(doc, table, tableName(target), 'relation', target, [], { single, multiTarget: true, backlink: false })
+    const object = relation(opts.objects, false)
+    const person = opts.who.kind === 'table' ? relation(opts.who.table, true) : undefined
+    // Die erste Textspalte gibt jeder Buchung ihren Titel: der Name, sonst eine Notiz
+    const config = opts.time ? { time: true } : {}
+    const date = (label: string) => addColumn(doc, table, label, 'date', undefined, [], config)
+    let text: string
+    if (opts.who.kind === 'text') {
+      text = first
+      moveColumn(doc, table, first, 1)
+    }
+    const start = date(t('Von')), end = date(t('Bis'))
+    if (opts.who.kind !== 'text') {
+      text = addColumn(doc, table, t('Notiz'), 'text')
+      deleteColumn(doc, table, first)
+      // Ohne diese Festlegung stünde als Titel das Datum da, solange die Notiz hinter den Datumsspalten steht
+      tablesOf(doc).get(table)!.set(REPR + 'title', text)
+    }
+    calendar = addCalendar(doc, name, {
+      layers: [{ table, start, end, lane: object, label: person ?? text! }],
+      groupBy: opts.groupBy, filters: opts.filters ?? [], ownTable: table,
+    }, icon)
+  })
+  return calendar
+}
+
+export function updateCalendar(doc: Y.Doc, id: string, patch: { name?: string; def?: CalendarDef; icon?: string }) {
+  const m = calendarsOf(doc).get(id)
+  if (!m) return
+  doc.transact(() => {
+    if (patch.name !== undefined) m.set('name', patch.name)
+    if (patch.def !== undefined) m.set('def', JSON.parse(JSON.stringify(patch.def)))
+    if (patch.icon !== undefined) { if (patch.icon) m.set('icon', patch.icon); else m.delete('icon') }
+  })
+}
+
+export function deleteCalendar(doc: Y.Doc, id: string) {
+  doc.transact(() => {
+    calendarsOf(doc).delete(id)
+    const order = tableOrderOf(doc)
+    const arr = order.toArray()
+    for (let i = arr.length - 1; i >= 0; i--) if (arr[i] === id) order.delete(i, 1)
+  })
+}
+
 /** Eintrag der Kopfzeile; `count` = Zeilenzahl (bei Tabellen hier, bei abgeleiteten Tabellen setzt es die Oberfläche). */
-export interface TabInfo { kind: 'table' | 'view' | 'map' | 'report'; id: string; name: string; icon: string; count?: number }
+export interface TabInfo { kind: 'table' | 'view' | 'map' | 'report' | 'calendar'; id: string; name: string; icon: string; count?: number }
 
 /** Tabellen und abgeleitete Tabellen in der Reihenfolge der Kopfzeile. */
 export function readTabs(doc: Y.Doc): TabInfo[] {
@@ -449,6 +579,7 @@ export function readTabs(doc: Y.Doc): TabInfo[] {
     ...readViews(doc).map((v) => ({ kind: 'view' as const, id: v.id, name: v.name, icon: v.icon ?? '' })),
     ...readMaps(doc).map((m) => ({ kind: 'map' as const, id: m.id, name: m.name, icon: m.icon ?? '' })),
     ...readReports(doc).map((r) => ({ kind: 'report' as const, id: r.id, name: r.name, icon: r.icon ?? '' })),
+    ...readCalendars(doc).map((c) => ({ kind: 'calendar' as const, id: c.id, name: c.name, icon: c.icon ?? '' })),
   ]
   const rank = new Map<string, number>()
   for (const id of tableOrderOf(doc).toArray()) if (!rank.has(id)) rank.set(id, rank.size)

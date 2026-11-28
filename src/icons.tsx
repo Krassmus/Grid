@@ -29,21 +29,21 @@ const ICONS: Record<string, { label: string; draw: ReactNode }> = {
   star: { label: 'Stern', draw: <path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z" /> },
 }
 export const ICON_KEYS = Object.keys(ICONS)
-const DEFAULT_ICON = { table: 'table', view: 'filter', map: 'map', report: 'doc' } as const
+const DEFAULT_ICON = { table: 'table', view: 'filter', map: 'map', report: 'doc', calendar: 'calendar' } as const
 
 const Svg = ({ name }: { name: string }) => (
   <svg className="sheet-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{ICONS[name].draw}</svg>
 )
 
 /** Symbol eines Blatts: eingebautes Symbol (Schlüssel), sonst Emoji/Text, sonst das Standardsymbol der Art. */
-export function SheetIcon({ icon, kind }: { icon?: string; kind: 'table' | 'view' | 'map' | 'report' }) {
+export function SheetIcon({ icon, kind }: { icon?: string; kind: 'table' | 'view' | 'map' | 'report' | 'calendar' }) {
   if (icon && ICONS[icon]) return <Svg name={icon} />
   if (icon) return <span className="sheet-icon emoji" aria-hidden="true">{icon}</span>
   return <Svg name={DEFAULT_ICON[kind]} />
 }
 
 /** Auswahl: eingebaute Symbole, dazu ein eigenes Zeichen (z. B. Emoji); leer = Standard der Art. */
-export function IconPicker(props: { value: string; kind: 'table' | 'view' | 'map' | 'report'; onChange: (icon: string) => void }) {
+export function IconPicker(props: { value: string; kind: 'table' | 'view' | 'map' | 'report' | 'calendar'; onChange: (icon: string) => void }) {
   const custom = props.value && !ICONS[props.value] ? props.value : ''
   return (
     <div className="icon-picker">

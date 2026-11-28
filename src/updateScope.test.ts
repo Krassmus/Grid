@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import * as Y from 'yjs'
-import { addColumn, addFile, addLink, addMap, addRow, addTable, deleteRow, deleteTable, readTables, renameTable, setCell, setMapShape, addView, tablesOf } from './model'
+import { addCalendar, updateCalendar, addColumn, addFile, addLink, addMap, addRow, addTable, deleteRow, deleteTable, readTables, renameTable, setCell, setMapShape, addView, tablesOf } from './model'
 import { scopeOf } from './updateScope'
 
 /** Zwei Dokumente im Gleichschritt: `author` schreibt, `checker` prüft das Update, bevor er es anwendet. */
@@ -21,6 +21,14 @@ function pair() {
 const none = { structure: false, unknown: false }
 
 describe('Bereich eines Updates', () => {
+  it('Kalender sind Struktur', () => {
+    const { author, sync, scopeOfChange } = pair()
+    addTable(author, 'A'); sync()
+    let id = ''
+    expect(scopeOfChange(() => { id = addCalendar(author, 'K', { layers: [], filters: [] }) })).toMatchObject({ structure: true, unknown: false })
+    expect(scopeOfChange(() => updateCalendar(author, id, { name: 'K2' }))).toMatchObject({ structure: true, unknown: false })
+  })
+
   it('Zellen und Zeilen gehören zur Tabelle; Spalten, Umbenennen und Tabellen sind Struktur', () => {
     const { author, sync, scopeOfChange } = pair()
     const t = addTable(author, 'A', { firstRow: false }); const col = readTables(author).find((x) => x.id === t)!.columns[0].id

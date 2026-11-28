@@ -15,7 +15,7 @@ const PALETTE: Record<string, { bg: string; fg: string; dot: string }> = {
   violet: { bg: 'var(--opt-violet-bg)', fg: 'var(--opt-violet-fg)', dot: 'var(--opt-violet-dot)' },
   gray: { bg: 'var(--opt-gray-bg)', fg: 'var(--opt-gray-fg)', dot: 'var(--opt-gray-dot)' },
 }
-const paletteOf = (id: string) => PALETTE[id] ?? PALETTE.gray
+export const paletteOf = (id: string) => PALETTE[id] ?? PALETTE.gray
 
 export function Pill({ option }: { option: SelectOption }) {
   const p = paletteOf(option.color)

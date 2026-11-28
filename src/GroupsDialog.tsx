@@ -51,7 +51,7 @@ export function GroupsDialog(props: { control: MembersControl; onClose: () => vo
     // Wer die ganze Tabelle bekommt oder verliert, braucht keine Spaltenrechte mehr
     void act([...grantedColumns(g, o).map((c) => ({ type: 'grant' as const, group: g, object: c.id, level: 'none' as Level })), { type: 'grant', group: g, object: o.id, level: v as Level }])
   }
-  const kindLabel = (k: 'table' | 'view' | 'map' | 'report') => (k === 'table' ? t('Tabelle') : k === 'view' ? t('Abgeleitete Tabelle') : k === 'map' ? t('Karte') : t('Bericht'))
+  const kindLabel = (k: 'table' | 'view' | 'map' | 'report' | 'calendar') => (k === 'table' ? t('Tabelle') : k === 'view' ? t('Abgeleitete Tabelle') : k === 'map' ? t('Karte') : k === 'calendar' ? t('Kalender') : t('Bericht'))
   return (
     <Modal onClose={props.onClose}>
       <div className="dialog sync-dialog members-dialog cloud-dialog groups-dialog" onMouseDown={(e) => e.stopPropagation()} onKeyDown={(e) => e.key === 'Escape' && props.onClose()}>
@@ -92,12 +92,12 @@ export function GroupsDialog(props: { control: MembersControl; onClose: () => vo
                     return (
                       <Fragment key={o.id}>
                         <tr>
-                          <td><strong>{o.name}</strong> <small>{kindLabel(o.kind)}</small>{o.kind === 'view' && o.blocked && <small className="hint" style={{ display: 'block' }}>{o.blocked}</small>}{o.kind === 'report' && <small className="hint" style={{ display: 'block' }}>{t('Zeigt nur Werte aus Daten, die die Gruppe auch lesen darf.')}</small>}{o.kind === 'view' && !o.blocked && o.note && <small className="hint" style={{ display: 'block' }}>{o.note}</small>}</td>
+                          <td><strong>{o.name}</strong> <small>{kindLabel(o.kind)}</small>{o.kind === 'view' && o.blocked && <small className="hint" style={{ display: 'block' }}>{o.blocked}</small>}{o.kind === 'report' && <small className="hint" style={{ display: 'block' }}>{t('Zeigt nur Werte aus Daten, die die Gruppe auch lesen darf.')}</small>}{o.kind === 'calendar' && <small className="hint" style={{ display: 'block' }}>{t('Zeigt nur Einträge aus Daten, die die Gruppe auch lesen darf.')}</small>}{o.kind === 'view' && !o.blocked && o.note && <small className="hint" style={{ display: 'block' }}>{o.note}</small>}</td>
                           <td>
                             <select value={mode} disabled={busy} aria-label={t('Zugriff auf {name}', { name: o.name })} onChange={(e) => choose(id, o, e.target.value)}>
                               <option value="none">{t('Kein Zugriff')}</option>
                               <option value="read">{t('Lesen')}</option>
-                              {o.kind !== 'report' && (o.kind !== 'view' || !o.blocked) && <option value="write">{t('Schreiben')}</option>}
+                              {o.kind !== 'report' && o.kind !== 'calendar' && (o.kind !== 'view' || !o.blocked) && <option value="write">{t('Schreiben')}</option>}
                               {o.kind === 'table' && <option value="columns">{t('Spaltenweise')}</option>}
                             </select>
                           </td>

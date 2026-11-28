@@ -147,6 +147,14 @@ export function RecordForm(props: {
   title: string
   initial?: Record<string, CellValue>
   submitLabel?: string
+  /** Vorbelegte Verknüpfungen eines neuen Datensatzes, je Relationsspalte */
+  initialRelations?: Record<string, string[]>
+  /** Beim Bearbeiten: Löschen anbieten (die Rückfrage stellt der Aufrufer) */
+  onDelete?: () => void
+  /** Warnungen zum aktuellen Stand des Formulars; sie verhindern das Speichern nicht */
+  warn?: (values: Record<string, CellValue>, relations: Record<string, string[]>) => string[]
+  /** Hinweis über den Feldern */
+  notice?: string
   /** Nur ansehen: Felder gesperrt, kein Speichern. */
   readOnly?: boolean
   /** Stufe je Spalte (Rechte je Spalte): Spalten ohne Leserecht fehlen, Spalten ohne Schreibrecht sind gesperrt. */
@@ -166,7 +174,7 @@ export function RecordForm(props: {
 }) {
   const cols = formColumns(props.table).filter((c) => (c.type !== 'relation' || props.relationField) && (c.type !== 'person' || props.doc) && (!props.only || props.only(c)) && (!props.access || props.access(c) !== 'none'))
   const [files, setFiles] = useState<Record<string, File[]>>({})
-  const [rels, setRels] = useState<Record<string, string[]>>(() => ({ ...(props.existing?.relations ?? {}) }))
+  const [rels, setRels] = useState<Record<string, string[]>>(() => ({ ...(props.existing?.relations ?? props.initialRelations ?? {}) }))
   const [removedFiles, setRemovedFiles] = useState<Record<string, string[]>>({})
   const [busy, setBusy] = useState(false)
   const [failure, setFailure] = useState<string | null>(null)
@@ -205,6 +213,8 @@ export function RecordForm(props: {
       setBusy(false)
     }
   }
+
+  const warnings = props.warn?.(values, rels) ?? []
 
   const limit = (c: ColumnInfo) => props.limitOptions?.(c) ?? null
   const field = (c: ColumnInfo, first: boolean): ReactNode => {
@@ -279,6 +289,7 @@ export function RecordForm(props: {
         onSubmit={(e) => { e.preventDefault(); submit() }}
         onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); props.onClose() } }}>
         <h3>{props.title}</h3>
+        {props.notice && <p className="hint">{props.notice}</p>}
         <fieldset className="rf-fields" disabled={props.readOnly}>
           {cols.map((c, i) => (
             <fieldset key={c.id} className="cfg-field rf-one" disabled={!!props.access && props.access(c) !== 'write'}>
@@ -288,12 +299,16 @@ export function RecordForm(props: {
           ))}
           {cols.length === 0 && <p className="hint">{t('Diese Tabelle hat keine Felder zum Ausfüllen. Der Datensatz wird leer angelegt.')}</p>}
         </fieldset>
+        {!props.readOnly && !!warnings.length && <div className="rf-warnings" role="status">{warnings.map((w) => <p key={w}>⚠ {w}</p>)}</div>}
         {failure && <p className="formula-error" role="alert">{failure}</p>}
-        <div className="actions">
-          {props.readOnly
-            ? <button type="button" autoFocus className="primary" onClick={props.onClose}>{t('Schließen')}</button>
-            : <><button type="button" onClick={props.onClose}>{t('Abbrechen')}</button>
-          <button type="submit" className="primary" disabled={!!invalid || busy}>{busy ? t('Speichert …') : props.submitLabel ?? t('Anlegen')}</button></>}
+        <div className={`actions${props.onDelete ? ' split' : ''}`}>
+          {props.onDelete && <button type="button" className="danger-outline" onClick={props.onDelete}>{t('Löschen …')}</button>}
+          <span className="actions-right">
+            {props.readOnly
+              ? <button type="button" autoFocus className="primary" onClick={props.onClose}>{t('Schließen')}</button>
+              : <><button type="button" onClick={props.onClose}>{t('Abbrechen')}</button>
+                <button type="submit" className="primary" disabled={!!invalid || busy}>{busy ? t('Speichert …') : props.submitLabel ?? t('Anlegen')}</button></>}
+          </span>
         </div>
       </form>
     </Modal>

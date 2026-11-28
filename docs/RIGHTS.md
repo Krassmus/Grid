@@ -79,6 +79,10 @@ Gilt nur für **verschlüsselte** Dokumente (alle neuen Cloud-Dokumente). In unv
 
 Berichte (docs/REPORTS.md) gehören zur Struktur: Nur Admins legen sie an und ändern sie. Gruppen bekommen an einem Bericht höchstens Leserecht; es gibt keinen Zugriff auf Daten. Ein Wert oder eine Tabelle erscheint nur, wenn der Betrachter alles lesen darf, was darin eingeht.
 
+## Kalender
+
+Kalender (docs/KALENDER.md) gehören zur Struktur wie Berichte: Nur Admins legen sie an und ändern sie, Gruppen bekommen höchstens Leserecht. Darin eingetragen wird mit den Rechten an Tabelle und Spalten; auch eine mit dem Kalender angelegte Buchungstabelle braucht darum eigene Rechte. Fehlt eine Spalte, ohne die Belegtes frei aussähe (Beginn, Ende, Zeilen-Relation, Zieltabelle), zeigt der Kalender nichts (`calendarData.ts`).
+
 ## Schreiben über Sichten
 
 Eine Gruppe kann an einer abgeleiteten Tabelle *Schreiben* bekommen, ohne an der Quelltabelle etwas zu dürfen. Dann darf sie genau die Zeilen der Quelltabelle ändern, anlegen und löschen, die den Bedingungen der Sicht genügen.

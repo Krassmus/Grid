@@ -4,14 +4,14 @@
  */
 import { useEffect, useState } from 'react'
 import * as Y from 'yjs'
-import { filesOf, linksOf, mapsOf, reportsOf, tableOrderOf, tablesOf, viewsOf } from './model'
+import { calendarsOf, filesOf, linksOf, mapsOf, reportsOf, tableOrderOf, tablesOf, viewsOf } from './model'
 
 /** Schnell aufeinanderfolgende Änderungen (Tippen) zählen als ein Schritt. */
 const CAPTURE_MS = 600
 
 export function createUndoManager(doc: Y.Doc): Y.UndoManager {
   // Nicht dabei: Profile der Mitglieder und Verwaltung, die Grid selbst einträgt
-  return new Y.UndoManager([tablesOf(doc), viewsOf(doc), mapsOf(doc), reportsOf(doc), tableOrderOf(doc), linksOf(doc), filesOf(doc)], { captureTimeout: CAPTURE_MS })
+  return new Y.UndoManager([tablesOf(doc), viewsOf(doc), mapsOf(doc), reportsOf(doc), calendarsOf(doc), tableOrderOf(doc), linksOf(doc), filesOf(doc)], { captureTimeout: CAPTURE_MS })
 }
 
 interface Active { undo: () => void; redo: () => void }

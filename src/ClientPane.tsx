@@ -5,8 +5,7 @@ import * as Y from 'yjs'
 import { IndexeddbPersistence } from 'y-indexeddb'
 import {
   addColumn, addLink, addMap, addView, deleteMap, updateMap, buildFileIndex, buildLinkIndex, tablesOf, type CellValue, deleteView, updateView, addRow, addTable, deleteColumn, deleteRow, deleteTable, moveColumn, moveLink, moveTable, removeLink, renameColumn, isComputed, rowExists, setCell, setColumnWidth, summarize,
-  type AggFn, type ColType, type ColumnInfo, type LinkIndex, type LinkSlot, type TableInfo, addReport, deleteReport, updateReport, moveRow,
-} from './model'
+  type AggFn, type ColType, type ColumnInfo, type LinkIndex, type LinkSlot, type TableInfo, addReport, deleteReport, updateReport, moveRow, addCalendar, addBookingCalendar, updateCalendar, deleteCalendar } from './model'
 import { useCell, useFileIndex, useLinkIndex, useRingVersion, useRowVersion, useTabs } from './useTables'
 import { FileCell } from './FileCell'
 import { SelectCell } from './SelectCell'
@@ -35,6 +34,9 @@ import { ViewDialog } from './ViewDialog'
 import { ViewGrid } from './ViewGrid'
 import { MapView } from './MapView'
 import { MapDialog } from './MapDialog'
+import { CalendarDialog } from './CalendarDialog'
+import { CalendarView, type NewEntry } from './CalendarView'
+import { useOverlapWarnings } from './useOverlapWarnings'
 import { ReportDialog, ReportView } from './ReportView'
 import { printPage } from './print'
 import { aggLabel, allowedAggs, defaultAgg } from './aggregate'
@@ -171,11 +173,42 @@ function Picker(props: {
 }
 
 /** Bestehenden Datensatz im Formular bearbeiten (Klick auf eine Kachel). Änderungen werden erst mit „Speichern“ übernommen. */
-function EditRecordDialog(props: { doc: Y.Doc; tables: TableInfo[]; table: TableInfo; rowId: string; onClose: () => void }) {
+function NewRecordDialog(props: { doc: Y.Doc; tables: TableInfo[]; table: TableInfo; entry: NewEntry; onClose: () => void }) {
+  const { doc, tables, table, entry } = props
+  const rights = useRights()
+  const colAccess = (c: ColumnInfo) => rights.colAccess(table.id, c.id)
+  const warn = useOverlapWarnings(doc, tables, table)
+  // Vorbelegte Verknüpfungen: ein Ziel, das die Spalte kein zweites Mal verknüpfen darf, bleibt weg (mit Erklärung)
+  const [prefill] = useState(() => {
+    const index = buildLinkIndex(doc)
+    const relations: Record<string, string[]> = {}
+    let blocked: string | undefined
+    for (const [colId, ids] of Object.entries(entry.relations)) {
+      const col = table.columns.find((c) => c.id === colId)
+      if (!col) continue
+      const exists = (rowId: string) => rowExists(doc, table.id, rowId)
+      relations[colId] = ids.filter((id) => targetAvailable(index, col, id, [], exists))
+      if (relations[colId].length < ids.length) blocked = t('„{name}“ ist schon verknüpft und darf es nur einmal sein. Für einen Kalender sollte in den Einstellungen dieser Spalte „Zieldatensatz darf mehrfach verknüpft werden“ an sein.', { name: col.name })
+    }
+    return { relations, blocked }
+  })
+  return (
+    <RecordForm doc={doc} table={table} title={t('Neuer Datensatz in „{name}“', { name: table.name })} access={colAccess} onClose={props.onClose}
+      initial={entry.values} initialRelations={prefill.relations} notice={prefill.blocked} warn={warn}
+      relationField={(col, ids, update) => <RelationDraftField doc={doc} tables={tables} col={col} ids={ids} update={update} readOnly={colAccess(col) !== 'write'} />}
+      onSubmit={async (values, extras) => {
+        await commitRecord(doc, table.id, values, extras)
+        props.onClose()
+      }} />
+  )
+}
+
+function EditRecordDialog(props: { doc: Y.Doc; tables: TableInfo[]; table: TableInfo; rowId: string; onClose: () => void; onDelete?: () => void }) {
   const { doc, tables, table, rowId } = props
   const rights = useRights()
   const colAccess = (c: ColumnInfo) => rights.colAccess(table.id, c.id)
   const readOnly = !table.columns.some((c) => colAccess(c) === 'write')
+  const warn = useOverlapWarnings(doc, tables, table, rowId)
   const reprs = useReprs()
   const title = reprs(table.id)?.get(rowId)?.title ?? summarize(doc, table, rowId).title
   // Stand beim Öffnen: Werte, Dateien, Verknüpfungen
@@ -193,7 +226,7 @@ function EditRecordDialog(props: { doc: Y.Doc; tables: TableInfo[]; table: Table
   })
   return (
     <RecordForm doc={doc} table={table} title={t('„{title}“ bearbeiten', { title })} submitLabel={t('Speichern')} readOnly={readOnly} access={colAccess} initial={snap.values} existing={snap.existing}
-      onClose={props.onClose}
+      onClose={props.onClose} onDelete={props.onDelete} warn={warn}
       relationField={(col, ids, update) => <RelationDraftField doc={doc} tables={tables} col={col} ids={ids} update={update} rowId={rowId} readOnly={colAccess(col) !== 'write'} />}
       onSubmit={async (values, extras) => {
         await updateRecord(doc, table.id, rowId, values, snap.values, extras, snap.existing.relations)
@@ -723,19 +756,26 @@ export function ClientPane(props: {
   const ringV = useRingVersion(doc) // neu rechnen, wenn Schlüssel vertraulicher Spalten eintreffen
   const rights = useRights()
   // Ohne Leserecht sind Tabellen, abgeleitete Tabellen und Karten für diesen Betrachter nicht vorhanden (docs/RIGHTS.md)
-  const { tables, views, maps, reports, tabs } = useMemo(() => {
+  const { tables, views, maps, reports, calendars, tabs } = useMemo(() => {
     if (!rights.active || rights.admin) return all
     const cols = new Map(all.tables.map((x) => [x.id, x.columns.map((c) => c.id)]))
     const see = (id: string) => rights.visible(id, cols.get(id) ?? [])
-    return { tables: all.tables.filter((x) => see(x.id)), views: all.views.filter((x) => see(x.id)), maps: all.maps.filter((x) => see(x.id)), reports: all.reports.filter((x) => see(x.id)), tabs: all.tabs.filter((x) => see(x.id)) }
+    return { tables: all.tables.filter((x) => see(x.id)), views: all.views.filter((x) => see(x.id)), maps: all.maps.filter((x) => see(x.id)), reports: all.reports.filter((x) => see(x.id)), calendars: all.calendars.filter((x) => see(x.id)), tabs: all.tabs.filter((x) => see(x.id)) }
   }, [all, rights])
   const structure = rights.structure
   const index = useLinkIndex(doc)
   const fileIndex = useFileIndex(doc)
   const [active, setActive] = useState<string | null>(null)
-  // Abgeleitete Tabellen haben keinen eigenen Reiter, sondern stehen im Menü ihrer Quelltabelle. Ohne sichtbare Quelle (Rechte) behalten sie einen.
-  const sourceOf = (id: string) => views.find((v) => v.id === id)?.def.source
-  const ownTab = (id: string) => { const source = sourceOf(id); return !source || !tables.some((x) => x.id === source) }
+  // Abgeleitete Tabellen haben keinen eigenen Reiter, sondern stehen im Menü ihrer Quelltabelle; eine mit einem Kalender angelegte
+  // Buchungstabelle steht im Menü des Kalenders. Ohne sichtbaren Ort dafür (Rechte) behalten sie einen eigenen.
+  const homeOf = (id: string): string | undefined => {
+    const source = views.find((v) => v.id === id)?.def.source
+    if (source) return tables.some((x) => x.id === source) ? source : undefined
+    return tables.some((x) => x.id === id) ? calendars.find((c) => c.def.ownTable === id)?.id : undefined
+  }
+  /** Der Reiter, in dessen Menü etwas steht (oder es selbst); auch über zwei Stufen: Sicht → Buchungstabelle → Kalender */
+  const rootOf = (id: string): string => { const home = homeOf(id); return home ? rootOf(home) : id }
+  const ownTab = (id: string) => !homeOf(id)
   const tab = tabs.find((t) => t.id === active) ?? tabs.find((t) => ownTab(t.id))
   // Zeilenzahl je Reiter: Tabellen kennt das Modell, abgeleitete Tabellen werden berechnet
   const shownTabs = useMemo(() => tabs.map((t) => {
@@ -746,6 +786,12 @@ export function ClientPane(props: {
   const view = tab?.kind === 'view' ? views.find((v) => v.id === tab.id) : undefined
   const mapTab = tab?.kind === 'map' ? maps.find((m) => m.id === tab.id) : undefined
   const report = tab?.kind === 'report' ? reports.find((r) => r.id === tab.id) : undefined
+  const calendarTab = tab?.kind === 'calendar' ? calendars.find((c) => c.id === tab.id) : undefined
+  const [calendarDialog, setCalendarDialog] = useState<{ mode: 'new' } | { mode: 'edit'; id: string } | null>(null)
+  const [deletingCalendar, setDeletingCalendar] = useState<string | null>(null)
+  const [deletingEntry, setDeletingEntry] = useState<{ tableId: string; rowId: string; entry: string } | null>(null) // im Kalender zu löschender Eintrag
+  const [calendarFooter, setCalendarFooter] = useState<HTMLElement | null>(null) // Platz in der Fußleiste, den der Kalender füllt
+  const [newEntry, setNewEntry] = useState<NewEntry | null>(null) // im Kalender angelegter Eintrag, mit Vorbelegung
   const [reportDialog, setReportDialog] = useState<{ mode: 'new' } | { mode: 'edit'; id: string } | null>(null)
   const [deletingReport, setDeletingReport] = useState<string | null>(null)
   const [editingReport, setEditingReport] = useState<string | null>(null) // Bericht, dessen Inhalt gerade bearbeitet wird
@@ -774,7 +820,7 @@ export function ClientPane(props: {
   const [mapDialog, setMapDialog] = useState<{ mode: 'new' } | { mode: 'edit'; id: string } | null>(null)
   const [deletingMap, setDeletingMap] = useState<string | null>(null)
   const [syncOpen, setSyncOpen] = useState(false)
-  const [mapRecord, setMapRecord] = useState<{ tableId: string; rowId: string } | null>(null) // auf der Karte angeklickte Zeile
+  const [mapRecord, setMapRecord] = useState<{ tableId: string; rowId: string; /** Eintrag eines Kalenders: im Formular löschbar */ entry?: string } | null>(null) // auf der Karte oder im Kalender angeklickte Zeile
 
   const [synced, setSynced] = useState(false)
   useEffect(() => {
@@ -888,13 +934,14 @@ export function ClientPane(props: {
   const { cellData, reprs } = useMemo(() => {
     const m = new Map<string, Map<string, CellData>>()
     const r = new Map<string, Map<string, Repr>>()
-    if (!table && !mapRecord) return { cellData: m, reprs: r }
+    const formTables = [mapRecord?.tableId, newEntry?.tableId].filter((x): x is string => !!x)
+    if (!table && !formTables.length) return { cellData: m, reprs: r }
     const ctx = newCtx() // gemeinsamer Zwischenspeicher: jede Spalte (auch von Formeln benutzte) wird nur einmal berechnet
     for (const c of table?.columns ?? []) if (isComputed(c) || c.type === 'autonumber' || c.type === 'stamp' || c.footer) m.set(c.id, columnCells(doc, tables, table!, c, ctx))
     // Darstellung der Zeilen für alles, was hier als Kachel erscheint: Ziele der Relationen, Quellen der Rückverweise, die Tabelle selbst
     // (auf der Karte gibt es keine Tabelle; dort braucht das Formular der angeklickten Zeile die Darstellung ihrer Tabelle und der Relationsziele)
     const wanted = new Set<string>(table ? [table.id] : [])
-    if (mapRecord) wanted.add(mapRecord.tableId)
+    for (const id of formTables) wanted.add(id)
     for (const c of table?.columns ?? []) if (c.type === 'relation' && c.target) wanted.add(c.target)
     if (table) for (const t of tables) if (t.columns.some((c) => c.type === 'relation' && c.target === table.id)) wanted.add(t.id)
     // Formulare für neue Datensätze zeigen deren Relationen: auch die Ziele der Zieltabellen
@@ -902,7 +949,7 @@ export function ClientPane(props: {
     for (const t of tables) if (wanted.has(t.id)) r.set(t.id, reprMap(doc, tables, t, ctx))
     return { cellData: m, reprs: r }
     // `index` (Verknüpfungen), `fileIndex` (Bilder) und `tables` (Werte, Struktur) decken alle Änderungen ab, die das Ergebnis beeinflussen
-  }, [doc, tables, table?.id, index, fileIndex, mapRecord?.tableId, ringV])
+  }, [doc, tables, table?.id, index, fileIndex, mapRecord?.tableId, newEntry?.tableId, ringV])
   const reprOf = useCallback((id: string) => reprs.get(id), [reprs])
 
   const [liveWidth, setLiveWidth] = useState<{ id: string; w: number } | null>(null)
@@ -1145,12 +1192,12 @@ export function ClientPane(props: {
       )}
       <nav className="tabs">
         {shownTabs.filter((x) => ownTab(x.id)).map((entry) => {
-          // Ist eine abgeleitete Tabelle gewählt, zeigt der Reiter ihrer Quelle sie an; Platz und Reihenfolge bleiben die der Quelle
-          const tb = (tab?.kind === 'view' && sourceOf(tab.id) === entry.id ? shownTabs.find((x) => x.id === tab.id) : undefined) ?? entry
+          // Ist etwas aus seinem Menü gewählt, zeigt der Reiter das an; Platz und Reihenfolge bleiben seine
+          const tb = (tab && tab.id !== entry.id && rootOf(tab.id) === entry.id ? shownTabs.find((x) => x.id === tab.id) : undefined) ?? entry
           const current = tb.id === tab?.id
-          // Verwandte Reiter: die Quelltabelle und ihre abgeleiteten Tabellen zeigen dieselben Objekte; das Menü wechselt zwischen ihnen
-          const source = tb.kind === 'table' ? tb.id : sourceOf(tb.id)
-          const related = current && source ? shownTabs.filter((x) => x.id !== tb.id && (x.id === source || sourceOf(x.id) === source)).sort((a, b) => Number(b.id === source) - Number(a.id === source)) : []
+          // Verwandte Reiter: eine Tabelle und ihre abgeleiteten Tabellen zeigen dieselben Objekte, ein Kalender und seine Buchungstabelle
+          // dieselben Buchungen; das Menü wechselt zwischen ihnen
+          const related = current ? shownTabs.filter((x) => x.id !== tb.id && rootOf(x.id) === entry.id).sort((a, b) => Number(b.id === entry.id) - Number(a.id === entry.id)) : []
           const hasMenu = current && (structure || related.length > 0)
           return (
             <span key={entry.id} className={`tabgroup ${hintClass('table', entry.id)}${current && menuOpen ? ' menu-open' : ''}`}>
@@ -1166,7 +1213,7 @@ export function ClientPane(props: {
                   {structure && (
                     <button type="button" role="menuitem" autoFocus onClick={() => {
                       setMenuOpen(false)
-                      if (tb.kind === 'table') setEditing({ kind: 'table', id: tb.id }); else if (tb.kind === 'map') setMapDialog({ mode: 'edit', id: tb.id }); else if (tb.kind === 'report') setReportDialog({ mode: 'edit', id: tb.id }); else setViewDialog({ mode: 'edit', id: tb.id })
+                      if (tb.kind === 'table') setEditing({ kind: 'table', id: tb.id }); else if (tb.kind === 'map') setMapDialog({ mode: 'edit', id: tb.id }); else if (tb.kind === 'report') setReportDialog({ mode: 'edit', id: tb.id }); else if (tb.kind === 'calendar') setCalendarDialog({ mode: 'edit', id: tb.id }); else setViewDialog({ mode: 'edit', id: tb.id })
                     }}>{t('Bearbeiten …')}</button>
                   )}
                   {related.length > 0 && (
@@ -1175,7 +1222,7 @@ export function ClientPane(props: {
                         <button type="button" role="menuitem" key={x.id} autoFocus={!structure && i === 0} onClick={() => { setActive(x.id); setMenuOpen(false) }}>
                           <SheetIcon icon={x.icon} kind={x.kind} />
                           <span className="tab-name">{x.name}</span>
-                          <span className="tab-count">{x.count}</span>
+                          {x.count !== undefined && <span className="tab-count">{x.count}</span>}
                         </button>
                       ))}
                     </div>
@@ -1186,7 +1233,7 @@ export function ClientPane(props: {
                   {structure && (
                     <button type="button" role="menuitem" className="danger-item" onClick={() => {
                       setMenuOpen(false)
-                      if (tb.kind === 'table') setDeletingItem({ kind: 'table', id: tb.id }); else if (tb.kind === 'map') setDeletingMap(tb.id); else if (tb.kind === 'report') setDeletingReport(tb.id); else setDeletingView(tb.id)
+                      if (tb.kind === 'table') setDeletingItem({ kind: 'table', id: tb.id }); else if (tb.kind === 'map') setDeletingMap(tb.id); else if (tb.kind === 'report') setDeletingReport(tb.id); else if (tb.kind === 'calendar') setDeletingCalendar(tb.id); else setDeletingView(tb.id)
                     }}>{t('Löschen …')}</button>
                   )}
                 </div>
@@ -1195,12 +1242,13 @@ export function ClientPane(props: {
           )
         })}
         {structure && <span className={`tabgroup add-tab${addOpen ? ' menu-open' : ''}`}>
-          <button aria-haspopup="menu" aria-expanded={addOpen} title={t('Tabelle, Karte oder Bericht hinzufügen')} aria-label={t('Hinzufügen')}
+          <button aria-haspopup="menu" aria-expanded={addOpen} title={t('Tabelle, Karte, Kalender oder Bericht hinzufügen')} aria-label={t('Hinzufügen')}
             onClick={() => { setAddOpen((o) => !o); setMenuOpen(false) }}>+</button>
           {addOpen && (
             <div className="add-popup" role="menu">
               <button type="button" role="menuitem" autoFocus onClick={() => { setAddOpen(false); setDialog('table') }}>{t('Neue Tabelle …')}</button>
               <button type="button" role="menuitem" onClick={() => { setAddOpen(false); setMapDialog({ mode: 'new' }) }}>{t('Neue Karte …')}</button>
+              <button type="button" role="menuitem" onClick={() => { setAddOpen(false); setCalendarDialog({ mode: 'new' }) }}>{t('Neuer Kalender …')}</button>
               <button type="button" role="menuitem" onClick={() => { setAddOpen(false); setReportDialog({ mode: 'new' }) }}>{t('Neuer Bericht …')}</button>
             </div>
           )}
@@ -1212,6 +1260,16 @@ export function ClientPane(props: {
       {view && <ViewGrid key={view.id} doc={doc} view={view} renderCell={viewCell} source={viewSource} allTables={all.tables} writable={!props.asOf && rights.access(view.id) === 'write'} />}
       {report && <ReportView key={report.id} doc={doc} report={report} tables={all.tables} views={all.views} rights={rights} editing={reportEditing} />}
       {mapTab && <MapView key={mapTab.id} doc={doc} map={mapTab} tables={tables} onOpenRecord={(tableId, rowId) => setMapRecord({ tableId, rowId })} />}
+
+      {calendarTab && (
+        <CalendarView key={calendarTab.id} doc={doc} calendar={calendarTab} tables={tables} allTables={all.tables} footer={calendarFooter}
+          onOpenRecord={(tableId, rowId, entry) => setMapRecord({ tableId, rowId, entry })}
+          canDelete={(x) => !props.asOf && rights.access(x.id) === 'write'} // wie in der Tabelle: nur mit Schreibrecht an der ganzen Tabelle
+          onDeleteEntry={(tableId, rowId, entry) => setDeletingEntry({ tableId, rowId, entry })}
+          canWrite={(x, colId) => !props.asOf && rights.colAccess(x.id, colId) === 'write'}
+          onNew={setNewEntry} canAdd={(x) => !props.asOf && rights.canAdd(x.id, x.columns.map((c) => c.id))}
+          onEdit={structure ? () => setCalendarDialog({ mode: 'edit', id: calendarTab.id }) : undefined} />
+      )}
 
       {table && (
         <>
@@ -1334,6 +1392,13 @@ export function ClientPane(props: {
           {props.sync && <SyncButton control={props.sync} onClick={() => setSyncOpen(true)} />}
         </div>
       )}
+      {calendarTab && !props.asOf && (
+        <div className="addrow-bar">
+          <span className="addrow-slot" ref={setCalendarFooter} />
+          <TrackingChip doc={doc} />
+          {props.sync && <SyncButton control={props.sync} onClick={() => setSyncOpen(true)} />}
+        </div>
+      )}
       {report && !props.asOf && (
         <div className="addrow-bar report-bar">
           {structure && <button type="button" onClick={() => setEditingReport(reportEditing ? null : report.id)}>{reportEditing ? t('Fertig') : t('Bericht bearbeiten')}</button>}
@@ -1452,8 +1517,41 @@ export function ClientPane(props: {
             onConfirm={() => { deleteReport(doc, r.id); setActive(null); setDeletingReport(null) }} />
         )
       })()}
+      {calendarDialog && (() => {
+        const editing = calendarDialog.mode === 'edit' ? calendars.find((c) => c.id === calendarDialog.id) : undefined
+        if (calendarDialog.mode === 'edit' && !editing) return null
+        return (
+          <CalendarDialog tables={tables} initial={editing && { name: editing.name, def: editing.def, icon: editing.icon }}
+            onClose={() => setCalendarDialog(null)}
+            onDelete={editing && (() => { setDeletingCalendar(editing.id); setCalendarDialog(null) })}
+            onCreate={(name, icon, bookings) => {
+              setActive(addBookingCalendar(doc, name, icon, bookings))
+              setCalendarDialog(null)
+            }}
+            onSubmit={(name, def, icon) => {
+              if (editing) updateCalendar(doc, editing.id, { name, def, icon })
+              else setActive(addCalendar(doc, name, def, icon))
+              setCalendarDialog(null)
+            }} />
+        )
+      })()}
+      {deletingCalendar && (() => {
+        const c = calendars.find((x) => x.id === deletingCalendar)
+        if (!c) return null
+        const own = tables.find((x) => x.id === c.def.ownTable)
+        return (
+          <ConfirmDialog detail={t('Kalender „{name}“. Die Tabellen und ihre Daten bleiben unverändert.', { name: c.name }) + (own ? ' ' + t('„{name}“ bekommt wieder einen eigenen Reiter.', { name: own.name }) : '')}
+            onCancel={() => setDeletingCalendar(null)}
+            onConfirm={() => { deleteCalendar(doc, c.id); setActive(null); setDeletingCalendar(null) }} />
+        )
+      })()}
+      {newEntry && tables.some((x) => x.id === newEntry.tableId) && (
+        <NewRecordDialog doc={doc} tables={tables} table={tables.find((x) => x.id === newEntry.tableId)!} entry={newEntry} onClose={() => setNewEntry(null)} />
+      )}
       {mapRecord && tables.find((t) => t.id === mapRecord.tableId) && (
-        <EditRecordDialog doc={doc} tables={tables} table={tables.find((t) => t.id === mapRecord.tableId)!} rowId={mapRecord.rowId} onClose={() => setMapRecord(null)} />
+        <EditRecordDialog doc={doc} tables={tables} table={tables.find((t) => t.id === mapRecord.tableId)!} rowId={mapRecord.rowId} onClose={() => setMapRecord(null)}
+          onDelete={mapRecord.entry !== undefined && !props.asOf && rights.access(mapRecord.tableId) === 'write'
+            ? () => setDeletingEntry({ tableId: mapRecord.tableId, rowId: mapRecord.rowId, entry: mapRecord.entry! }) : undefined} />
       )}
       {deletingView && (() => {
         const v = views.find((x) => x.id === deletingView)
@@ -1465,6 +1563,11 @@ export function ClientPane(props: {
         )
       })()}
 
+      {deletingEntry && (
+        <ConfirmDialog detail={deletingEntry.entry}
+          onCancel={() => setDeletingEntry(null)}
+          onConfirm={() => { deleteRow(doc, deletingEntry.tableId, deletingEntry.rowId); setDeletingEntry(null); setMapRecord(null) }} />
+      )}
       {deleting && table && (
         <ConfirmDialog detail={t('Zeile „{title}“', { title: summarize(doc, table, deleting).title })}
           onCancel={() => setDeleting(null)}
